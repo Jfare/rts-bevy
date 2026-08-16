@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Mini-RTS (Bevy 0.15 Wasm)</title>
+    <link data-trunk rel="rust" href="crates/client/Cargo.toml" data-bin="client" />
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #0b0e11;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: #d1d5db;
+        }
+
+        #bevy-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw !important;
+            height: 100vh !important;
+            display: block;
+            outline: none;
+            touch-action: none;
+            cursor: crosshair;
+        }
+
+        #loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+            z-index: 10;
+            pointer-events: none;
+            transition: opacity 0.4s ease-out;
+            background-color: #0b0e11;
+        }
+
+        .spinner {
+            width: 48px;
+            height: 48px;
+            border: 4px solid rgba(56, 189, 248, 0.2);
+            border-top: 4px solid #38bdf8;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        .loading-text {
+            font-size: 1.1rem;
+            letter-spacing: 0.05em;
+            color: #94a3b8;
+            font-weight: 500;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <canvas id="bevy-canvas" tabindex="0"></canvas>
+
+    <div id="loading-overlay">
+        <div class="spinner"></div>
+        <div class="loading-text">Loading Mini-RTS (Bevy 0.15 Wasm)...</div>
+    </div>
+
+    <script>
+        // Prevent default context menu on right click
+        window.addEventListener('contextmenu', (e) => e.preventDefault());
+
+        const canvas = document.getElementById('bevy-canvas');
+        if (canvas) {
+            canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+        }
+
+        // Hide overlay once Bevy initializes
+        const observer = new MutationObserver(() => {
+            const overlay = document.getElementById('loading-overlay');
+            if (overlay && canvas.getAttribute('data-raw-handle')) {
+                overlay.style.opacity = '0';
+                setTimeout(() => overlay.remove(), 400);
+                observer.disconnect();
+            }
+        });
+        observer.observe(document.body, { attributes: true, childList: true, subtree: true });
+
+        setTimeout(() => {
+            const overlay = document.getElementById('loading-overlay');
+            if (overlay) {
+                overlay.style.opacity = '0';
+                setTimeout(() => overlay.remove(), 400);
+            }
+        }, 2500);
+    </script>
+</body>
+</html>

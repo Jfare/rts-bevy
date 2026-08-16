@@ -1,0 +1,15 @@
+[package]
+name = "server"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "server"
+path = "src/main.rs"
+
+[dependencies]
+bevy = { workspace = true, default-features = false, features = ["bevy_state", "bevy_remote"] }
+shared = { path = "../shared" }
+bot_ai = { path = "../bot_ai" }
+serde = { workspace = true }
+bincode = { workspace = true }

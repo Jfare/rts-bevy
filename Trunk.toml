@@ -1,0 +1,14 @@
+# Trunk configuration for rts-bevy WebAssembly client
+[build]
+target = "index.html"
+dist = "dist"
+release = false
+
+[watch]
+watch = ["crates/client", "crates/shared", "crates/bot_ai"]
+
+[serve]
+addresses = ["127.0.0.1"]
+port = 8000
+open = false
+ws_protocol = "ws"
