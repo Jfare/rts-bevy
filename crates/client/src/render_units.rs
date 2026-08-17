@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use shared::components::{
-    Barracks, BaseHQ, Building, Faction, Health, Radius, ResourceNode, Soldier, SupplyDepot, Unit,
-    Worker,
+    Barracks, BaseHQ, Building, Faction, GunTurret, Health, Radius, ResourceNode, SiegeTank, Soldier,
+    SupplyDepot, Unit, Worker,
 };
 
 pub struct RenderUnitsPlugin;
@@ -20,12 +20,19 @@ impl Plugin for RenderUnitsPlugin {
     }
 }
 
-/// Renders units (Workers, Soldiers) with faction colors, heading indicators, and gear
+/// Renders units (Workers, Soldiers, Siege Tanks) with faction colors, heading indicators, and weapons
 fn draw_units_system(
     mut gizmos: Gizmos,
-    query: Query<(&Transform, &Radius, &Faction, Option<&Worker>, Option<&Soldier>), With<Unit>>,
+    query: Query<(
+        &Transform,
+        &Radius,
+        &Faction,
+        Option<&Worker>,
+        Option<&Soldier>,
+        Option<&SiegeTank>,
+    ), With<Unit>>,
 ) {
-    for (transform, radius, faction, worker_opt, soldier_opt) in &query {
+    for (transform, radius, faction, worker_opt, soldier_opt, tank_opt) in &query {
         let pos = transform.translation.truncate();
         let r = radius.0;
         let rot = transform.rotation.to_euler(EulerRot::ZYX).0;
@@ -34,33 +41,69 @@ fn draw_units_system(
         let body_color = Color::srgb(cr, cg, cb);
         let outline_color = body_color.lighter(0.25);
 
-        // Body Circle
-        gizmos.circle_2d(pos, r, body_color);
-        gizmos.circle_2d(pos, r, outline_color);
+        if let Some(tank) = tank_opt {
+            // ─────────────────────────────────────────────────────────────
+            // SIEGE TANK: Heavy Armored Tracked Combat Vehicle
+            // ─────────────────────────────────────────────────────────────
+            let forward = Vec2::new(rot.cos(), rot.sin());
+            let side = Vec2::new(-forward.y, forward.x);
 
-        // Heading Direction Pointer
-        let forward = Vec2::new(rot.cos(), rot.sin());
-        let tip = pos + forward * (r + 6.0);
-        let left = pos + forward * (r - 2.0) + Vec2::new(-forward.y, forward.x) * 4.0;
-        let right = pos + forward * (r - 2.0) - Vec2::new(-forward.y, forward.x) * 4.0;
+            // Left and Right Caterpillar Treads
+            let tread_w = r * 0.45;
+            let tread_l = r * 1.8;
+            let left_tread = pos + side * (r * 0.7);
+            let right_tread = pos - side * (r * 0.7);
+            let tread_col = Color::srgb(0.20, 0.22, 0.25);
 
-        gizmos.line_2d(tip, left, Color::WHITE);
-        gizmos.line_2d(tip, right, Color::WHITE);
-        gizmos.line_2d(left, right, Color::WHITE);
+            gizmos.rect_2d(left_tread, Vec2::new(tread_l, tread_w), tread_col);
+            gizmos.rect_2d(right_tread, Vec2::new(tread_l, tread_w), tread_col);
 
-        // Marine Rifle Barrel
-        if soldier_opt.is_some() {
-            let gun_tip = pos + forward * (r + 10.0);
-            let gun_base = pos + forward * (r + 2.0);
-            gizmos.line_2d(gun_base, gun_tip, Color::srgb(0.9, 0.9, 0.95));
-        }
+            // Heavy Armored Hull Chassis
+            gizmos.rect_2d(pos, Vec2::new(r * 1.5, r * 1.2), body_color);
+            gizmos.rect_2d(pos, Vec2::new(r * 1.5, r * 1.2), outline_color);
 
-        // SCV Welder Arms
-        if worker_opt.is_some() {
-            let arm_left = pos + forward * (r + 4.0) + Vec2::new(-forward.y, forward.x) * 5.0;
-            let arm_right = pos + forward * (r + 4.0) - Vec2::new(-forward.y, forward.x) * 5.0;
-            gizmos.circle_2d(arm_left, 2.5, Color::srgb(0.95, 0.75, 0.20));
-            gizmos.circle_2d(arm_right, 2.5, Color::srgb(0.95, 0.75, 0.20));
+            // Rotating Artillery Turret Box
+            let t_angle = tank.turret_angle;
+            let t_fwd = Vec2::new(t_angle.cos(), t_angle.sin());
+
+            gizmos.circle_2d(pos, r * 0.55, Color::srgb(0.15, 0.18, 0.22));
+
+            gizmos.circle_2d(pos, r * 0.55, outline_color);
+
+            // Long Artillery Cannon Barrel with Muzzle Brake
+            let barrel_base = pos + t_fwd * (r * 0.3);
+            let barrel_tip = pos + t_fwd * (r * 1.6);
+            gizmos.line_2d(barrel_base, barrel_tip, Color::srgb(0.92, 0.95, 0.98));
+            gizmos.rect_2d(barrel_tip, Vec2::new(5.0, 7.0), Color::srgb(0.35, 0.40, 0.45));
+        } else {
+            // Body Circle for infantry/worker
+            gizmos.circle_2d(pos, r, body_color);
+            gizmos.circle_2d(pos, r, outline_color);
+
+            // Heading Direction Pointer
+            let forward = Vec2::new(rot.cos(), rot.sin());
+            let tip = pos + forward * (r + 6.0);
+            let left = pos + forward * (r - 2.0) + Vec2::new(-forward.y, forward.x) * 4.0;
+            let right = pos + forward * (r - 2.0) - Vec2::new(-forward.y, forward.x) * 4.0;
+
+            gizmos.line_2d(tip, left, Color::WHITE);
+            gizmos.line_2d(tip, right, Color::WHITE);
+            gizmos.line_2d(left, right, Color::WHITE);
+
+            // Marine Rifle Barrel
+            if soldier_opt.is_some() {
+                let gun_tip = pos + forward * (r + 10.0);
+                let gun_base = pos + forward * (r + 2.0);
+                gizmos.line_2d(gun_base, gun_tip, Color::srgb(0.9, 0.9, 0.95));
+            }
+
+            // SCV Welder Arms
+            if worker_opt.is_some() {
+                let arm_left = pos + forward * (r + 4.0) + Vec2::new(-forward.y, forward.x) * 5.0;
+                let arm_right = pos + forward * (r + 4.0) - Vec2::new(-forward.y, forward.x) * 5.0;
+                gizmos.circle_2d(arm_left, 2.5, Color::srgb(0.95, 0.75, 0.20));
+                gizmos.circle_2d(arm_right, 2.5, Color::srgb(0.95, 0.75, 0.20));
+            }
         }
     }
 }
@@ -75,9 +118,10 @@ fn draw_buildings_system(
         Option<&BaseHQ>,
         Option<&Barracks>,
         Option<&SupplyDepot>,
+        Option<&GunTurret>,
     )>,
 ) {
-    for (transform, building, faction, hq_opt, barracks_opt, supply_opt) in &query {
+    for (transform, building, faction, hq_opt, barracks_opt, supply_opt, turret_opt) in &query {
         let pos = transform.translation.truncate();
         let size = building.size;
 
@@ -107,7 +151,6 @@ fn draw_buildings_system(
             // BARRACKS: Armored Military Garrison with Dual Roof Cannons
             // ─────────────────────────────────────────────────────────────
             gizmos.rect_2d(pos, size - Vec2::splat(10.0), accent_col.with_alpha(0.3));
-            // Dual turret barrels on roof
             let barrel_left_start = pos + Vec2::new(-16.0, 10.0);
             let barrel_left_end = pos + Vec2::new(-16.0, 32.0);
             let barrel_right_start = pos + Vec2::new(16.0, 10.0);
@@ -122,14 +165,32 @@ fn draw_buildings_system(
             gizmos.rect_2d(pos + Vec2::new(0.0, -size.y * 0.35), Vec2::new(28.0, 8.0), Color::srgb(0.95, 0.85, 0.25));
         } else if supply_opt.is_some() {
             // ─────────────────────────────────────────────────────────────
-            // SUPPLY DEPOT: Power Generator with 4 Glowing Energy Coils
+            // SUPPLY DEPOT: Power Generator with Glowing Energy Coils
             // ─────────────────────────────────────────────────────────────
             gizmos.circle_2d(pos, size.x * 0.32, Color::srgba(0.95, 0.75, 0.20, 0.4));
             gizmos.circle_2d(pos, size.x * 0.18, Color::srgb(0.95, 0.85, 0.25));
-            // Power conduit cross
             let arm = size.x * 0.35;
             gizmos.line_2d(pos + Vec2::new(-arm, 0.0), pos + Vec2::new(arm, 0.0), Color::srgb(0.95, 0.85, 0.25));
             gizmos.line_2d(pos + Vec2::new(0.0, -arm), pos + Vec2::new(0.0, arm), Color::srgb(0.95, 0.85, 0.25));
+        } else if let Some(turret) = turret_opt {
+            // ─────────────────────────────────────────────────────────────
+            // GUN TURRET: Automated Defensive Twin Cannon
+            // ─────────────────────────────────────────────────────────────
+            gizmos.circle_2d(pos, size.x * 0.36, Color::srgb(0.22, 0.26, 0.32));
+            gizmos.circle_2d(pos, size.x * 0.36, accent_col);
+
+            let angle = turret.barrel_angle;
+            let fwd = Vec2::new(angle.cos(), angle.sin());
+            let side = Vec2::new(-fwd.y, fwd.x);
+
+            let left_barrel_start = pos + side * 5.0;
+            let left_barrel_end = left_barrel_start + fwd * (size.x * 0.65);
+            let right_barrel_start = pos - side * 5.0;
+            let right_barrel_end = right_barrel_start + fwd * (size.x * 0.65);
+
+            gizmos.line_2d(left_barrel_start, left_barrel_end, Color::srgb(0.92, 0.95, 0.98));
+            gizmos.line_2d(right_barrel_start, right_barrel_end, Color::srgb(0.92, 0.95, 0.98));
+            gizmos.circle_2d(pos, size.x * 0.18, accent_col);
         }
     }
 }
@@ -177,7 +238,6 @@ fn draw_health_bars_system(
     query: Query<(&Transform, &Radius, &Health, &Faction, Option<&Building>)>,
 ) {
     for (transform, radius, health, faction, building_opt) in &query {
-        // Only show health bar if damaged or if building is under construction
         let is_building = building_opt.is_some();
         let is_damaged = health.current < health.max - 0.5;
 
@@ -196,20 +256,17 @@ fn draw_health_bars_system(
         let fraction = health.fraction();
         let health_col = if *faction == Faction::Player1 {
             if fraction > 0.5 {
-                Color::srgb(0.20, 0.90, 0.35) // Green
+                Color::srgb(0.20, 0.90, 0.35)
             } else if fraction > 0.25 {
-                Color::srgb(0.95, 0.80, 0.20) // Yellow
+                Color::srgb(0.95, 0.80, 0.20)
             } else {
-                Color::srgb(0.95, 0.25, 0.25) // Red
+                Color::srgb(0.95, 0.25, 0.25)
             }
         } else {
-            Color::srgb(0.95, 0.30, 0.30) // Red for enemy
+            Color::srgb(0.95, 0.30, 0.30)
         };
 
-        // Background
         gizmos.rect_2d(bar_center, Vec2::new(bar_w, bar_h), bg_col);
-
-        // Health fill
         let fill_w = bar_w * fraction;
         let fill_center = Vec2::new(pos.x - (bar_w - fill_w) * 0.5, bar_y);
         gizmos.rect_2d(fill_center, Vec2::new(fill_w, bar_h - 1.5), health_col);

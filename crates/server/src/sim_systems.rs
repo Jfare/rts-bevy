@@ -165,17 +165,20 @@ fn handle_incoming_network_events(
                             .map(|(e, _, _)| e);
 
                         if let Some(node_e) = target_node {
-                            for (_, net_entity, faction, _, _, worker_opt) in &mut unit_query {
+                            for (e, net_entity, faction, _, _, worker_opt) in &mut unit_query {
                                 if worker_net_ids.contains(&net_entity.net_id)
                                     && *faction == player_faction
                                 {
+                                    commands.entity(e).remove::<MoveTarget>();
                                     if let Some(mut worker) = worker_opt {
                                         worker.target_node = Some(node_e);
                                         worker.state = WorkerState::MovingToResource;
+                                        worker.harvest_timer = 0.0;
                                     }
                                 }
                             }
                         }
+
                     }
                     shared::protocol::ClientMessage::RequestStop { unit_net_ids } => {
                         let player_faction = matchmaker
@@ -279,7 +282,11 @@ fn handle_incoming_network_events(
                                 BuildingKind::SupplyDepot => {
                                     entity_cmds.insert(SupplyDepot { supply_provided: 8 });
                                 }
+                                BuildingKind::Turret => {
+                                    entity_cmds.insert(GunTurret::default());
+                                }
                             }
+
 
                             let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::Broadcast {
                                 msg: ServerMessage::BuildingSpawned {
@@ -595,15 +602,21 @@ fn server_boids_separation_system(
 
 /// SCV mining and resource dropoff loop
 fn server_mining_system(
+    mut commands: Commands,
     time: Res<Time>,
     mut economy: ResMut<PlayerEconomy>,
-    mut workers: Query<(&mut Transform, &MoveSpeed, &Faction, &mut Worker)>,
+    mut workers: Query<(Entity, &mut Transform, &MoveSpeed, &Faction, &mut Worker, Option<&MoveTarget>)>,
     mut nodes: Query<(&Transform, &mut ResourceNode, &NetEntity), Without<Worker>>,
     bases: Query<(&Transform, &Faction), (With<BaseHQ>, Without<Worker>, Without<ResourceNode>)>,
 ) {
     let dt = time.delta_secs();
-    for (mut transform, speed, faction, mut worker) in &mut workers {
+    for (worker_e, mut transform, speed, faction, mut worker, move_target_opt) in &mut workers {
+        if worker.state != WorkerState::Idle && move_target_opt.is_some() {
+            commands.entity(worker_e).remove::<MoveTarget>();
+        }
+
         match worker.state {
+
             WorkerState::Idle => {}
             WorkerState::MovingToResource => {
                 if let Some(target_node_e) = worker.target_node {
@@ -726,6 +739,8 @@ fn server_production_system(
 
                         let unit_kind = if finished_unit.name.contains("SCV") {
                             UnitKind::Worker
+                        } else if finished_unit.name.contains("Tank") {
+                            UnitKind::Tank
                         } else {
                             UnitKind::Soldier
                         };
@@ -776,7 +791,16 @@ fn server_production_system(
                                     Velocity::default(),
                                 ));
                             }
+                            UnitKind::Tank => {
+                                unit_cmds.insert((
+                                    SiegeTank::default(),
+                                    Radius(22.0),
+                                    MoveSpeed(140.0),
+                                    Velocity::default(),
+                                ));
+                            }
                         }
+
 
                         let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::Broadcast {
                             msg: ServerMessage::UnitSpawned {

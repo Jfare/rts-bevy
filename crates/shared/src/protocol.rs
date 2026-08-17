@@ -7,6 +7,7 @@ use crate::grid::BuildingKind;
 pub enum UnitKind {
     Worker,
     Soldier,
+    Tank,
 }
 
 impl UnitKind {
@@ -14,6 +15,7 @@ impl UnitKind {
         match self {
             UnitKind::Worker => "SCV Worker",
             UnitKind::Soldier => "Marine Soldier",
+            UnitKind::Tank => "Siege Tank",
         }
     }
 
@@ -21,6 +23,7 @@ impl UnitKind {
         match self {
             UnitKind::Worker => 50,
             UnitKind::Soldier => 100,
+            UnitKind::Tank => 200,
         }
     }
 
@@ -28,6 +31,7 @@ impl UnitKind {
         match self {
             UnitKind::Worker => 1,
             UnitKind::Soldier => 2,
+            UnitKind::Tank => 3,
         }
     }
 
@@ -35,6 +39,7 @@ impl UnitKind {
         match self {
             UnitKind::Worker => 3.0,
             UnitKind::Soldier => 4.0,
+            UnitKind::Tank => 5.0,
         }
     }
 
@@ -42,9 +47,11 @@ impl UnitKind {
         match self {
             UnitKind::Worker => 80.0,
             UnitKind::Soldier => 120.0,
+            UnitKind::Tank => 220.0,
         }
     }
 }
+
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Reflect, Default)]
 pub enum GameMode {

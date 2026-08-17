@@ -153,13 +153,14 @@ impl Default for Worker {
             carried_minerals: 0,
             harvest_duration: 1.8,
             harvest_timer: 0.0,
-            interact_distance: 54.0,
-            base_interact_distance: 80.0,
+            interact_distance: 58.0,
+            base_interact_distance: 125.0,
             target_node: None,
             target_base: None,
         }
     }
 }
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SOLDIER (MARINE) STATS & COMBAT STATE MACHINE
@@ -211,6 +212,55 @@ impl Default for Soldier {
         }
     }
 }
+
+/// Defensive Gun Turret (Stationary automated defensive weapon)
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Component, Reflect)]
+pub struct GunTurret {
+    pub attack_range: f32,
+    pub attack_damage: f32,
+    pub attack_cooldown: f32,
+    pub attack_timer: f32,
+    pub target: Option<Entity>,
+    pub barrel_angle: f32,
+}
+
+impl Default for GunTurret {
+    fn default() -> Self {
+        Self {
+            attack_range: 220.0,
+            attack_damage: 18.0,
+            attack_cooldown: 0.65,
+            attack_timer: 0.0,
+            target: None,
+            barrel_angle: 0.0,
+        }
+    }
+}
+
+/// Heavy armored Siege Tank
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Component, Reflect)]
+pub struct SiegeTank {
+    pub attack_range: f32,
+    pub attack_damage: f32,
+    pub attack_cooldown: f32,
+    pub attack_timer: f32,
+    pub target: Option<Entity>,
+    pub turret_angle: f32,
+}
+
+impl Default for SiegeTank {
+    fn default() -> Self {
+        Self {
+            attack_range: 240.0,
+            attack_damage: 35.0,
+            attack_cooldown: 1.6,
+            attack_timer: 0.0,
+            target: None,
+            turret_angle: 0.0,
+        }
+    }
+}
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // COMBAT PROJECTILES & VISUALS

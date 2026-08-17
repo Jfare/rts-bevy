@@ -2,10 +2,11 @@ use bevy::prelude::*;
 use bevy::ui::FocusPolicy;
 use bot_ai::WaveAiState;
 use shared::components::{
-    Building, Faction, Health, MatchOutcome, ProductionBuilding, ResourceNode, Selectable, Unit,
-    Worker,
+    Building, Faction, GunTurret, Health, MatchOutcome, ProductionBuilding, ResourceNode, Selectable,
+    SiegeTank, Unit, Worker,
 };
 use shared::economy::PlayerEconomy;
+use shared::protocol::{ClientMessage, GameMode};
 use crate::net::{NetClient, NetStatus};
 use crate::placement::PlacementState;
 
@@ -23,10 +24,26 @@ impl Plugin for RtsUiPlugin {
                     update_selection_info_text,
                     update_command_card_text,
                     update_match_outcome_banner,
+                    handle_lobby_button_interactions,
+                    update_lobby_modal_status_text,
                 ),
             );
     }
 }
+
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
+pub enum LobbyButtonAction {
+    PlaySolo,
+    Find1v1,
+    ToggleModal,
+    CloseModal,
+}
+
+#[derive(Component)]
+pub struct LobbyModalContainer;
+
+#[derive(Component)]
+pub struct LobbyStatusText;
 
 #[derive(Component)]
 struct NetworkStatusText;
@@ -91,7 +108,7 @@ fn setup_hud(mut commands: Commands) {
                 FocusPolicy::Pass,
             ))
             .with_children(|top_bar| {
-                // Game Title & Session Badge
+                // Game Title & Matchmaking Button
                 top_bar
                     .spawn((
                         Node {
@@ -111,15 +128,34 @@ fn setup_hud(mut commands: Commands) {
                             TextColor(Color::srgb(0.35, 0.82, 1.0)),
                             FocusPolicy::Pass,
                         ));
-                        title_group.spawn((
-                            Text::new("[SESSION B5: DEDICATED SERVER & MULTIPLAYER]"),
-                            TextFont {
-                                font_size: 13.0,
-                                ..default()
-                            },
-                            TextColor(Color::srgb(0.65, 0.72, 0.80)),
-                            FocusPolicy::Pass,
-                        ));
+
+                        // Lobby / Matchmaking button
+                        title_group
+                            .spawn((
+                                Button,
+                                Node {
+                                    padding: UiRect::axes(Val::Px(12.0), Val::Px(6.0)),
+                                    justify_content: JustifyContent::Center,
+                                    align_items: AlignItems::Center,
+                                    border: UiRect::all(Val::Px(1.0)),
+                                    ..default()
+                                },
+                                BorderRadius::all(Val::Px(4.0)),
+                                BackgroundColor(Color::srgba(0.12, 0.22, 0.32, 0.95)),
+                                BorderColor(Color::srgb(0.35, 0.75, 1.0)),
+                                LobbyButtonAction::ToggleModal,
+                            ))
+                            .with_children(|btn| {
+                                btn.spawn((
+                                    Text::new("🌐 MATCHMAKING & MODES"),
+                                    TextFont {
+                                        font_size: 12.0,
+                                        ..default()
+                                    },
+                                    TextColor(Color::srgb(0.85, 0.95, 1.0)),
+                                    FocusPolicy::Pass,
+                                ));
+                            });
                     });
 
                 // Resource & Network Display (Minerals, Supply, Wave Timer, Net Status)
@@ -144,7 +180,7 @@ fn setup_hud(mut commands: Commands) {
                             FocusPolicy::Pass,
                         ));
                         res_group.spawn((
-                            Text::new("⚡ Supply: 4 / 10"),
+                            Text::new("⚡ Supply: 11 / 20"),
                             TextFont {
                                 font_size: 17.0,
                                 ..default()
@@ -176,7 +212,6 @@ fn setup_hud(mut commands: Commands) {
                     });
             });
 
-
             // ─────────────────────────────────────────────────────────────────
             // CENTER MATCH OUTCOME BANNER (Hidden until Victory/Defeat)
             // ─────────────────────────────────────────────────────────────────
@@ -185,7 +220,7 @@ fn setup_hud(mut commands: Commands) {
                     align_self: AlignSelf::Center,
                     padding: UiRect::axes(Val::Px(32.0), Val::Px(16.0)),
                     border: UiRect::all(Val::Px(2.0)),
-                    display: Display::None, // Hidden by default
+                    display: Display::None,
                     ..default()
                 },
                 BackgroundColor(Color::srgba(0.04, 0.06, 0.08, 0.96)),
@@ -207,7 +242,153 @@ fn setup_hud(mut commands: Commands) {
             });
 
             // ─────────────────────────────────────────────────────────────────
-            // BOTTOM HUD BAR (Selection Card, Production Queue, Build Menu)
+            // CENTER MULTIPLAYER LOBBY MODAL (Interactive Mode Selector)
+            // ─────────────────────────────────────────────────────────────────
+            root.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Percent(50.0),
+                    top: Val::Percent(50.0),
+                    margin: UiRect {
+                        left: Val::Px(-240.0),
+                        top: Val::Px(-180.0),
+                        right: Val::Px(0.0),
+                        bottom: Val::Px(0.0),
+                    },
+                    width: Val::Px(480.0),
+                    padding: UiRect::all(Val::Px(24.0)),
+                    border: UiRect::all(Val::Px(2.0)),
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(16.0),
+                    display: Display::None,
+                    ..default()
+                },
+                BorderRadius::all(Val::Px(8.0)),
+                BackgroundColor(Color::srgba(0.06, 0.09, 0.14, 0.98)),
+                BorderColor(Color::srgb(0.30, 0.75, 1.0)),
+                LobbyModalContainer,
+            ))
+            .with_children(|modal| {
+                modal.spawn((
+                    Text::new("🌐 MULTIPLAYER & GAME MODES"),
+                    TextFont {
+                        font_size: 20.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.35, 0.85, 1.0)),
+                    FocusPolicy::Pass,
+                ));
+
+                modal.spawn((
+                    Text::new("Choose your match type. 1v1 PvP pairs you live with another connected commander."),
+                    TextFont {
+                        font_size: 13.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.70, 0.78, 0.85)),
+                    FocusPolicy::Pass,
+                ));
+
+                // Button 1: 1v1 Online PvP Matchmaking
+                modal
+                    .spawn((
+                        Button,
+                        Node {
+                            padding: UiRect::axes(Val::Px(16.0), Val::Px(12.0)),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            border: UiRect::all(Val::Px(1.5)),
+                            ..default()
+                        },
+                        BorderRadius::all(Val::Px(6.0)),
+                        BackgroundColor(Color::srgba(0.15, 0.30, 0.45, 0.95)),
+                        BorderColor(Color::srgb(0.40, 0.85, 1.0)),
+                        LobbyButtonAction::Find1v1,
+                    ))
+                    .with_children(|btn| {
+                        btn.spawn((
+                            Text::new("⚔️ FIND 1v1 MULTIPLAYER MATCH"),
+                            TextFont {
+                                font_size: 15.0,
+                                ..default()
+                            },
+                            TextColor(Color::srgb(0.95, 0.98, 1.0)),
+                            FocusPolicy::Pass,
+                        ));
+                    });
+
+                // Button 2: Solo Skirmish Practice
+                modal
+                    .spawn((
+                        Button,
+                        Node {
+                            padding: UiRect::axes(Val::Px(16.0), Val::Px(12.0)),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            border: UiRect::all(Val::Px(1.5)),
+                            ..default()
+                        },
+                        BorderRadius::all(Val::Px(6.0)),
+                        BackgroundColor(Color::srgba(0.12, 0.28, 0.22, 0.95)),
+                        BorderColor(Color::srgb(0.35, 0.90, 0.55)),
+                        LobbyButtonAction::PlaySolo,
+                    ))
+                    .with_children(|btn| {
+                        btn.spawn((
+                            Text::new("🤖 SOLO PRACTICE (VS AI WAVES)"),
+                            TextFont {
+                                font_size: 15.0,
+                                ..default()
+                            },
+                            TextColor(Color::srgb(0.90, 1.0, 0.92)),
+                            FocusPolicy::Pass,
+                        ));
+                    });
+
+                // Status message inside modal
+                modal.spawn((
+                    Text::new("Status: Standalone Practice"),
+                    TextFont {
+                        font_size: 13.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.80, 0.85, 0.90)),
+                    LobbyStatusText,
+                    FocusPolicy::Pass,
+                ));
+
+                // Close Button
+                modal
+                    .spawn((
+                        Button,
+                        Node {
+                            align_self: AlignSelf::Center,
+                            padding: UiRect::axes(Val::Px(18.0), Val::Px(6.0)),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            border: UiRect::all(Val::Px(1.0)),
+                            ..default()
+                        },
+                        BorderRadius::all(Val::Px(4.0)),
+                        BackgroundColor(Color::srgba(0.20, 0.22, 0.26, 0.95)),
+                        BorderColor(Color::srgb(0.45, 0.50, 0.55)),
+                        LobbyButtonAction::CloseModal,
+                    ))
+                    .with_children(|btn| {
+                        btn.spawn((
+                            Text::new("✕ Close"),
+                            TextFont {
+                                font_size: 13.0,
+                                ..default()
+                            },
+                            TextColor(Color::srgb(0.75, 0.80, 0.85)),
+                            FocusPolicy::Pass,
+                        ));
+                    });
+            });
+
+            // ─────────────────────────────────────────────────────────────────
+            // BOTTOM HUD BAR (Radar Minimap, Selection Card, Build Menu)
             // ─────────────────────────────────────────────────────────────────
             root.spawn((
                 Node {
@@ -220,17 +401,48 @@ fn setup_hud(mut commands: Commands) {
                 FocusPolicy::Pass,
             ))
             .with_children(|bottom_row| {
-                // Left Panel: Selection Info & Production Queue
+                // Left Panel: Radar Minimap Frame
                 bottom_row
                     .spawn((
                         Node {
-                            min_width: Val::Px(340.0),
+                            width: Val::Px(170.0),
+                            height: Val::Px(170.0),
+                            padding: UiRect::all(Val::Px(8.0)),
+                            border: UiRect::all(Val::Px(1.5)),
+                            justify_content: JustifyContent::FlexStart,
+                            align_items: AlignItems::FlexStart,
+                            ..default()
+                        },
+                        BorderRadius::all(Val::Px(4.0)),
+                        BackgroundColor(Color::srgba(0.04, 0.07, 0.10, 0.85)),
+                        BorderColor(Color::srgba(0.20, 0.45, 0.70, 0.90)),
+                        FocusPolicy::Pass,
+                    ))
+                    .with_children(|radar| {
+                        radar.spawn((
+                            Text::new("📡 RADAR MAP"),
+                            TextFont {
+                                font_size: 10.0,
+                                ..default()
+                            },
+                            TextColor(Color::srgba(0.35, 0.80, 1.0, 0.8)),
+                            FocusPolicy::Pass,
+                        ));
+                    });
+
+                // Center Panel: Selection Info & Production Queue
+                bottom_row
+                    .spawn((
+                        Node {
+                            flex_grow: 1.0,
+                            max_width: Val::Px(460.0),
                             padding: UiRect::all(Val::Px(14.0)),
                             border: UiRect::all(Val::Px(1.0)),
                             flex_direction: FlexDirection::Column,
                             row_gap: Val::Px(6.0),
                             ..default()
                         },
+                        BorderRadius::all(Val::Px(4.0)),
                         BackgroundColor(Color::srgba(0.06, 0.08, 0.12, 0.92)),
                         BorderColor(Color::srgba(0.20, 0.35, 0.45, 0.85)),
                         FocusPolicy::Pass,
@@ -268,7 +480,7 @@ fn setup_hud(mut commands: Commands) {
                         ));
                     });
 
-                // Center-Right Panel: Build Commands & Shortcuts
+                // Right Panel: Build Commands & Shortcuts
                 bottom_row
                     .spawn((
                         Node {
@@ -279,6 +491,7 @@ fn setup_hud(mut commands: Commands) {
                             align_items: AlignItems::FlexEnd,
                             ..default()
                         },
+                        BorderRadius::all(Val::Px(4.0)),
                         BackgroundColor(Color::srgba(0.06, 0.08, 0.12, 0.90)),
                         BorderColor(Color::srgba(0.20, 0.35, 0.45, 0.85)),
                         FocusPolicy::Pass,
@@ -294,7 +507,7 @@ fn setup_hud(mut commands: Commands) {
                             FocusPolicy::Pass,
                         ));
                         legend.spawn((
-                            Text::new("[B] Barracks (150 💎) | [P] Supply Depot (100 💎) | [H] Base HQ (400 💎)"),
+                            Text::new("[B] Barracks (150 💎) | [U] Turret (125 💎) | [P] Depot (100 💎) | [H] HQ (400 💎)"),
                             TextFont {
                                 font_size: 12.0,
                                 ..default()
@@ -304,7 +517,7 @@ fn setup_hud(mut commands: Commands) {
                             FocusPolicy::Pass,
                         ));
                         legend.spawn((
-                            Text::new("HQ: [V] Train SCV (50 💎, 1 ⚡) | Barracks: [M] Train Marine (100 💎, 2 ⚡)"),
+                            Text::new("HQ: [V] SCV (50 💎) | Barracks: [M] Marine (100 💎) [T] Tank (200 💎)"),
                             TextFont {
                                 font_size: 11.0,
                                 ..default()
@@ -317,41 +530,152 @@ fn setup_hud(mut commands: Commands) {
         });
 }
 
+fn handle_lobby_button_interactions(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut interaction_query: Query<
+        (&Interaction, &mut BackgroundColor, &LobbyButtonAction),
+        (Changed<Interaction>, With<Button>),
+    >,
+    mut net_client: ResMut<NetClient>,
+    mut modal_query: Query<&mut Node, With<LobbyModalContainer>>,
+) {
+    if keyboard.just_pressed(KeyCode::F1) || keyboard.just_pressed(KeyCode::Tab) {
+        for mut node in &mut modal_query {
+            node.display = if node.display == Display::None {
+                Display::Flex
+            } else {
+                Display::None
+            };
+        }
+    }
+
+    for (interaction, mut bg_color, action) in &mut interaction_query {
+        match *interaction {
+            Interaction::Pressed => {
+                match action {
+                    LobbyButtonAction::ToggleModal => {
+                        for mut node in &mut modal_query {
+                            node.display = if node.display == Display::None {
+                                Display::Flex
+                            } else {
+                                Display::None
+                            };
+                        }
+                    }
+                    LobbyButtonAction::CloseModal => {
+                        for mut node in &mut modal_query {
+                            node.display = Display::None;
+                        }
+                    }
+                    LobbyButtonAction::Find1v1 => {
+                        net_client.current_mode = GameMode::Multiplayer1v1;
+                        net_client.send(&ClientMessage::JoinLobby {
+                            player_name: "Commander".to_string(),
+                            mode: GameMode::Multiplayer1v1,
+                        });
+                        info!("⚔️ [Lobby] Searching for 1v1 Multiplayer match...");
+                    }
+                    LobbyButtonAction::PlaySolo => {
+                        net_client.current_mode = GameMode::SoloVsAi;
+                        net_client.send(&ClientMessage::JoinLobby {
+                            player_name: "Commander".to_string(),
+                            mode: GameMode::SoloVsAi,
+                        });
+                        info!("🤖 [Lobby] Started Solo vs AI practice match.");
+                        for mut node in &mut modal_query {
+                            node.display = Display::None;
+                        }
+                    }
+                }
+            }
+            Interaction::Hovered => {
+                bg_color.0 = Color::srgba(0.25, 0.45, 0.65, 0.95);
+            }
+            Interaction::None => {
+                bg_color.0 = match action {
+                    LobbyButtonAction::Find1v1 => Color::srgba(0.15, 0.30, 0.45, 0.95),
+                    LobbyButtonAction::PlaySolo => Color::srgba(0.12, 0.28, 0.22, 0.95),
+                    LobbyButtonAction::ToggleModal => Color::srgba(0.12, 0.22, 0.32, 0.95),
+                    LobbyButtonAction::CloseModal => Color::srgba(0.20, 0.22, 0.26, 0.95),
+                };
+            }
+        }
+    }
+}
+
+fn update_lobby_modal_status_text(
+    net_client: Res<NetClient>,
+    mut text_query: Query<&mut Text, With<LobbyStatusText>>,
+) {
+    for mut text in &mut text_query {
+        match net_client.status {
+            NetStatus::InGame => {
+                let role = if net_client.my_faction == Faction::Player1 {
+                    "Player 1 (Blue / West Base)"
+                } else {
+                    "Player 2 (Red / East Base)"
+                };
+                text.0 = format!("🟢 Live Match Active! You are: {}", role);
+            }
+            NetStatus::InLobby => {
+                text.0 = "🟡 In Matchmaking Queue... Waiting for Opponent (1/2)".to_string();
+            }
+            NetStatus::Connected => {
+                text.0 = "🟢 Connected to Dedicated Server (Ready)".to_string();
+            }
+            NetStatus::Connecting => {
+                text.0 = "🟡 Connecting to Server...".to_string();
+            }
+            NetStatus::Disconnected => {
+                text.0 = "⚪ Offline (Solo Practice Active)".to_string();
+            }
+        }
+    }
+}
+
 fn update_hud_economy_text(
     economy: Res<PlayerEconomy>,
+    net_client: Res<NetClient>,
     mut min_query: Query<&mut Text, (With<MineralsText>, Without<SupplyText>)>,
     mut sup_query: Query<&mut Text, (With<SupplyText>, Without<MineralsText>)>,
 ) {
-    let p1_eco = economy.get(Faction::Player1);
+    let my_eco = economy.get(net_client.my_faction);
     for mut text in &mut min_query {
-        text.0 = format!("💎 Minerals: {}", p1_eco.minerals);
+        text.0 = format!("💎 Minerals: {}", my_eco.minerals);
     }
     for mut text in &mut sup_query {
-        text.0 = format!("⚡ Supply: {} / {}", p1_eco.current_supply, p1_eco.max_supply);
+        text.0 = format!("⚡ Supply: {} / {}", my_eco.current_supply, my_eco.max_supply);
     }
 }
 
 fn update_hud_wave_text(
+    net_client: Res<NetClient>,
     wave_state: Option<Res<WaveAiState>>,
     outcome: Option<Res<MatchOutcome>>,
     mut text_query: Query<&mut Text, With<WaveCountdownText>>,
 ) {
-    let Some(wave_state) = wave_state else {
-        return;
-    };
     for mut text in &mut text_query {
-        if !wave_state.is_active {
-            if outcome.as_deref() == Some(&MatchOutcome::Victory) {
-                text.0 = "🏆 Victory! Waves Cleared".to_string();
-            } else if outcome.as_deref() == Some(&MatchOutcome::Defeat) {
-                text.0 = "💥 Base Fallen".to_string();
+        if net_client.current_mode == GameMode::Multiplayer1v1 {
+            let role = if net_client.my_faction == Faction::Player1 {
+                "P1 (Blue)"
             } else {
-                text.0 = "🛑 Assault Ended".to_string();
+                "P2 (Red)"
+            };
+            text.0 = format!("⚔️ 1v1 PvP [{}]", role);
+        } else if let Some(ref wave_state) = wave_state {
+            if !wave_state.is_active {
+                if outcome.as_deref() == Some(&MatchOutcome::Victory) {
+                    text.0 = "🏆 Victory! Waves Cleared".to_string();
+                } else if outcome.as_deref() == Some(&MatchOutcome::Defeat) {
+                    text.0 = "💥 Base Fallen".to_string();
+                } else {
+                    text.0 = "🛑 Assault Ended".to_string();
+                }
+            } else {
+                let secs = wave_state.time_until_next_wave.max(0.0) as u32;
+                let wave_num = wave_state.current_wave + 1;
+                text.0 = format!("⏳ Wave {} in: {}s", wave_num, secs);
             }
-        } else {
-            let secs = wave_state.time_until_next_wave.max(0.0) as u32;
-            let wave_num = wave_state.current_wave + 1;
-            text.0 = format!("⏳ Wave {} in: {}s", wave_num, secs);
         }
     }
 }
@@ -367,7 +691,7 @@ fn update_hud_network_status(
                 color.0 = Color::srgb(0.25, 0.95, 0.45);
             }
             NetStatus::InLobby => {
-                text.0 = "🟡 IN LOBBY (WAITING)".to_string();
+                text.0 = "🟡 SEARCHING (1/2)".to_string();
                 color.0 = Color::srgb(0.95, 0.85, 0.25);
             }
             NetStatus::Connected => {
@@ -387,8 +711,8 @@ fn update_hud_network_status(
 }
 
 fn update_selection_info_text(
-    unit_query: Query<(&Unit, &Faction, &Health, &Selectable, Option<&Worker>)>,
-    building_query: Query<(&Building, &Faction, &Health, &Selectable, Option<&ProductionBuilding>)>,
+    unit_query: Query<(&Unit, &Faction, &Health, &Selectable, Option<&Worker>, Option<&SiegeTank>)>,
+    building_query: Query<(&Building, &Faction, &Health, &Selectable, Option<&ProductionBuilding>, Option<&GunTurret>)>,
     resource_query: Query<(&ResourceNode, &Selectable)>,
     mut title_query: Query<&mut Text, (With<SelectionTitleText>, Without<SelectionDetailsText>, Without<ProductionQueueText>)>,
     mut details_query: Query<&mut Text, (With<SelectionDetailsText>, Without<SelectionTitleText>, Without<ProductionQueueText>)>,
@@ -398,15 +722,15 @@ fn update_selection_info_text(
     let mut selected_building = None;
     let mut selected_resource = None;
 
-    for (unit, faction, health, selectable, worker_opt) in &unit_query {
+    for (unit, faction, health, selectable, worker_opt, tank_opt) in &unit_query {
         if selectable.is_selected {
-            selected_units.push((unit, faction, health, worker_opt));
+            selected_units.push((unit, faction, health, worker_opt, tank_opt));
         }
     }
 
-    for (building, faction, health, selectable, prod_opt) in &building_query {
+    for (building, faction, health, selectable, prod_opt, turret_opt) in &building_query {
         if selectable.is_selected {
-            selected_building = Some((building, faction, health, prod_opt));
+            selected_building = Some((building, faction, health, prod_opt, turret_opt));
             break;
         }
     }
@@ -422,17 +746,19 @@ fn update_selection_info_text(
     let mut details_str = "Drag left-click to select | Right-click ground to Move, enemy to Attack".to_string();
     let mut queue_str = String::new();
 
-    if let Some((building, faction, health, prod_opt)) = selected_building {
-        let fac_str = if *faction == Faction::Player1 { "Player 1" } else { "Hostile" };
+    if let Some((building, faction, health, prod_opt, turret_opt)) = selected_building {
+        let fac_str = if *faction == Faction::Player1 { "Player 1" } else if *faction == Faction::Player2 { "Player 2" } else { "Hostile" };
         title_str = format!("🏢 {} ({}) - HP: {:.0}/{:.0}", building.name, fac_str, health.current, health.max);
 
         if !building.is_constructed {
             details_str = format!("⚠️ Under Construction... ({:.0}%)", building.progress() * 100.0);
+        } else if turret_opt.is_some() {
+            details_str = "Automated Twin-Cannon Defense | 360° Attack Arc (18 DMG, 220 Range)".to_string();
         } else if let Some(prod) = prod_opt {
             let train_prompt = if building.name.contains("Base HQ") {
                 "Press [V] to Train SCV Worker (50 💎, 1 ⚡)"
             } else if building.name.contains("Barracks") {
-                "Press [M] to Train Marine Soldier (100 💎, 2 ⚡)"
+                "Press [M] Marine (100 💎, 2 ⚡) | [T] Siege Tank (200 💎, 3 ⚡)"
             } else {
                 "Right-click ground to set Rally Point"
             };
@@ -450,8 +776,8 @@ fn update_selection_info_text(
         details_str = format!("Remaining Minerals: {} / {}", resource.remaining_minerals, resource.max_minerals);
     } else if !selected_units.is_empty() {
         if selected_units.len() == 1 {
-            let (unit, faction, health, worker_opt) = selected_units[0];
-            let fac_str = if *faction == Faction::Player1 { "Player 1" } else { "Hostile" };
+            let (unit, faction, health, worker_opt, tank_opt) = selected_units[0];
+            let fac_str = if *faction == Faction::Player1 { "Player 1" } else if *faction == Faction::Player2 { "Player 2" } else { "Hostile" };
             title_str = format!("🎖️ {} ({}) - HP: {:.0}/{:.0}", unit.name, fac_str, health.current, health.max);
 
             if let Some(worker) = worker_opt {
@@ -462,14 +788,14 @@ fn update_selection_info_text(
                     shared::components::WorkerState::MovingToBase => "Returning Minerals to Base HQ",
                 };
                 details_str = format!("Worker Status: {} | Carried: {} 💎", state_str, worker.carried_minerals);
+            } else if tank_opt.is_some() {
+                details_str = "Heavy Armored Artillery | Long Range 35 DMG Cannon (140 Speed)".to_string();
             } else {
                 details_str = "Combat Soldier ready | Right-click to Move / Attack".to_string();
             }
         } else {
-            let friendly_count = selected_units.iter().filter(|(_, f, _, _)| **f == Faction::Player1).count();
-            let hostile_count = selected_units.len() - friendly_count;
             title_str = format!("Selected: {} Units", selected_units.len());
-            details_str = format!("Friendly: {} | Hostile: {} | Right-click to issue squad move / attack", friendly_count, hostile_count);
+            details_str = "Right-click to issue squad move / focus attack".to_string();
         }
     }
 
@@ -493,7 +819,7 @@ fn update_command_card_text(
             let status = if placement_state.is_valid { "Valid Location (Left-Click to Place)" } else { "Blocked / Insufficient Funds" };
             text.0 = format!("🏗️ Placing: {} ($ {}) - {} | [Esc/Right-Click] Cancel", kind.name(), placement_state.mineral_cost, status);
         } else {
-            text.0 = "[B] Barracks (150 💎) | [P] Supply Depot (100 💎) | [H] Base HQ (400 💎)".to_string();
+            text.0 = "[B] Barracks (150 💎) | [U] Turret (125 💎) | [P] Supply Depot (100 💎) | [H] Base HQ (400 💎)".to_string();
         }
     }
 }

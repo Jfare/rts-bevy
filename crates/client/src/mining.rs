@@ -3,6 +3,9 @@ use bevy::render::camera::OrthographicProjection;
 use bevy::window::PrimaryWindow;
 use shared::components::*;
 use shared::economy::PlayerEconomy;
+use shared::protocol::ClientMessage;
+use crate::audio_sfx::SoundEffect;
+use crate::net::{NetClient, NetStatus};
 use crate::selection::screen_to_world_2d;
 
 pub struct MiningPlugin;
@@ -22,11 +25,15 @@ impl Plugin for MiningPlugin {
 
 /// Contextual right-click handler: If right-clicking a mineral node with SCV workers selected, start mining!
 fn handle_mining_click_orders(
+    mut commands: Commands,
     mouse_button: Res<ButtonInput<MouseButton>>,
+    mut net_client: ResMut<NetClient>,
     window_query: Query<&Window, With<PrimaryWindow>>,
+
     camera_query: Query<(&Camera, &Transform, Option<&OrthographicProjection>), With<Camera>>,
-    node_query: Query<(Entity, &Transform, &Radius, &ResourceNode), With<ResourceNode>>,
-    mut worker_query: Query<(Entity, &Faction, &Selectable, &mut Worker), (With<Worker>, Without<ResourceNode>)>,
+    node_query: Query<(Entity, &Transform, &Radius, &ResourceNode, Option<&NetEntity>), With<ResourceNode>>,
+    mut worker_query: Query<(Entity, &Faction, &Selectable, &mut Worker, Option<&NetEntity>), (With<Worker>, Without<ResourceNode>)>,
+    mut sound_events: EventWriter<SoundEffect>,
 ) {
     if !mouse_button.just_pressed(MouseButton::Right) {
         return;
@@ -47,32 +54,57 @@ fn handle_mining_click_orders(
     let cam_scale = ortho_opt.map(|o| o.scale).unwrap_or(1.0);
     let click_pos = screen_to_world_2d(cursor_screen, win_size, cam_pos, cam_scale);
 
-    // Check if clicked on a ResourceNode
+    // Check if clicked on an active ResourceNode
     let mut clicked_node = None;
-    for (node_entity, node_transform, radius, resource_node) in &node_query {
+    for (node_entity, node_transform, radius, resource_node, net_opt) in &node_query {
         let node_pos = node_transform.translation.truncate();
         if node_pos.distance(click_pos) <= (radius.0 + 20.0) && resource_node.remaining_minerals > 0 {
-            clicked_node = Some((node_entity, node_pos));
+            clicked_node = Some((node_entity, node_pos, net_opt.map(|n| n.net_id)));
             break;
         }
     }
 
-    let Some((target_node_entity, _)) = clicked_node else {
+    let Some((target_node_entity, _, node_net_id_opt)) = clicked_node else {
         return;
     };
 
-    // Assign mining order to all selected Player 1 SCVs
-    for (_, faction, selectable, mut worker) in &mut worker_query {
-        if *faction == Faction::Player1 && selectable.is_selected {
+    let mut worker_net_ids = Vec::new();
+    let mut any_assigned = false;
+
+    // Assign mining order to all selected friendly SCVs
+    for (worker_entity, faction, selectable, mut worker, net_opt) in &mut worker_query {
+        if *faction == net_client.my_faction && selectable.is_selected {
+            // Remove any MoveTarget so standard pathfinding doesn't conflict with mining state machine
+            commands.entity(worker_entity).remove::<MoveTarget>();
             worker.target_node = Some(target_node_entity);
             worker.state = WorkerState::MovingToResource;
             worker.harvest_timer = 0.0;
+            any_assigned = true;
+
+            if let Some(net) = net_opt {
+                worker_net_ids.push(net.net_id);
+            }
+        }
+    }
+
+    if any_assigned {
+        sound_events.send(SoundEffect::OrderIssued);
+
+        // Sync with multiplayer server if connected
+        if net_client.status != NetStatus::Disconnected {
+            if let Some(node_net_id) = node_net_id_opt {
+                net_client.send(&ClientMessage::RequestHarvest {
+                    worker_net_ids,
+                    resource_net_id: node_net_id,
+                });
+            }
         }
     }
 }
 
 /// SCV Worker Mining State Machine
 fn worker_mining_state_machine(
+    mut commands: Commands,
     time: Res<Time>,
     mut economy: ResMut<PlayerEconomy>,
     mut worker_query: Query<(
@@ -81,14 +113,20 @@ fn worker_mining_state_machine(
         &mut Transform,
         &MoveSpeed,
         &Faction,
-        Option<&mut MoveTarget>,
+        Option<&MoveTarget>,
     ), (With<Worker>, Without<ResourceNode>, Without<BaseHQ>)>,
     mut node_query: Query<(Entity, &Transform, &mut ResourceNode), (With<ResourceNode>, Without<Worker>, Without<BaseHQ>)>,
     base_query: Query<(Entity, &Transform, &Faction, &Building, &BaseHQ), (With<BaseHQ>, Without<Worker>, Without<ResourceNode>)>,
+    mut sound_events: EventWriter<SoundEffect>,
 ) {
     let dt = time.delta_secs();
 
-    for (_worker_entity, mut worker, mut worker_transform, move_speed, faction, _move_target_opt) in &mut worker_query {
+    for (worker_entity, mut worker, mut worker_transform, move_speed, faction, move_target_opt) in &mut worker_query {
+        // If worker is active in mining loop, ensure ground MoveTarget is removed
+        if worker.state != WorkerState::Idle && move_target_opt.is_some() {
+            commands.entity(worker_entity).remove::<MoveTarget>();
+        }
+
         match worker.state {
             WorkerState::Idle => {
                 // Do nothing
@@ -156,6 +194,7 @@ fn worker_mining_state_machine(
                     worker.carried_minerals = harvested;
                     worker.harvest_timer = 0.0;
                     worker.state = WorkerState::MovingToBase;
+                    sound_events.send(SoundEffect::LaserMining);
 
                     // Find nearest friendly Base HQ
                     let worker_pos = worker_transform.translation.truncate();
@@ -216,8 +255,11 @@ fn worker_mining_state_machine(
                 let dist = worker_pos.distance(base_pos);
                 if dist <= worker.base_interact_distance {
                     // Deposit minerals into economy!
-                    economy.add_minerals(*faction, worker.carried_minerals);
-                    worker.carried_minerals = 0;
+                    if worker.carried_minerals > 0 {
+                        economy.add_minerals(*faction, worker.carried_minerals);
+                        info!("💎 [Mining] Worker deposited {} minerals for {:?}! New Bank Total: {}", worker.carried_minerals, faction, economy.get_minerals(*faction));
+                        worker.carried_minerals = 0;
+                    }
 
                     // If original mineral patch still has minerals, return to it!
                     if let Some(node_entity) = worker.target_node {
@@ -228,6 +270,7 @@ fn worker_mining_state_machine(
                             }
                         }
                     }
+
 
                     // Otherwise try to find another mineral patch
                     let mut closest_node = None;

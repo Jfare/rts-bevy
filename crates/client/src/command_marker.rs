@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy::render::camera::OrthographicProjection;
 use bevy::window::PrimaryWindow;
-use shared::components::{Faction, MoveTarget, NetEntity, Selectable};
+use shared::components::{Faction, MoveTarget, NetEntity, Radius, ResourceNode, Selectable, Worker};
 use shared::protocol::ClientMessage;
 use crate::net::{NetClient, NetStatus};
 use crate::selection::screen_to_world_2d;
@@ -34,7 +34,8 @@ fn handle_right_click_orders(
     mut net_client: ResMut<NetClient>,
     window_query: Query<&Window, With<PrimaryWindow>>,
     camera_query: Query<(&Camera, &Transform, Option<&OrthographicProjection>)>,
-    mut unit_query: Query<(Entity, &Faction, &Selectable, Option<&NetEntity>, Option<&mut MoveTarget>)>,
+    node_query: Query<(&Transform, &Radius, &ResourceNode), With<ResourceNode>>,
+    mut unit_query: Query<(Entity, &Faction, &Selectable, Option<&NetEntity>, Option<&mut MoveTarget>, Option<&Worker>)>,
 ) {
     if !mouse_button.just_pressed(MouseButton::Right) {
         return;
@@ -56,19 +57,45 @@ fn handle_right_click_orders(
     let cam_scale = ortho_opt.map(|o| o.scale).unwrap_or(1.0);
 
     let target_world_pos = screen_to_world_2d(cursor_screen, win_size, cam_pos, cam_scale);
-
     let is_attack_move = keyboard.pressed(KeyCode::KeyA);
+
+    // Check if clicked directly on an active mineral resource node
+    let is_clicking_mineral = node_query.iter().any(|(t, r, n)| {
+        t.translation.truncate().distance(target_world_pos) <= (r.0 + 20.0) && n.remaining_minerals > 0
+    });
 
     // 1. Collect selected player units and their NetIDs
     let mut selected_units = Vec::new();
     let mut selected_net_ids = Vec::new();
-    for (entity, faction, selectable, net_entity_opt, move_target) in &mut unit_query {
-        if *faction == Faction::Player1 && selectable.is_selected {
+    let mut has_workers = false;
+
+    for (entity, faction, selectable, net_entity_opt, move_target, worker_opt) in &mut unit_query {
+        if *faction == net_client.my_faction && selectable.is_selected {
+            // If clicking mineral and unit is worker, skip ground move (mining system handles harvest)
+            if is_clicking_mineral && worker_opt.is_some() {
+                has_workers = true;
+                continue;
+            }
+
             selected_units.push((entity, move_target));
             if let Some(net) = net_entity_opt {
                 selected_net_ids.push(net.net_id);
             }
         }
+    }
+
+    // If only workers were selected and clicking mineral, show cyan harvest marker and exit
+    if is_clicking_mineral && has_workers && selected_units.is_empty() {
+        commands.spawn((
+            CommandMarker {
+                lifetime: 0.0,
+                max_lifetime: 0.45,
+                initial_radius: 20.0,
+                color: Color::srgba(0.20, 0.90, 1.0, 0.95), // Cyan for harvest order
+            },
+            Transform::from_xyz(target_world_pos.x, target_world_pos.y, 1.0),
+        ));
+        return;
     }
 
     if selected_units.is_empty() {
@@ -83,7 +110,6 @@ fn handle_right_click_orders(
             is_attack_move,
         });
     }
-
 
     let unit_count = selected_units.len();
 
@@ -110,7 +136,6 @@ fn handle_right_click_orders(
         }
     }
 
-
     // 3. Spawn visual tactical pulse marker
     let marker_color = if is_attack_move {
         Color::srgba(1.0, 0.35, 0.25, 0.95) // Red-orange for Attack-Move
@@ -128,6 +153,7 @@ fn handle_right_click_orders(
         Transform::from_xyz(target_world_pos.x, target_world_pos.y, 1.0),
     ));
 }
+
 
 /// Updates timers, shrinks and draws command pulse markers
 fn update_and_draw_command_markers(

@@ -51,6 +51,11 @@ fn handle_placement_input(
         state.mineral_cost = BuildingKind::Barracks.mineral_cost();
         info!("🏗️ [Build Mode] Barracks ($150) selected for placement");
     }
+    if keyboard.just_pressed(KeyCode::KeyU) {
+        state.active_kind = Some(BuildingKind::Turret);
+        state.mineral_cost = BuildingKind::Turret.mineral_cost();
+        info!("🏗️ [Build Mode] Gun Turret ($125) selected for placement");
+    }
     if keyboard.just_pressed(KeyCode::KeyP) {
         state.active_kind = Some(BuildingKind::SupplyDepot);
         state.mineral_cost = BuildingKind::SupplyDepot.mineral_cost();
@@ -96,7 +101,8 @@ fn handle_placement_input(
 
     // 3. Confirm placement on Left-Click
     if mouse_button.just_pressed(MouseButton::Left) && state.is_valid {
-        if economy.spend_minerals(Faction::Player1, state.mineral_cost) {
+        let my_faction = net_client.my_faction;
+        if economy.spend_minerals(my_faction, state.mineral_cost) {
             let spawn_pos = state.ghost_pos;
 
             if net_client.status != NetStatus::Disconnected {
@@ -106,22 +112,21 @@ fn handle_placement_input(
                 });
             }
 
-
             let size = building_kind.size();
             let duration = building_kind.build_duration();
             let max_hp = building_kind.max_health();
-
 
             let radius = match building_kind {
                 BuildingKind::BaseHQ => 55.0,
                 BuildingKind::Barracks => 46.0,
                 BuildingKind::SupplyDepot => 30.0,
+                BuildingKind::Turret => 28.0,
             };
 
             let mut entity_cmds = commands.spawn((
                 Building::new(building_kind.name(), size, duration, false),
                 Health::new(max_hp),
-                Faction::Player1,
+                my_faction,
                 Selectable::default(),
                 Radius(radius),
                 Transform::from_xyz(spawn_pos.x, spawn_pos.y, 1.0),
@@ -158,7 +163,11 @@ fn handle_placement_input(
                         supply_provided: 8,
                     });
                 }
+                BuildingKind::Turret => {
+                    entity_cmds.insert(GunTurret::default());
+                }
             }
+
 
             info!(
                 "🏗️ [Build] Placed {} at {:?}! Construction started.",
@@ -200,7 +209,9 @@ fn update_placement_validation(
         BuildingKind::BaseHQ => 55.0,
         BuildingKind::Barracks => 46.0,
         BuildingKind::SupplyDepot => 30.0,
+        BuildingKind::Turret => 28.0,
     };
+
 
     // 2. Check Map Boundaries (-1500 .. 1500)
     if ghost_pos.x - size.x * 0.5 < -1500.0

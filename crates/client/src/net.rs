@@ -279,38 +279,41 @@ fn handle_server_message(
                 entity_map.insert(net_entity.net_id, (entity, transform, health, worker_opt));
             }
 
-            // Sync positions, health, and state from server snapshot
-            for snap in snapshots {
-                if let Some((_e, mut tf, mut hp, mut worker_opt)) = entity_map.remove(&snap.net_id) {
-                    // Smooth lerp towards authoritative position
-                    let target_pos = Vec3::new(snap.position.x, snap.position.y, tf.translation.z);
-                    tf.translation = tf.translation.lerp(target_pos, 0.45);
-                    tf.rotation = Quat::from_rotation_z(snap.rotation);
+            // Sync positions, health, and state from server snapshot only during active online matches
+            if net_client.status == NetStatus::InGame {
+                for snap in snapshots {
+                    if let Some((_e, mut tf, mut hp, mut worker_opt)) = entity_map.remove(&snap.net_id) {
+                        // Smooth lerp towards authoritative position
+                        let target_pos = Vec3::new(snap.position.x, snap.position.y, tf.translation.z);
+                        tf.translation = tf.translation.lerp(target_pos, 0.45);
+                        tf.rotation = Quat::from_rotation_z(snap.rotation);
 
-                    hp.current = snap.current_hp;
-                    hp.max = snap.max_hp;
+                        hp.current = snap.current_hp;
+                        hp.max = snap.max_hp;
 
-                    if let Some(ref mut worker) = worker_opt {
-                        if snap.is_mining {
-                            worker.state = WorkerState::Mining;
+                        if let Some(ref mut worker) = worker_opt {
+                            if snap.is_mining {
+                                worker.state = WorkerState::Mining;
+                            }
+                        }
+                    }
+                }
+
+                // Sync local player economy minerals
+                if net_client.my_faction == Faction::Player1 {
+                    let current = economy.get_minerals(Faction::Player1);
+                    if current != p1_minerals {
+                        let diff = p1_minerals as i64 - current as i64;
+                        if diff > 0 {
+                            economy.add_minerals(Faction::Player1, diff as u32);
+                        } else if diff < 0 {
+                            economy.spend_minerals(Faction::Player1, (-diff) as u32);
                         }
                     }
                 }
             }
-
-            // Sync local player economy minerals
-            if net_client.my_faction == Faction::Player1 {
-                let current = economy.get_minerals(Faction::Player1);
-                if current != p1_minerals {
-                    let diff = p1_minerals as i64 - current as i64;
-                    if diff > 0 {
-                        economy.add_minerals(Faction::Player1, diff as u32);
-                    } else if diff < 0 {
-                        economy.spend_minerals(Faction::Player1, (-diff) as u32);
-                    }
-                }
-            }
         }
+
         ServerMessage::BuildingSpawned {
             net_id,
             faction,
@@ -366,6 +369,9 @@ fn handle_server_message(
                 BuildingKind::SupplyDepot => {
                     entity_cmds.insert(SupplyDepot { supply_provided: 8 });
                 }
+                BuildingKind::Turret => {
+                    entity_cmds.insert(GunTurret::default());
+                }
             }
         }
         ServerMessage::UnitSpawned {
@@ -415,8 +421,17 @@ fn handle_server_message(
                         Velocity::default(),
                     ));
                 }
+                UnitKind::Tank => {
+                    unit_cmds.insert((
+                        SiegeTank::default(),
+                        Radius(22.0),
+                        MoveSpeed(140.0),
+                        Velocity::default(),
+                    ));
+                }
             }
         }
+
         ServerMessage::ProjectileFired {
             attacker_net_id: _,
             target_net_id: _,

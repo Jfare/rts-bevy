@@ -3,6 +3,24 @@ use bevy::render::camera::OrthographicProjection;
 use bevy::window::PrimaryWindow;
 use shared::components::{Faction, Radius, Selectable};
 
+use crate::minimap::{get_minimap_screen_rect, MinimapState};
+use crate::net::NetClient;
+
+
+/// Helper to convert screen cursor coordinates to 2D world coordinates accurately across all platforms
+pub fn screen_to_world_2d(
+    cursor_pos: Vec2,
+    window_size: Vec2,
+    camera_pos: Vec2,
+    camera_scale: f32,
+) -> Vec2 {
+    let centered = Vec2::new(
+        cursor_pos.x - window_size.x * 0.5,
+        (window_size.y * 0.5) - cursor_pos.y, // Invert Y
+    );
+    camera_pos + centered * camera_scale
+}
+
 /// State of the active drag selection marquee box
 #[derive(Debug, Resource, Default)]
 pub struct SelectionState {
@@ -21,29 +39,18 @@ impl Plugin for SelectionPlugin {
     }
 }
 
-/// Helper to convert screen cursor coordinates to 2D world coordinates accurately across all platforms
-pub fn screen_to_world_2d(
-    cursor_pos: Vec2,
-    window_size: Vec2,
-    camera_pos: Vec2,
-    camera_scale: f32,
-) -> Vec2 {
-    let centered = Vec2::new(
-        cursor_pos.x - window_size.x * 0.5,
-        (window_size.y * 0.5) - cursor_pos.y, // Invert Y
-    );
-    camera_pos + centered * camera_scale
-}
 
 /// Handles mouse input for single-click and drag-box entity selection
 fn handle_selection_input(
     mouse_button: Res<ButtonInput<MouseButton>>,
     keyboard: Res<ButtonInput<KeyCode>>,
+    net_client: Res<NetClient>,
     window_query: Query<&Window, With<PrimaryWindow>>,
     camera_query: Query<(&Camera, &Transform, Option<&OrthographicProjection>)>,
     mut selection_state: ResMut<SelectionState>,
     mut selectable_query: Query<(Entity, &Transform, &Radius, &Faction, &mut Selectable)>,
 ) {
+
     let Ok((_camera, cam_transform, ortho_opt)) = camera_query.get_single() else {
         return;
     };
@@ -55,6 +62,12 @@ fn handle_selection_input(
         return;
     };
 
+    let mm_rect = get_minimap_screen_rect(window, &MinimapState::default());
+    let is_over_minimap = cursor_screen.x >= mm_rect.min.x
+        && cursor_screen.x <= mm_rect.max.x
+        && cursor_screen.y >= mm_rect.min.y
+        && cursor_screen.y <= mm_rect.max.y;
+
     let win_size = Vec2::new(window.width(), window.height());
     let cam_pos = cam_transform.translation.truncate();
     let cam_scale = ortho_opt.map(|o| o.scale).unwrap_or(1.0);
@@ -65,6 +78,9 @@ fn handle_selection_input(
 
     // 1. Mouse Button Pressed (Start Drag)
     if mouse_button.just_pressed(MouseButton::Left) {
+        if is_over_minimap {
+            return;
+        }
         selection_state.drag_start_screen = Some(cursor_screen);
         selection_state.drag_start_world = Some(cursor_world_pos);
         selection_state.current_world_pos = Some(cursor_world_pos);
@@ -73,16 +89,10 @@ fn handle_selection_input(
 
     // 2. Mouse Button Held (Update Drag)
     if mouse_button.pressed(MouseButton::Left) {
-        if selection_state.drag_start_world.is_none() {
-            selection_state.drag_start_screen = Some(cursor_screen);
-            selection_state.drag_start_world = Some(cursor_world_pos);
-        }
-
-        selection_state.current_world_pos = Some(cursor_world_pos);
-
         if let Some(start_screen) = selection_state.drag_start_screen {
-            if start_screen.distance(cursor_screen) > 4.0 {
+            if start_screen.distance(cursor_screen) > 6.0 {
                 selection_state.is_dragging = true;
+                selection_state.current_world_pos = Some(cursor_world_pos);
             }
         }
     }
@@ -112,10 +122,11 @@ fn handle_selection_input(
             for (_, transform, _, faction, mut sel) in &mut selectable_query {
                 let pos = transform.translation.truncate();
                 if pos.x >= min_x && pos.x <= max_x && pos.y >= min_y && pos.y <= max_y {
-                    if *faction == Faction::Player1 {
+                    if *faction == net_client.my_faction {
                         sel.is_selected = true;
                         friendly_selected = true;
                     }
+
                 }
             }
 

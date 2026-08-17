@@ -106,6 +106,29 @@ pub fn spawn_match_entities(
         max_hp: BuildingKind::BaseHQ.max_health(),
     });
 
+    // P1 Starting Mineral Field
+    let p1_minerals_pos = p1_base_pos + Vec2::new(180.0, -40.0);
+    let p1_minerals_id = matchmaker.alloc_net_id();
+    let p1_minerals_e = commands.spawn((
+        ResourceNode::new(1500),
+        Radius(32.0),
+        NetEntity {
+            net_id: p1_minerals_id,
+            owner_peer_id: 0,
+        },
+        Transform::from_xyz(p1_minerals_pos.x, p1_minerals_pos.y, 1.0),
+    )).id();
+
+    initial_states.push(EntityState {
+        net_id: p1_minerals_id,
+        kind: EntityKind::ResourceNode,
+        faction: Faction::Neutral,
+        position: p1_minerals_pos,
+        rotation: 0.0,
+        current_hp: 1500.0,
+        max_hp: 1500.0,
+    });
+
     // P1 SCVs
     let worker_offsets = [Vec2::new(-60.0, -80.0), Vec2::new(60.0, -80.0)];
     for offset in worker_offsets {
@@ -117,7 +140,11 @@ pub fn spawn_match_entities(
                 name: "SCV Worker".to_string(),
                 supply_cost: 1,
             },
-            Worker::default(),
+            Worker {
+                state: WorkerState::MovingToResource,
+                target_node: Some(p1_minerals_e),
+                ..default()
+            },
             Health::new(80.0),
             Radius(14.0),
             MoveSpeed(190.0),
@@ -187,28 +214,6 @@ pub fn spawn_match_entities(
         });
     }
 
-    // P1 Starting Mineral Field
-    let p1_minerals_pos = p1_base_pos + Vec2::new(180.0, -40.0);
-    let p1_minerals_id = matchmaker.alloc_net_id();
-    commands.spawn((
-        ResourceNode::new(1500),
-        Radius(32.0),
-        NetEntity {
-            net_id: p1_minerals_id,
-            owner_peer_id: 0,
-        },
-        Transform::from_xyz(p1_minerals_pos.x, p1_minerals_pos.y, 1.0),
-    ));
-
-    initial_states.push(EntityState {
-        net_id: p1_minerals_id,
-        kind: EntityKind::ResourceNode,
-        faction: Faction::Neutral,
-        position: p1_minerals_pos,
-        rotation: 0.0,
-        current_hp: 1500.0,
-        max_hp: 1500.0,
-    });
 
     // ─────────────────────────────────────────────────────────────────────────
     // PLAYER 2 / HOSTILE AI BASE

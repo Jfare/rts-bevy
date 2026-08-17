@@ -53,6 +53,7 @@ pub enum BuildingKind {
     BaseHQ,
     Barracks,
     SupplyDepot,
+    Turret,
 }
 
 impl BuildingKind {
@@ -61,6 +62,7 @@ impl BuildingKind {
             BuildingKind::BaseHQ => "Base HQ",
             BuildingKind::Barracks => "Barracks",
             BuildingKind::SupplyDepot => "Supply Depot",
+            BuildingKind::Turret => "Gun Turret",
         }
     }
 
@@ -69,6 +71,7 @@ impl BuildingKind {
             BuildingKind::BaseHQ => 400,
             BuildingKind::Barracks => 150,
             BuildingKind::SupplyDepot => 100,
+            BuildingKind::Turret => 125,
         }
     }
 
@@ -77,6 +80,7 @@ impl BuildingKind {
             BuildingKind::BaseHQ => Vec2::new(110.0, 110.0),
             BuildingKind::Barracks => Vec2::new(96.0, 96.0),
             BuildingKind::SupplyDepot => Vec2::new(64.0, 64.0),
+            BuildingKind::Turret => Vec2::new(56.0, 56.0),
         }
     }
 
@@ -85,6 +89,7 @@ impl BuildingKind {
             BuildingKind::BaseHQ => 5.0,
             BuildingKind::Barracks => 3.5,
             BuildingKind::SupplyDepot => 2.5,
+            BuildingKind::Turret => 3.0,
         }
     }
 
@@ -93,6 +98,8 @@ impl BuildingKind {
             BuildingKind::BaseHQ => 1200.0,
             BuildingKind::Barracks => 700.0,
             BuildingKind::SupplyDepot => 500.0,
+            BuildingKind::Turret => 450.0,
         }
     }
 }
+

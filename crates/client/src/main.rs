@@ -1,7 +1,10 @@
+mod audio_sfx;
 mod camera;
 mod combat;
 mod command_marker;
+mod fog_of_war;
 mod mining;
+mod minimap;
 mod net;
 mod placement;
 mod production;
@@ -13,10 +16,13 @@ mod world_grid;
 
 use bevy::prelude::*;
 use bevy::window::WindowResolution;
+use audio_sfx::AudioSfxPlugin;
 use camera::{RtsCamera, RtsCameraPlugin};
 use combat::CombatPlugin;
 use command_marker::CommandMarkerPlugin;
+use fog_of_war::FogOfWarPlugin;
 use mining::MiningPlugin;
+use minimap::MinimapPlugin;
 use net::NetClientPlugin;
 use placement::PlacementPlugin;
 use production::ProductionPlugin;
@@ -36,8 +42,8 @@ fn main() {
     let mut app = App::new();
 
     let mut economy = PlayerEconomy::new();
-    // Initialize starting supply for Player 1 (2 SCVs @ 1 = 2, 3 Marines @ 2 = 6 -> Total 8 / 10)
-    economy.register_supply(Faction::Player1, 8);
+    // Initialize starting supply for Player 1 (2 SCVs @ 1 = 2, 3 Marines @ 2 = 6, 1 Tank @ 3 = 3 -> Total 11 / 20)
+    economy.register_supply(Faction::Player1, 11);
     // Initialize starting supply for Hostile AI (2 Marines @ 2 = 4 -> Total 4 / 10)
     economy.register_supply(Faction::HostileAi, 4);
 
@@ -67,8 +73,13 @@ fn main() {
         RenderUnitsPlugin,
         MiningPlugin,
         ProductionPlugin,
+    ))
+    .add_plugins((
         PlacementPlugin,
         CombatPlugin,
+        AudioSfxPlugin,
+        MinimapPlugin,
+        FogOfWarPlugin,
         RtsUiPlugin,
         NetClientPlugin,
         bot_ai::WaveAiPlugin,
@@ -84,7 +95,7 @@ fn main() {
     app.run();
 }
 
-/// Spawns the camera and initial playable units, buildings, and mineral nodes for Session B4
+/// Spawns the camera and initial playable units, buildings, and mineral nodes
 fn setup_demo_scene(mut commands: Commands) {
     // 1. RTS 2D Camera centered on Player 1 Base
     commands.spawn((
@@ -107,7 +118,7 @@ fn setup_demo_scene(mut commands: Commands) {
             true,
         ),
         BaseHQ {
-            supply_provided: 10,
+            supply_provided: 20,
             dropoff_radius: 70.0,
         },
         ProductionBuilding {
@@ -123,7 +134,33 @@ fn setup_demo_scene(mut commands: Commands) {
         Transform::from_xyz(p1_base_pos.x, p1_base_pos.y, 1.0),
     ));
 
-    // Player 1 SCV Workers
+    // Player 1 Gun Turret
+    let turret_pos = p1_base_pos + Vec2::new(0.0, 110.0);
+    commands.spawn((
+        Building::new(
+            BuildingKind::Turret.name(),
+            BuildingKind::Turret.size(),
+            BuildingKind::Turret.build_duration(),
+            true,
+        ),
+        GunTurret::default(),
+        Health::new(BuildingKind::Turret.max_health()),
+        Faction::Player1,
+        Selectable::default(),
+        Radius(28.0),
+        Transform::from_xyz(turret_pos.x, turret_pos.y, 1.0),
+    ));
+
+    // Player 1 Starting Mineral Field
+    let mineral_pos = p1_base_pos + Vec2::new(180.0, -40.0);
+    let mineral_e = commands.spawn((
+        ResourceNode::new(1500),
+        Radius(32.0),
+        Selectable::default(),
+        Transform::from_xyz(mineral_pos.x, mineral_pos.y, 1.0),
+    )).id();
+
+    // Player 1 SCV Workers (Automatically harvesting starting mineral patch)
     let worker_offsets = [Vec2::new(-60.0, -80.0), Vec2::new(60.0, -80.0)];
     for (i, offset) in worker_offsets.iter().enumerate() {
         let pos = p1_base_pos + *offset;
@@ -132,7 +169,11 @@ fn setup_demo_scene(mut commands: Commands) {
                 name: "SCV Worker".to_string(),
                 supply_cost: 1,
             },
-            Worker::default(),
+            Worker {
+                state: WorkerState::MovingToResource,
+                target_node: Some(mineral_e),
+                ..default()
+            },
             Health::new(80.0),
             Radius(14.0),
             MoveSpeed(190.0),
@@ -182,14 +223,27 @@ fn setup_demo_scene(mut commands: Commands) {
         ));
     }
 
-    // Player 1 Starting Mineral Field
-    let mineral_pos = p1_base_pos + Vec2::new(180.0, -40.0);
+    // Player 1 Siege Tank
+    let tank_pos = p1_base_pos + Vec2::new(-160.0, 80.0);
     commands.spawn((
-        ResourceNode::new(1500),
-        Radius(32.0),
+        Unit {
+            name: "Siege Tank".to_string(),
+            supply_cost: 3,
+        },
+        SiegeTank::default(),
+        Health::new(220.0),
+        Radius(22.0),
+        MoveSpeed(140.0),
+        Velocity::default(),
+        Faction::Player1,
         Selectable::default(),
-        Transform::from_xyz(mineral_pos.x, mineral_pos.y, 1.0),
+        NetEntity {
+            net_id: 250,
+            owner_peer_id: 1,
+        },
+        Transform::from_xyz(tank_pos.x, tank_pos.y, 2.0),
     ));
+
 
     // ─────────────────────────────────────────────────────────────────────────
     // HOSTILE AI BASE & DEFENDERS

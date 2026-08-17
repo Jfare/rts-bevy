@@ -91,6 +91,7 @@ fn production_queue_system(
 
             // Spawn the unit based on name
             let is_worker = completed_unit.name.contains("SCV");
+            let is_tank = completed_unit.name.contains("Tank");
             let net_id = 5000 + (building_entity.index() % 1000) * 10 + (prod.queue.len() as u32);
 
             if is_worker {
@@ -103,6 +104,29 @@ fn production_queue_system(
                     Health::new(80.0),
                     Radius(14.0),
                     MoveSpeed(190.0),
+                    Velocity::default(),
+                    *faction,
+                    Selectable::default(),
+                    NetEntity {
+                        net_id,
+                        owner_peer_id: if *faction == Faction::Player1 { 1 } else { 2 },
+                    },
+                    MoveTarget {
+                        destination: prod.rally_point,
+                        is_attack_move: false,
+                    },
+                    Transform::from_xyz(spawn_pos.x, spawn_pos.y, 2.0),
+                ));
+            } else if is_tank {
+                commands.spawn((
+                    Unit {
+                        name: "Siege Tank".to_string(),
+                        supply_cost: 3,
+                    },
+                    SiegeTank::default(),
+                    Health::new(220.0),
+                    Radius(22.0),
+                    MoveSpeed(140.0),
                     Velocity::default(),
                     *faction,
                     Selectable::default(),
@@ -164,10 +188,12 @@ fn handle_production_hotkeys(
         Option<&Barracks>,
     )>,
 ) {
+    let my_faction = net_client.my_faction;
+
     // Key 'V' for SCV Worker at Base HQ
     if keyboard.just_pressed(KeyCode::KeyV) {
         for (mut prod, building, faction, selectable, net_entity_opt, base_hq, _) in &mut prod_query {
-            if *faction == Faction::Player1 && selectable.is_selected && building.is_constructed && base_hq.is_some() {
+            if *faction == my_faction && selectable.is_selected && building.is_constructed && base_hq.is_some() {
                 if prod.queue.len() < prod.max_queue_size {
                     if economy.has_minerals(*faction, 50) && economy.has_supply(*faction, 1) {
                         economy.spend_minerals(*faction, 50);
@@ -198,7 +224,7 @@ fn handle_production_hotkeys(
     // Key 'M' for Marine at Barracks
     if keyboard.just_pressed(KeyCode::KeyM) {
         for (mut prod, building, faction, selectable, net_entity_opt, _, barracks) in &mut prod_query {
-            if *faction == Faction::Player1 && selectable.is_selected && building.is_constructed && barracks.is_some() {
+            if *faction == my_faction && selectable.is_selected && building.is_constructed && barracks.is_some() {
                 if prod.queue.len() < prod.max_queue_size {
                     if economy.has_minerals(*faction, 100) && economy.has_supply(*faction, 2) {
                         economy.spend_minerals(*faction, 100);
@@ -225,7 +251,39 @@ fn handle_production_hotkeys(
             }
         }
     }
+
+    // Key 'T' for Siege Tank at Barracks
+    if keyboard.just_pressed(KeyCode::KeyT) {
+        for (mut prod, building, faction, selectable, net_entity_opt, _, barracks) in &mut prod_query {
+            if *faction == my_faction && selectable.is_selected && building.is_constructed && barracks.is_some() {
+                if prod.queue.len() < prod.max_queue_size {
+                    if economy.has_minerals(*faction, 200) && economy.has_supply(*faction, 3) {
+                        economy.spend_minerals(*faction, 200);
+                        economy.register_supply(*faction, 3);
+                        prod.queue.push(QueuedUnit {
+                            name: "Siege Tank".to_string(),
+                            mineral_cost: 200,
+                            supply_cost: 3,
+                            build_duration: 5.0,
+                        });
+
+                        if let Some(net) = net_entity_opt {
+                            if net_client.status != NetStatus::Disconnected {
+                                net_client.send(&ClientMessage::RequestTrainUnit {
+                                    building_net_id: net.net_id,
+                                    unit_kind: UnitKind::Tank,
+                                });
+                            }
+                        }
+
+                        info!("🛡️ [Queue] Siege Tank queued! Queue size: {}", prod.queue.len());
+                    }
+                }
+            }
+        }
+    }
 }
+
 
 /// Allows right-clicking to change the rally point of a selected production building
 fn handle_rally_point_order(
@@ -253,9 +311,10 @@ fn handle_rally_point_order(
     let cam_pos = cam_transform.translation.truncate();
     let cam_scale = ortho_opt.map(|o| o.scale).unwrap_or(1.0);
     let target_world_pos = screen_to_world_2d(cursor_screen, win_size, cam_pos, cam_scale);
+    let my_faction = net_client.my_faction;
 
     for (mut prod, faction, selectable, net_entity_opt) in &mut prod_query {
-        if *faction == Faction::Player1 && selectable.is_selected {
+        if *faction == my_faction && selectable.is_selected {
             prod.rally_point = target_world_pos;
             if let Some(net) = net_entity_opt {
                 if net_client.status != NetStatus::Disconnected {
@@ -269,6 +328,7 @@ fn handle_rally_point_order(
         }
     }
 }
+
 
 
 /// Renders construction progress bars and rally point dashed lines
