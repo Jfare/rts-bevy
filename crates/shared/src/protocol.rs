@@ -37,11 +37,36 @@ impl UnitKind {
             UnitKind::Soldier => 4.0,
         }
     }
+
+    pub fn max_health(&self) -> f32 {
+        match self {
+            UnitKind::Worker => 80.0,
+            UnitKind::Soldier => 120.0,
+        }
+    }
 }
 
-/// Nätverksmeddelanden som skickas från Klient till Server
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Reflect, Default)]
+pub enum GameMode {
+    #[default]
+    SoloVsAi,
+    Multiplayer1v1,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Reflect)]
+pub enum EntityKind {
+    Unit(UnitKind),
+    Building(BuildingKind),
+    ResourceNode,
+}
+
+/// Messages sent from Client to Server
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ClientMessage {
+    JoinLobby {
+        player_name: String,
+        mode: GameMode,
+    },
     RequestBuild {
         building_kind: BuildingKind,
         position: Vec2,
@@ -65,7 +90,7 @@ pub enum ClientMessage {
     },
     RequestHarvest {
         worker_net_ids: Vec<u32>,
-        resource_position: Vec2,
+        resource_net_id: u32,
     },
     RequestStop {
         unit_net_ids: Vec<u32>,
@@ -73,51 +98,94 @@ pub enum ClientMessage {
     RequestHoldPosition {
         unit_net_ids: Vec<u32>,
     },
+    Ping {
+        timestamp: u64,
+    },
 }
 
-/// 30 Hz position- och hälsosnapshot för en entitet
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+/// 30 Hz position, rotation, HP, and visual state for an active entity
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct EntitySnapshot {
     pub net_id: u32,
     pub position: Vec2,
     pub rotation: f32,
     pub current_hp: f32,
     pub max_hp: f32,
+    pub is_mining: bool,
+    pub laser_target: Option<Vec2>,
 }
 
-/// Nätverksmeddelanden som skickas från Server till Klient
+/// Complete initial state of an entity on match start
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EntityState {
+    pub net_id: u32,
+    pub kind: EntityKind,
+    pub faction: Faction,
+    pub position: Vec2,
+    pub rotation: f32,
+    pub current_hp: f32,
+    pub max_hp: f32,
+}
+
+/// Messages sent from Server to Client
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ServerMessage {
+    LobbyJoined {
+        player_id: u64,
+        assigned_faction: Faction,
+        room_id: u32,
+        is_game_ready: bool,
+    },
+    GameStarted {
+        p1_pos: Vec2,
+        p2_pos: Vec2,
+        wave_initial_delay: f32,
+    },
+    InitialWorldState {
+        entities: Vec<EntityState>,
+        p1_minerals: u32,
+        p1_supply: u32,
+        p1_max_supply: u32,
+        p2_minerals: u32,
+        p2_supply: u32,
+        p2_max_supply: u32,
+    },
+    TickSnapshotBatch {
+        tick: u32,
+        snapshots: Vec<EntitySnapshot>,
+        p1_minerals: u32,
+        p1_supply: u32,
+        p1_max_supply: u32,
+        p2_minerals: u32,
+        p2_supply: u32,
+        p2_max_supply: u32,
+        next_wave_seconds: f32,
+        current_wave: u32,
+    },
     BuildingSpawned {
         net_id: u32,
         faction: Faction,
         building_kind: BuildingKind,
         position: Vec2,
+        max_hp: f32,
     },
     UnitSpawned {
         net_id: u32,
         faction: Faction,
         unit_kind: UnitKind,
         position: Vec2,
-        rally_position: Vec2,
+        max_hp: f32,
     },
     QueueUpdated {
         building_net_id: u32,
         queue_count: usize,
-    },
-    EconomySync {
-        faction: Faction,
-        minerals: u32,
-        current_supply: u32,
-        max_supply: u32,
-    },
-    EntitySnapshotBatch {
-        tick: u32,
-        snapshots: Vec<EntitySnapshot>,
+        current_progress: f32,
     },
     ProjectileFired {
         attacker_net_id: u32,
         target_net_id: u32,
+        origin: Vec2,
+        target_pos: Vec2,
         damage: f32,
     },
     EntityDamaged {
@@ -133,4 +201,31 @@ pub enum ServerMessage {
         winning_faction: Faction,
         duration_seconds: f32,
     },
+    Pong {
+        client_timestamp: u64,
+        server_time: u64,
+    },
+    ErrorMessage {
+        reason: String,
+    },
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BINARY SERIALIZATION HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub fn encode_client_msg(msg: &ClientMessage) -> Result<Vec<u8>, bincode::Error> {
+    bincode::serialize(msg)
+}
+
+pub fn decode_client_msg(bytes: &[u8]) -> Result<ClientMessage, bincode::Error> {
+    bincode::deserialize(bytes)
+}
+
+pub fn encode_server_msg(msg: &ServerMessage) -> Result<Vec<u8>, bincode::Error> {
+    bincode::serialize(msg)
+}
+
+pub fn decode_server_msg(bytes: &[u8]) -> Result<ServerMessage, bincode::Error> {
+    bincode::deserialize(bytes)
 }

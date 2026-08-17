@@ -59,93 +59,69 @@ All in-game text, UI, HUD elements, unit cards, and commands are strictly in **E
 
 ---
 
-## 🎯 Next Session: Session B5 (Plan of Action)
-
-### Focus: Dedicated Server, Multiplayer Networking & VPS Deployment
-
-```
-+-------------------------------------------------------------------------+
-|                              SESSION B5                                 |
-+-------------------------------------------------------------------------+
-|                                                                         |
-|  [Part 1: Protocol]        crates/shared/src/protocol.rs                |
-|                            - ClientCommand (Move, Attack, Build, Train) |
-|                            - ServerSnapshot (Entity states, HP, Eco)    |
-|                                                                         |
-|  [Part 2: Server]          crates/server/src/main.rs                    |
-|                            - Headless Bevy 0.15 app (30 Hz tick)        |
-|                            - Async WebSocket listener (tokio / axum)    |
-|                            - Authoritative combat, movement & economy   |
-|                            - Room & Matchmaking management (1v1, Solo)  |
-|                                                                         |
-|  [Part 3: Client Sync]     crates/client/src/net.rs                     |
-|                            - Wasm WebSocket client integration          |
-|                            - Client-side prediction & reconciliation    |
-|                            - Remote peer unit interpolation             |
-|                            - Multiplayer Lobby UI in English            |
-|                                                                         |
-|  [Part 4: Deployment]      Docker & Linux VPS (UpCloud)                 |
-|                            - Dockerfile.server (Minimal Alpine Rust)    |
-|                            - Dockerfile.client (Nginx static web host)  |
-|                            - docker-compose.yml                         |
-|                            - scripts/deploy_upcloud.sh                  |
-|                                                                         |
-+-------------------------------------------------------------------------+
-```
-
-### Detailed Breakdown for Session B5:
-
-#### 1. Binary Protocol Serialization (`crates/shared/src/protocol.rs`)
-- Compact binary serialization using `bincode` and `serde`.
-- `ClientMessage`:
-  - `Connect { player_name: String }`
-  - `CommandMove { unit_ids: Vec<u32>, target: Vec2, is_attack_move: bool }`
-  - `CommandAttack { unit_ids: Vec<u32>, target_net_id: u32 }`
-  - `CommandHarvest { worker_ids: Vec<u32>, node_net_id: u32 }`
-  - `CommandBuild { kind: BuildingKind, position: Vec2 }`
-  - `CommandTrain { building_net_id: u32, unit_name: String }`
-  - `CommandRallyPoint { building_net_id: u32, target: Vec2 }`
-- `ServerMessage`:
-  - `Welcome { assigned_faction: Faction, player_id: u64 }`
-  - `WorldSnapshot { tick: u64, entities: Vec<NetEntityState>, economy: FactionEconomy, wave: WaveInfo }`
-  - `MatchEnd { outcome: MatchOutcome }`
-
-#### 2. Authoritative Dedicated Server (`crates/server`)
-- Listens on WebSocket port `8080`.
-- Runs full Bevy ECS simulation without graphics:
-  - Simulates movement, pathing, soft separation, resource deposits, and combat damage.
-  - Broadcasts 30 Hz world state snapshots to all connected clients.
-  - Supports 2 human players (PvP 1v1) or 1 human player vs Server AI.
-
-#### 3. Client Multiplayer Synchronization (`crates/client`)
-- Connects via WebSocket in WebAssembly (`web-sys` / `ws`) and Native Desktop.
-- Applies local client prediction for instant responsive control on movement/selection.
-- Smoothly interpolates positions of enemy/peer units based on server snapshots.
-- Multiplayer lobby UI:
-  - `[Play Solo Skirmish (vs AI)]`
-  - `[Join 1v1 Multiplayer Match]`
-
-#### 4. Containerization & UpCloud VPS Deployment
-- **`Dockerfile.server`**: Multi-stage Rust build producing a minimal ~25 MB binary image.
-- **`Dockerfile.client`**: Nginx image serving optimized Wasm/JS/HTML static assets with Gzip/Brotli.
-- **`docker-compose.yml`**: Exposes port 80/443 for web client and port 8080 for WebSocket game server.
-- **Deployment Script (`scripts/deploy_upcloud.sh`)**:
-  - One-command SSH deployment: builds Docker images, transfers to VPS, and starts services with health checks.
+### ✅ Session B5: Dedicated Server, Multiplayer Networking & VPS Deployment
+- [x] Protocol & Serialization ([`crates/shared/src/protocol.rs`](file:///home/john/Godot/rts-bevy/crates/shared/src/protocol.rs)):
+  - `ClientMessage` (`JoinLobby`, `RequestMove`, `RequestAttackTarget`, `RequestHarvest`, `RequestBuild`, `RequestTrainUnit`, `RequestSetRallyPoint`, `RequestStop`, `RequestHoldPosition`, `Ping`).
+  - `ServerMessage` (`LobbyJoined`, `GameStarted`, `InitialWorldState`, `TickSnapshotBatch`, `BuildingSpawned`, `UnitSpawned`, `QueueUpdated`, `ProjectileFired`, `EntityDamaged`, `EntityDied`, `MatchEnded`, `Pong`).
+  - Binary serialization / deserialization helpers using `bincode`.
+- [x] Authoritative Dedicated Server ([`crates/server`](file:///home/john/Godot/rts-bevy/crates/server)):
+  - Tokio async WebSocket listener on port 8080 with crossbeam channel ECS bridging.
+  - Multi-room matchmaking (Solo vs AI practice or 1v1 PvP matching).
+  - 30 Hz authoritative simulation for movement, soft Boids separation, mining, production, and combat damage.
+  - 30 Hz state snapshot broadcasting to connected clients.
+- [x] Client Network Synchronization ([`crates/client/src/net.rs`](file:///home/john/Godot/rts-bevy/crates/client/src/net.rs)):
+  - Cross-platform WebSocket client using `ewebsock` (Native and WebAssembly / WebGL2).
+  - Client-side prediction for instant responsive feedback on movement/build/train orders.
+  - 30 Hz snapshot reconciliation & entity lerp interpolation.
+  - Live latency / ping and connection status indicator in HUD.
+- [x] Containerization & VPS Deployment:
+  - `docker/Dockerfile.server` (Minimal multi-stage Debian server image).
+  - `docker/Dockerfile.client` (Trunk WebAssembly builder + Caddy static web server).
+  - `docker/Caddyfile` & `docker-compose.yml`.
+  - `scripts/deploy_upcloud.sh` (Automated SSH & Docker Compose deployment to UpCloud VPS).
 
 ---
 
-## ⚡ Quick Resume Commands for Next Session
+## 🎯 Next Session: Session B6 (Future Polish & Systems)
 
-To resume right where we left off:
+### Focus: Interactive Minimap Radar, Fog of War & Audio Effects
+
+```
++-------------------------------------------------------------------------+
+|                              SESSION B6                                 |
++-------------------------------------------------------------------------+
+|                                                                         |
+|  [Part 1: Minimap Radar]   Interactive 2D radar widget with frustum box |
+|                            and click-to-pan camera navigation           |
+|                                                                         |
+|  [Part 2: Fog of War]      Grid-based vision exploration system         |
+|                            (Unexplored / Explored / Visible)            |
+|                                                                         |
+|  [Part 3: Audio Effects]   Kira audio plugin integration for SFX        |
+|                            (Shots, clicks, mining laser, alerts)        |
+|                                                                         |
+|  [Part 4: New Units]       Siege Tank & Defensive Gun Turret            |
+|                                                                         |
++-------------------------------------------------------------------------+
+```
+
+---
+
+## ⚡ Quick Run Commands
+
+To run locally:
 
 ```bash
-# 1. Run local web client (Wasm):
-cd /home/john/Godot/rts-bevy
+# 1. Start dedicated server (port 8080):
+cargo run --bin server
+
+# 2. Run local web client (Wasm on port 8000):
 trunk serve --open
 
-# 2. Run native desktop client:
+# 3. Or run native desktop client:
 cargo run --bin client
 
-# 3. Run headless server:
-cargo run --bin server
+# 4. Or launch entire stack in Docker:
+docker compose up --build
 ```
+

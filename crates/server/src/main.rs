@@ -1,5 +1,11 @@
+mod game_session;
+mod net_server;
+mod sim_systems;
+
 use bevy::app::ScheduleRunnerPlugin;
 use bevy::prelude::*;
+use net_server::ServerNetworkPlugin;
+use sim_systems::ServerSimulationPlugin;
 use std::time::Duration;
 
 fn main() {
@@ -14,19 +20,21 @@ fn main() {
         )
         .add_plugins(bevy::remote::RemotePlugin::default())
         .add_plugins(bot_ai::WaveAiPlugin)
+        .add_plugins(ServerNetworkPlugin::default())
+        .add_plugins(ServerSimulationPlugin)
         .add_systems(Startup, setup_server)
         .add_systems(Update, server_heartbeat)
         .run();
 }
 
 fn setup_server() {
-    println!("✅ [Mini-RTS Server] Server initialized! Remote BRP active on port 15702.");
+    println!("✅ [Mini-RTS Server] Dedicated server started! Remote BRP active on port 15702.");
 }
 
 fn server_heartbeat(time: Res<Time>, mut timer: Local<f32>) {
     *timer += time.delta_secs();
     if *timer >= 10.0 {
         *timer = 0.0;
-        println!("💓 [Mini-RTS Server] Heartbeat - Server active.");
+        println!("💓 [Mini-RTS Server] Heartbeat - Server active at 30 Hz.");
     }
 }

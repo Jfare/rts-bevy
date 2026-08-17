@@ -4,6 +4,8 @@ use bevy::window::PrimaryWindow;
 use shared::components::*;
 use shared::economy::PlayerEconomy;
 use shared::grid::BuildingKind;
+use shared::protocol::ClientMessage;
+use crate::net::{NetClient, NetStatus};
 use crate::selection::screen_to_world_2d;
 
 /// Active placement state when the player is positioning a new building
@@ -36,11 +38,13 @@ fn handle_placement_input(
     mut commands: Commands,
     keyboard: Res<ButtonInput<KeyCode>>,
     mouse_button: Res<ButtonInput<MouseButton>>,
+    mut net_client: ResMut<NetClient>,
     mut economy: ResMut<PlayerEconomy>,
     mut state: ResMut<PlacementState>,
     window_query: Query<&Window, With<PrimaryWindow>>,
     camera_query: Query<(&Camera, &Transform, Option<&OrthographicProjection>)>,
 ) {
+
     // 1. Hotkeys to enter placement mode
     if keyboard.just_pressed(KeyCode::KeyB) {
         state.active_kind = Some(BuildingKind::Barracks);
@@ -94,9 +98,19 @@ fn handle_placement_input(
     if mouse_button.just_pressed(MouseButton::Left) && state.is_valid {
         if economy.spend_minerals(Faction::Player1, state.mineral_cost) {
             let spawn_pos = state.ghost_pos;
+
+            if net_client.status != NetStatus::Disconnected {
+                net_client.send(&ClientMessage::RequestBuild {
+                    building_kind,
+                    position: spawn_pos,
+                });
+            }
+
+
             let size = building_kind.size();
             let duration = building_kind.build_duration();
             let max_hp = building_kind.max_health();
+
 
             let radius = match building_kind {
                 BuildingKind::BaseHQ => 55.0,

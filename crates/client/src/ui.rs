@@ -6,6 +6,7 @@ use shared::components::{
     Worker,
 };
 use shared::economy::PlayerEconomy;
+use crate::net::{NetClient, NetStatus};
 use crate::placement::PlacementState;
 
 pub struct RtsUiPlugin;
@@ -18,6 +19,7 @@ impl Plugin for RtsUiPlugin {
                 (
                     update_hud_economy_text,
                     update_hud_wave_text,
+                    update_hud_network_status,
                     update_selection_info_text,
                     update_command_card_text,
                     update_match_outcome_banner,
@@ -25,6 +27,9 @@ impl Plugin for RtsUiPlugin {
             );
     }
 }
+
+#[derive(Component)]
+struct NetworkStatusText;
 
 #[derive(Component)]
 struct MineralsText;
@@ -107,7 +112,7 @@ fn setup_hud(mut commands: Commands) {
                             FocusPolicy::Pass,
                         ));
                         title_group.spawn((
-                            Text::new("[SESSION B4: COMBAT & SOLO SKIRMISH WAVES]"),
+                            Text::new("[SESSION B5: DEDICATED SERVER & MULTIPLAYER]"),
                             TextFont {
                                 font_size: 13.0,
                                 ..default()
@@ -117,12 +122,12 @@ fn setup_hud(mut commands: Commands) {
                         ));
                     });
 
-                // Resource Display (Minerals, Supply, Wave Timer)
+                // Resource & Network Display (Minerals, Supply, Wave Timer, Net Status)
                 top_bar
                     .spawn((
                         Node {
                             align_items: AlignItems::Center,
-                            column_gap: Val::Px(28.0),
+                            column_gap: Val::Px(24.0),
                             ..default()
                         },
                         FocusPolicy::Pass,
@@ -158,8 +163,19 @@ fn setup_hud(mut commands: Commands) {
                             WaveCountdownText,
                             FocusPolicy::Pass,
                         ));
+                        res_group.spawn((
+                            Text::new("🌐 Connecting..."),
+                            TextFont {
+                                font_size: 14.0,
+                                ..default()
+                            },
+                            TextColor(Color::srgb(0.40, 0.85, 0.45)),
+                            NetworkStatusText,
+                            FocusPolicy::Pass,
+                        ));
                     });
             });
+
 
             // ─────────────────────────────────────────────────────────────────
             // CENTER MATCH OUTCOME BANNER (Hidden until Victory/Defeat)
@@ -336,6 +352,36 @@ fn update_hud_wave_text(
             let secs = wave_state.time_until_next_wave.max(0.0) as u32;
             let wave_num = wave_state.current_wave + 1;
             text.0 = format!("⏳ Wave {} in: {}s", wave_num, secs);
+        }
+    }
+}
+
+fn update_hud_network_status(
+    net_client: Res<NetClient>,
+    mut text_query: Query<(&mut Text, &mut TextColor), With<NetworkStatusText>>,
+) {
+    for (mut text, mut color) in &mut text_query {
+        match net_client.status {
+            NetStatus::InGame => {
+                text.0 = format!("🟢 LIVE ({}ms)", net_client.rtt_ms);
+                color.0 = Color::srgb(0.25, 0.95, 0.45);
+            }
+            NetStatus::InLobby => {
+                text.0 = "🟡 IN LOBBY (WAITING)".to_string();
+                color.0 = Color::srgb(0.95, 0.85, 0.25);
+            }
+            NetStatus::Connected => {
+                text.0 = "🟢 CONNECTED".to_string();
+                color.0 = Color::srgb(0.25, 0.95, 0.45);
+            }
+            NetStatus::Connecting => {
+                text.0 = "🟡 CONNECTING...".to_string();
+                color.0 = Color::srgb(0.95, 0.85, 0.25);
+            }
+            NetStatus::Disconnected => {
+                text.0 = "⚪ OFFLINE (SOLO)".to_string();
+                color.0 = Color::srgb(0.60, 0.65, 0.70);
+            }
         }
     }
 }

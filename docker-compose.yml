@@ -1,0 +1,34 @@
+services:
+  # Dedicated Headless Bevy 0.15 RTS Server
+  game-server:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.server
+    container_name: rts-bevy-server
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - RUST_LOG=info
+    networks:
+      - rts-net
+
+  # Web Client Static Host & Reverse Proxy
+  web-client:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.client
+    container_name: rts-bevy-web
+    restart: unless-stopped
+    ports:
+      - "8000:80"
+      - "8443:443"
+    depends_on:
+      - game-server
+    networks:
+      - rts-net
+
+networks:
+  rts-net:
+    driver: bridge

@@ -3,6 +3,8 @@ use bevy::render::camera::OrthographicProjection;
 use bevy::window::PrimaryWindow;
 use shared::components::*;
 use shared::economy::PlayerEconomy;
+use shared::protocol::{ClientMessage, UnitKind};
+use crate::net::{NetClient, NetStatus};
 use crate::selection::screen_to_world_2d;
 
 pub struct ProductionPlugin;
@@ -150,19 +152,21 @@ fn production_queue_system(
 /// Hotkeys for training units when a production building is selected
 fn handle_production_hotkeys(
     keyboard: Res<ButtonInput<KeyCode>>,
+    mut net_client: ResMut<NetClient>,
     mut economy: ResMut<PlayerEconomy>,
     mut prod_query: Query<(
         &mut ProductionBuilding,
         &Building,
         &Faction,
         &Selectable,
+        Option<&NetEntity>,
         Option<&BaseHQ>,
         Option<&Barracks>,
     )>,
 ) {
     // Key 'V' for SCV Worker at Base HQ
     if keyboard.just_pressed(KeyCode::KeyV) {
-        for (mut prod, building, faction, selectable, base_hq, _) in &mut prod_query {
+        for (mut prod, building, faction, selectable, net_entity_opt, base_hq, _) in &mut prod_query {
             if *faction == Faction::Player1 && selectable.is_selected && building.is_constructed && base_hq.is_some() {
                 if prod.queue.len() < prod.max_queue_size {
                     if economy.has_minerals(*faction, 50) && economy.has_supply(*faction, 1) {
@@ -174,6 +178,16 @@ fn handle_production_hotkeys(
                             supply_cost: 1,
                             build_duration: 3.0,
                         });
+
+                        if let Some(net) = net_entity_opt {
+                            if net_client.status != NetStatus::Disconnected {
+                                net_client.send(&ClientMessage::RequestTrainUnit {
+                                    building_net_id: net.net_id,
+                                    unit_kind: UnitKind::Worker,
+                                });
+                            }
+                        }
+
                         info!("⛏️ [Queue] SCV Worker queued! Queue size: {}", prod.queue.len());
                     }
                 }
@@ -183,7 +197,7 @@ fn handle_production_hotkeys(
 
     // Key 'M' for Marine at Barracks
     if keyboard.just_pressed(KeyCode::KeyM) {
-        for (mut prod, building, faction, selectable, _, barracks) in &mut prod_query {
+        for (mut prod, building, faction, selectable, net_entity_opt, _, barracks) in &mut prod_query {
             if *faction == Faction::Player1 && selectable.is_selected && building.is_constructed && barracks.is_some() {
                 if prod.queue.len() < prod.max_queue_size {
                     if economy.has_minerals(*faction, 100) && economy.has_supply(*faction, 2) {
@@ -195,6 +209,16 @@ fn handle_production_hotkeys(
                             supply_cost: 2,
                             build_duration: 4.0,
                         });
+
+                        if let Some(net) = net_entity_opt {
+                            if net_client.status != NetStatus::Disconnected {
+                                net_client.send(&ClientMessage::RequestTrainUnit {
+                                    building_net_id: net.net_id,
+                                    unit_kind: UnitKind::Soldier,
+                                });
+                            }
+                        }
+
                         info!("🔫 [Queue] Marine Soldier queued! Queue size: {}", prod.queue.len());
                     }
                 }
@@ -206,9 +230,10 @@ fn handle_production_hotkeys(
 /// Allows right-clicking to change the rally point of a selected production building
 fn handle_rally_point_order(
     mouse_button: Res<ButtonInput<MouseButton>>,
+    mut net_client: ResMut<NetClient>,
     window_query: Query<&Window, With<PrimaryWindow>>,
     camera_query: Query<(&Camera, &Transform, Option<&OrthographicProjection>)>,
-    mut prod_query: Query<(&mut ProductionBuilding, &Faction, &Selectable), Without<Unit>>,
+    mut prod_query: Query<(&mut ProductionBuilding, &Faction, &Selectable, Option<&NetEntity>), Without<Unit>>,
 ) {
     if !mouse_button.just_pressed(MouseButton::Right) {
         return;
@@ -227,15 +252,24 @@ fn handle_rally_point_order(
     let win_size = Vec2::new(window.width(), window.height());
     let cam_pos = cam_transform.translation.truncate();
     let cam_scale = ortho_opt.map(|o| o.scale).unwrap_or(1.0);
-    let target_pos = screen_to_world_2d(cursor_screen, win_size, cam_pos, cam_scale);
+    let target_world_pos = screen_to_world_2d(cursor_screen, win_size, cam_pos, cam_scale);
 
-    for (mut prod, faction, selectable) in &mut prod_query {
+    for (mut prod, faction, selectable, net_entity_opt) in &mut prod_query {
         if *faction == Faction::Player1 && selectable.is_selected {
-            prod.rally_point = target_pos;
-            info!("📍 [Rally Point] New rally point set to {:?}", target_pos);
+            prod.rally_point = target_world_pos;
+            if let Some(net) = net_entity_opt {
+                if net_client.status != NetStatus::Disconnected {
+                    net_client.send(&ClientMessage::RequestSetRallyPoint {
+                        building_net_id: net.net_id,
+                        rally_position: target_world_pos,
+                    });
+                }
+            }
+            info!("📍 [Rally Point] Production rally updated to {:?}", target_world_pos);
         }
     }
 }
+
 
 /// Renders construction progress bars and rally point dashed lines
 fn draw_production_and_construction_visuals(

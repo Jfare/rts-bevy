@@ -2,6 +2,7 @@ mod camera;
 mod combat;
 mod command_marker;
 mod mining;
+mod net;
 mod placement;
 mod production;
 mod render_units;
@@ -16,6 +17,7 @@ use camera::{RtsCamera, RtsCameraPlugin};
 use combat::CombatPlugin;
 use command_marker::CommandMarkerPlugin;
 use mining::MiningPlugin;
+use net::NetClientPlugin;
 use placement::PlacementPlugin;
 use production::ProductionPlugin;
 use render_units::RenderUnitsPlugin;
@@ -68,8 +70,10 @@ fn main() {
         PlacementPlugin,
         CombatPlugin,
         RtsUiPlugin,
+        NetClientPlugin,
         bot_ai::WaveAiPlugin,
     ));
+
 
     // Enable Bevy Remote Protocol (BRP) for live MCP debugging on native desktop
     #[cfg(not(target_arch = "wasm32"))]

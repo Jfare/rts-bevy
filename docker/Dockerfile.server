@@ -1,0 +1,50 @@
+# ─────────────────────────────────────────────────────────────
+# Stage 1: Build Server Binary
+# ─────────────────────────────────────────────────────────────
+FROM rust:1.80-bullseye AS builder
+
+WORKDIR /usr/src/rts-bevy
+
+# Copy Cargo manifests for dependency caching
+COPY Cargo.toml Cargo.lock ./
+COPY crates/shared/Cargo.toml crates/shared/
+COPY crates/bot_ai/Cargo.toml crates/bot_ai/
+COPY crates/server/Cargo.toml crates/server/
+COPY crates/client/Cargo.toml crates/client/
+
+# Dummy source files to cache dependency compilation
+RUN mkdir -p crates/shared/src crates/bot_ai/src crates/server/src crates/client/src && \
+    echo "pub mod components; pub mod economy; pub mod grid; pub mod protocol;" > crates/shared/src/lib.rs && \
+    touch crates/shared/src/components.rs crates/shared/src/economy.rs crates/shared/src/grid.rs crates/shared/src/protocol.rs && \
+    echo "use bevy::prelude::*; pub struct WaveAiPlugin;" > crates/bot_ai/src/lib.rs && \
+    echo "fn main() {}" > crates/server/src/main.rs && \
+    echo "fn main() {}" > crates/client/src/main.rs
+
+RUN cargo build --release --bin server || true
+
+# Copy real sources
+COPY crates/ crates/
+
+# Build optimized production server binary
+RUN cargo build --release --bin server
+
+# ─────────────────────────────────────────────────────────────
+# Stage 2: Minimal Runtime Image
+# ─────────────────────────────────────────────────────────────
+FROM debian:bullseye-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    libssl1.1 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY --from=builder /usr/src/rts-bevy/target/release/server /app/rts-server
+
+ENV PORT=8080
+ENV RUST_LOG=info
+
+EXPOSE 8080
+
+CMD ["/app/rts-server"]

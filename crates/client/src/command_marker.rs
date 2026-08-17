@@ -1,7 +1,9 @@
 use bevy::prelude::*;
 use bevy::render::camera::OrthographicProjection;
 use bevy::window::PrimaryWindow;
-use shared::components::{Faction, MoveTarget, Selectable};
+use shared::components::{Faction, MoveTarget, NetEntity, Selectable};
+use shared::protocol::ClientMessage;
+use crate::net::{NetClient, NetStatus};
 use crate::selection::screen_to_world_2d;
 
 /// Visual expanding and fading marker at ground destination when right-clicking
@@ -29,9 +31,10 @@ fn handle_right_click_orders(
     mut commands: Commands,
     mouse_button: Res<ButtonInput<MouseButton>>,
     keyboard: Res<ButtonInput<KeyCode>>,
+    mut net_client: ResMut<NetClient>,
     window_query: Query<&Window, With<PrimaryWindow>>,
     camera_query: Query<(&Camera, &Transform, Option<&OrthographicProjection>)>,
-    mut unit_query: Query<(Entity, &Faction, &Selectable, Option<&mut MoveTarget>)>,
+    mut unit_query: Query<(Entity, &Faction, &Selectable, Option<&NetEntity>, Option<&mut MoveTarget>)>,
 ) {
     if !mouse_button.just_pressed(MouseButton::Right) {
         return;
@@ -56,11 +59,15 @@ fn handle_right_click_orders(
 
     let is_attack_move = keyboard.pressed(KeyCode::KeyA);
 
-    // 1. Collect selected player units
+    // 1. Collect selected player units and their NetIDs
     let mut selected_units = Vec::new();
-    for (entity, faction, selectable, move_target) in &mut unit_query {
+    let mut selected_net_ids = Vec::new();
+    for (entity, faction, selectable, net_entity_opt, move_target) in &mut unit_query {
         if *faction == Faction::Player1 && selectable.is_selected {
             selected_units.push((entity, move_target));
+            if let Some(net) = net_entity_opt {
+                selected_net_ids.push(net.net_id);
+            }
         }
     }
 
@@ -68,9 +75,19 @@ fn handle_right_click_orders(
         return;
     }
 
+    // Send networked command if online
+    if net_client.status != NetStatus::Disconnected && !selected_net_ids.is_empty() {
+        net_client.send(&ClientMessage::RequestMove {
+            unit_net_ids: selected_net_ids,
+            target_position: target_world_pos,
+            is_attack_move,
+        });
+    }
+
+
     let unit_count = selected_units.len();
 
-    // 2. Assign formation destinations so units don't overlap into one exact point
+    // 2. Assign formation destinations (Client-side local prediction)
     for (i, (entity, move_target_opt)) in selected_units.into_iter().enumerate() {
         let formation_offset = if unit_count > 1 {
             let angle = (i as f32) * 2.39996; // Golden angle spread
@@ -92,6 +109,7 @@ fn handle_right_click_orders(
             });
         }
     }
+
 
     // 3. Spawn visual tactical pulse marker
     let marker_color = if is_attack_move {
