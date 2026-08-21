@@ -23,3 +23,17 @@ Thumbs.db
 *.iml
 *.sublime-project
 *.sublime-workspace
+
+# Secrets, Credentials, Certificates & Environment
+.env
+.env.*
+*.pem
+*.key
+*.crt
+*.pfx
+*.p12
+id_rsa*
+id_ed25519*
+*.credentials*
+.upcloud/
+
