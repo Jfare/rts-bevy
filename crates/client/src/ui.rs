@@ -3,7 +3,7 @@ use bevy::ui::FocusPolicy;
 use bot_ai::WaveAiState;
 use shared::components::{
     Building, Faction, GunTurret, Health, MatchOutcome, ProductionBuilding, ResourceNode, Selectable,
-    SiegeTank, Unit, Worker,
+    SiegeTank, Soldier, Stimpack, TacticalStance, Unit, Worker,
 };
 use shared::economy::PlayerEconomy;
 use shared::protocol::{ClientMessage, GameMode};
@@ -711,7 +711,17 @@ fn update_hud_network_status(
 }
 
 fn update_selection_info_text(
-    unit_query: Query<(&Unit, &Faction, &Health, &Selectable, Option<&Worker>, Option<&SiegeTank>)>,
+    unit_query: Query<(
+        &Unit,
+        &Faction,
+        &Health,
+        &Selectable,
+        Option<&Worker>,
+        Option<&Soldier>,
+        Option<&SiegeTank>,
+        Option<&Stimpack>,
+        Option<&TacticalStance>,
+    )>,
     building_query: Query<(&Building, &Faction, &Health, &Selectable, Option<&ProductionBuilding>, Option<&GunTurret>)>,
     resource_query: Query<(&ResourceNode, &Selectable)>,
     mut title_query: Query<&mut Text, (With<SelectionTitleText>, Without<SelectionDetailsText>, Without<ProductionQueueText>)>,
@@ -722,9 +732,9 @@ fn update_selection_info_text(
     let mut selected_building = None;
     let mut selected_resource = None;
 
-    for (unit, faction, health, selectable, worker_opt, tank_opt) in &unit_query {
+    for (unit, faction, health, selectable, worker_opt, soldier_opt, tank_opt, stim_opt, stance_opt) in &unit_query {
         if selectable.is_selected {
-            selected_units.push((unit, faction, health, worker_opt, tank_opt));
+            selected_units.push((unit, faction, health, worker_opt, soldier_opt, tank_opt, stim_opt, stance_opt));
         }
     }
 
@@ -743,7 +753,7 @@ fn update_selection_info_text(
     }
 
     let mut title_str = "No Units Selected".to_string();
-    let mut details_str = "Drag left-click to select | Right-click ground to Move, enemy to Attack".to_string();
+    let mut details_str = "Drag left-click to select | [A] Attack-Move | [S] Stop | [H] Hold | [P] Patrol".to_string();
     let mut queue_str = String::new();
 
     if let Some((building, faction, health, prod_opt, turret_opt)) = selected_building {
@@ -758,7 +768,7 @@ fn update_selection_info_text(
             let train_prompt = if building.name.contains("Base HQ") {
                 "Press [V] to Train SCV Worker (50 💎, 1 ⚡)"
             } else if building.name.contains("Barracks") {
-                "Press [M] Marine (100 💎, 2 ⚡) | [T] Siege Tank (200 💎, 3 ⚡)"
+                "Press [M] Marine (100 💎, 2 ⚡) | [T] Siege Tank (200 💎, 3 ⚡, Req Depot)"
             } else {
                 "Right-click ground to set Rally Point"
             };
@@ -776,9 +786,15 @@ fn update_selection_info_text(
         details_str = format!("Remaining Minerals: {} / {}", resource.remaining_minerals, resource.max_minerals);
     } else if !selected_units.is_empty() {
         if selected_units.len() == 1 {
-            let (unit, faction, health, worker_opt, tank_opt) = selected_units[0];
+            let (unit, faction, health, worker_opt, soldier_opt, tank_opt, stim_opt, stance_opt) = selected_units[0];
             let fac_str = if *faction == Faction::Player1 { "Player 1" } else if *faction == Faction::Player2 { "Player 2" } else { "Hostile" };
             title_str = format!("🎖️ {} ({}) - HP: {:.0}/{:.0}", unit.name, fac_str, health.current, health.max);
+
+            let stance_suffix = match stance_opt {
+                Some(shared::components::TacticalStance::HoldPosition) => " [HOLDING POSITION]",
+                Some(shared::components::TacticalStance::Patrol { .. }) => " [PATROLLING]",
+                _ => "",
+            };
 
             if let Some(worker) = worker_opt {
                 let state_str = match worker.state {
@@ -787,15 +803,39 @@ fn update_selection_info_text(
                     shared::components::WorkerState::Mining => "Harvesting Minerals with Laser",
                     shared::components::WorkerState::MovingToBase => "Returning Minerals to Base HQ",
                 };
-                details_str = format!("Worker Status: {} | Carried: {} 💎", state_str, worker.carried_minerals);
-            } else if tank_opt.is_some() {
-                details_str = "Heavy Armored Artillery | Long Range 35 DMG Cannon (140 Speed)".to_string();
+                details_str = format!("Worker: {}{} | Carried: {} 💎 | [S] Stop", state_str, stance_suffix, worker.carried_minerals);
+            } else if let Some(tank) = tank_opt {
+                match tank.mode {
+                    shared::components::TankMode::Tank => {
+                        details_str = format!("Mobile Tank (35 DMG, 240 Rng){} | [E] Deploy Siege Mode | [S] Stop | [H] Hold | [P] Patrol", stance_suffix);
+                    }
+                    shared::components::TankMode::Siege => {
+                        details_str = "🛡️ SIEGE MODE (70 DMG + 45px Splash, 380 Rng, Immobile) | [E] Mobile Mode".to_string();
+                    }
+                    shared::components::TankMode::TransformingToSiege => {
+                        details_str = "⚙️ Deploying Stabilizers & Artillery Cannon...".to_string();
+                    }
+                    shared::components::TankMode::TransformingToTank => {
+                        details_str = "⚙️ Retracting Stabilizers...".to_string();
+                    }
+                }
+            } else if soldier_opt.is_some() {
+                let stim_status = if let Some(stim) = stim_opt {
+                    if stim.is_active {
+                        format!(" | 💉 STIMPACK ACTIVE ({:.1}s)", stim.timer)
+                    } else {
+                        " | [T] Stimpack (+50% Spd/Fire, -15 HP)".to_string()
+                    }
+                } else {
+                    " | [T] Stimpack".to_string()
+                };
+                details_str = format!("Marine Rifleman (15 DMG){} | [A] Attack | [S] Stop | [H] Hold | [P] Patrol{}", stance_suffix, stim_status);
             } else {
-                details_str = "Combat Soldier ready | Right-click to Move / Attack".to_string();
+                details_str = "Combat Unit ready | [A] Attack | [S] Stop | [H] Hold | [P] Patrol".to_string();
             }
         } else {
             title_str = format!("Selected: {} Units", selected_units.len());
-            details_str = "Right-click to issue squad move / focus attack".to_string();
+            details_str = "Squad Command: [A] Attack-Move | [S] Stop | [H] Hold Position | [P] Patrol | [T] Stimpack | [E] Siege".to_string();
         }
     }
 
@@ -816,10 +856,10 @@ fn update_command_card_text(
 ) {
     for mut text in &mut text_query {
         if let Some(kind) = placement_state.active_kind {
-            let status = if placement_state.is_valid { "Valid Location (Left-Click to Place)" } else { "Blocked / Insufficient Funds" };
+            let status = if placement_state.is_valid { "Valid Location (Left-Click to Place)" } else { "Blocked / Insufficient Tech or Minerals" };
             text.0 = format!("🏗️ Placing: {} ($ {}) - {} | [Esc/Right-Click] Cancel", kind.name(), placement_state.mineral_cost, status);
         } else {
-            text.0 = "[B] Barracks (150 💎) | [U] Turret (125 💎) | [P] Supply Depot (100 💎) | [H] Base HQ (400 💎)".to_string();
+            text.0 = "[B] Barracks (150 💎) | [U] Turret (125 💎, Req Barracks) | [P] Supply Depot (100 💎) | [H] Base HQ (400 💎)".to_string();
         }
     }
 }

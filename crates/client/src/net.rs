@@ -451,6 +451,7 @@ fn handle_server_message(
                     target_pos,
                     speed,
                     damage,
+                    splash_radius: 0.0,
                     faction: Faction::Neutral,
                     lifetime: 0.0,
                     max_lifetime: lifetime,

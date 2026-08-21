@@ -174,6 +174,7 @@ fn setup_demo_scene(mut commands: Commands) {
                 target_node: Some(mineral_e),
                 ..default()
             },
+            TacticalStance::default(),
             Health::new(80.0),
             Radius(14.0),
             MoveSpeed(190.0),
@@ -209,6 +210,8 @@ fn setup_demo_scene(mut commands: Commands) {
                 attack_cooldown: 0.85,
                 ..default()
             },
+            Stimpack::default(),
+            TacticalStance::default(),
             Health::new(120.0),
             Radius(16.0),
             MoveSpeed(180.0),
@@ -231,6 +234,7 @@ fn setup_demo_scene(mut commands: Commands) {
             supply_cost: 3,
         },
         SiegeTank::default(),
+        TacticalStance::default(),
         Health::new(220.0),
         Radius(22.0),
         MoveSpeed(140.0),
@@ -286,6 +290,8 @@ fn setup_demo_scene(mut commands: Commands) {
                 attack_cooldown: 0.9,
                 ..default()
             },
+            Stimpack::default(),
+            TacticalStance::default(),
             Health::new(120.0),
             Radius(16.0),
             MoveSpeed(175.0),

@@ -108,23 +108,40 @@ All in-game text, UI, HUD elements, unit cards, and commands are strictly in **E
 
 ---
 
-## 🎯 Next Session: Session B7 (Tactical Pathfinding, Stances & Tech Tree)
+### ✅ Session B7: A* Pathfinding, Tactical Command Stances & Tech Tree/Abilities
+- [x] **A* Navigation Grid & Pathfinding** ([`crates/shared/src/grid.rs`](file:///home/john/Godot/rts-bevy/crates/shared/src/grid.rs)):
+  - 64×64 cell navigation grid over 3200×3200 world space with dynamic building/obstacle blocking.
+  - 8-directional A* search with Euclidean heuristic, diagonal corner-cut prevention, nearest walkable coordinate fallbacks, and line-of-sight shortcutting (string pulling).
+  - Waypoint-based progression in [`MoveTarget`](file:///home/john/Godot/rts-bevy/crates/shared/src/components.rs) synchronized across client and dedicated server.
+- [x] **Tactical Command Stances & Hotkeys** ([`crates/client/src/command_marker.rs`](file:///home/john/Godot/rts-bevy/crates/client/src/command_marker.rs), [`crates/client/src/unit_movement.rs`](file:///home/john/Godot/rts-bevy/crates/client/src/unit_movement.rs), [`crates/shared/src/protocol.rs`](file:///home/john/Godot/rts-bevy/crates/shared/src/protocol.rs)):
+  - **Stop (`S`)**: Halts all movement and clears attack targets immediately.
+  - **Hold Position (`H`)**: Anchors units in place, firing at enemies within attack range without chasing.
+  - **Patrol (`P`)**: Orders units to cycle back and forth along a route in aggressive attack-move stance.
+  - **Attack-Move (`A`)**: Aggressive movement engaging any enemy spotted along the path.
+- [x] **Tech Tree Prerequisites & Unit Abilities**:
+  - **Prerequisites**: Gun Turret requires a completed Barracks; Siege Tank requires completed Barracks + Supply Depot.
+  - **Marine Stimpack (`T`)**: Sacrifices 15 HP for +50% move speed and +50% fire rate for 6.0s with glowing crimson aura visual.
+  - **Siege Tank Siege Mode (`E`)**: Transforms mobile tank into long-range stationary artillery (380px range, 70 DMG + 45px area splash damage) with deployed stabilizer struts.
 
-### Focus: Grid/Flowfield Navigation, Unit Stances & Tech Upgrades
+---
+
+## 🎯 Next Session: Session B8 (Advanced Soundscape, Particle FX & Match Statistics)
+
+### Focus: Rich Ambient Audio, Particle Systems & Post-Game Scoreboard
 
 ```
 +-------------------------------------------------------------------------+
-|                              SESSION B7                                 |
+|                              SESSION B8                                 |
 +-------------------------------------------------------------------------+
 |                                                                         |
-|  [Part 1: A* Pathfinding]   Tile-grid obstacle navigation avoiding      |
-|                            buildings and mineral patch choke-points     |
+|  [Part 1: Rich Audio FX]   Positional sound effects, ambient engine hums|
+|                            and voice acknowledgement bark audio lines   |
 |                                                                         |
-|  [Part 2: Tactical Stances] Hold Position (H), Patrol (P), Stop (S),   |
-|                            Attack-Move (A) squad command states         |
+|  [Part 2: Particle FX]     Explosion debris, smoke trails, shell        |
+|                            casings, and damage spark emitters           |
 |                                                                         |
-|  [Part 3: Tech Tree]       Prerequisite buildings & research upgrades   |
-|                            (e.g., Siege Mode, Stimpack, Armor Upgrades) |
+|  [Part 3: Match Stats]     End-game summary screen (APM, minerals       |
+|                            harvested, units killed/lost, damage dealt)  |
 |                                                                         |
 +-------------------------------------------------------------------------+
 ```

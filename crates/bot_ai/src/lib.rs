@@ -117,6 +117,8 @@ fn wave_spawner_system(
                     attack_cooldown: 0.9,
                     ..default()
                 },
+                Stimpack::default(),
+                TacticalStance::default(),
                 Health::new(120.0),
                 Radius(16.0),
                 MoveSpeed(175.0),
@@ -127,10 +129,7 @@ fn wave_spawner_system(
                     net_id,
                     owner_peer_id: 2,
                 },
-                MoveTarget {
-                    destination: target_pos,
-                    is_attack_move: true,
-                },
+                MoveTarget::new(target_pos, true),
                 Transform::from_xyz(spawn_pos.x, spawn_pos.y, 2.0),
             ));
         }

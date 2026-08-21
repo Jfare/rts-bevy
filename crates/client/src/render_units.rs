@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use shared::components::{
-    Barracks, BaseHQ, Building, Faction, GunTurret, Health, Radius, ResourceNode, SiegeTank, Soldier,
-    SupplyDepot, Unit, Worker,
+    Barracks, BaseHQ, Building, Faction, GunTurret, Health, Radius, ResourceNode, Selectable,
+    SiegeTank, Soldier, Stimpack, SupplyDepot, TacticalStance, TankMode, Unit, Worker,
 };
 
 pub struct RenderUnitsPlugin;
@@ -27,12 +27,15 @@ fn draw_units_system(
         &Transform,
         &Radius,
         &Faction,
+        &Selectable,
         Option<&Worker>,
         Option<&Soldier>,
         Option<&SiegeTank>,
+        Option<&Stimpack>,
+        Option<&TacticalStance>,
     ), With<Unit>>,
 ) {
-    for (transform, radius, faction, worker_opt, soldier_opt, tank_opt) in &query {
+    for (transform, radius, faction, selectable, worker_opt, soldier_opt, tank_opt, stim_opt, stance_opt) in &query {
         let pos = transform.translation.truncate();
         let r = radius.0;
         let rot = transform.rotation.to_euler(EulerRot::ZYX).0;
@@ -41,12 +44,54 @@ fn draw_units_system(
         let body_color = Color::srgb(cr, cg, cb);
         let outline_color = body_color.lighter(0.25);
 
+        // 1. Stimpack Aura Glow
+        if let Some(stim) = stim_opt {
+            if stim.is_active {
+                gizmos.circle_2d(pos, r + 6.0, Color::srgba(1.0, 0.25, 0.15, 0.85));
+                gizmos.circle_2d(pos, r + 3.0, Color::srgba(1.0, 0.85, 0.20, 0.65));
+            }
+        }
+
+        // 2. Tactical Stance Indicators
+        if let Some(stance) = stance_opt {
+            match stance {
+                TacticalStance::HoldPosition => {
+                    gizmos.circle_2d(pos, r + 4.0, Color::srgba(0.25, 0.65, 1.0, 0.75));
+                }
+                TacticalStance::Patrol { origin, target, .. } => {
+                    if selectable.is_selected {
+                        gizmos.line_2d(*origin, *target, Color::srgba(0.35, 0.75, 1.0, 0.75));
+                        gizmos.circle_2d(*target, 6.0, Color::srgba(0.35, 0.75, 1.0, 0.85));
+                    }
+                }
+                _ => {}
+            }
+        }
+
         if let Some(tank) = tank_opt {
             // ─────────────────────────────────────────────────────────────
             // SIEGE TANK: Heavy Armored Tracked Combat Vehicle
             // ─────────────────────────────────────────────────────────────
             let forward = Vec2::new(rot.cos(), rot.sin());
             let side = Vec2::new(-forward.y, forward.x);
+
+            let is_siege = tank.mode == TankMode::Siege;
+            let is_transforming = tank.mode == TankMode::TransformingToSiege || tank.mode == TankMode::TransformingToTank;
+
+            // Stabilizer Support Legs in Siege Mode
+            if is_siege || is_transforming {
+                let strut_corners = [
+                    Vec2::new(-r * 1.2, -r * 1.1),
+                    Vec2::new(r * 1.2, -r * 1.1),
+                    Vec2::new(-r * 1.2, r * 1.1),
+                    Vec2::new(r * 1.2, r * 1.1),
+                ];
+                for strut in strut_corners {
+                    let pad_pos = pos + strut;
+                    gizmos.line_2d(pos + strut * 0.4, pad_pos, Color::srgb(0.70, 0.75, 0.80));
+                    gizmos.rect_2d(pad_pos, Vec2::splat(6.0), Color::srgb(0.95, 0.35, 0.20));
+                }
+            }
 
             // Left and Right Caterpillar Treads
             let tread_w = r * 0.45;
@@ -67,14 +112,26 @@ fn draw_units_system(
             let t_fwd = Vec2::new(t_angle.cos(), t_angle.sin());
 
             gizmos.circle_2d(pos, r * 0.55, Color::srgb(0.15, 0.18, 0.22));
-
             gizmos.circle_2d(pos, r * 0.55, outline_color);
 
-            // Long Artillery Cannon Barrel with Muzzle Brake
-            let barrel_base = pos + t_fwd * (r * 0.3);
-            let barrel_tip = pos + t_fwd * (r * 1.6);
-            gizmos.line_2d(barrel_base, barrel_tip, Color::srgb(0.92, 0.95, 0.98));
-            gizmos.rect_2d(barrel_tip, Vec2::new(5.0, 7.0), Color::srgb(0.35, 0.40, 0.45));
+            if is_siege {
+                // Extended Heavy Siege Cannon with Massive Muzzle Brake
+                let barrel_base = pos + t_fwd * (r * 0.3);
+                let barrel_tip = pos + t_fwd * (r * 2.2);
+                gizmos.line_2d(barrel_base, barrel_tip, Color::srgb(1.0, 0.95, 0.90));
+                gizmos.rect_2d(barrel_tip, Vec2::new(8.0, 10.0), Color::srgb(0.95, 0.35, 0.20));
+            } else {
+                // Standard Tank Cannon
+                let barrel_base = pos + t_fwd * (r * 0.3);
+                let barrel_tip = pos + t_fwd * (r * 1.6);
+                gizmos.line_2d(barrel_base, barrel_tip, Color::srgb(0.92, 0.95, 0.98));
+                gizmos.rect_2d(barrel_tip, Vec2::new(5.0, 7.0), Color::srgb(0.35, 0.40, 0.45));
+            }
+
+            // Transforming animation ring
+            if is_transforming {
+                gizmos.circle_2d(pos, r * 1.6, Color::srgba(0.95, 0.75, 0.20, 0.85));
+            }
         } else {
             // Body Circle for infantry/worker
             gizmos.circle_2d(pos, r, body_color);

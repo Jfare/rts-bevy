@@ -3,6 +3,7 @@ use bevy::render::camera::OrthographicProjection;
 use bevy::window::PrimaryWindow;
 use shared::components::*;
 use shared::economy::PlayerEconomy;
+use shared::grid::NavGrid;
 use shared::protocol::{ClientMessage, UnitKind};
 use crate::net::{NetClient, NetStatus};
 use crate::selection::screen_to_world_2d;
@@ -62,6 +63,7 @@ fn building_construction_system(
 fn production_queue_system(
     mut commands: Commands,
     time: Res<Time>,
+    nav_grid: Res<NavGrid>,
     mut prod_query: Query<(
         Entity,
         &mut ProductionBuilding,
@@ -88,6 +90,7 @@ fn production_queue_system(
             let building_pos = transform.translation.truncate();
             let spawn_offset = Vec2::new(0.0, -radius.0 - 22.0);
             let spawn_pos = building_pos + spawn_offset;
+            let rally_waypoints = nav_grid.find_path(spawn_pos, prod.rally_point);
 
             // Spawn the unit based on name
             let is_worker = completed_unit.name.contains("SCV");
@@ -101,6 +104,7 @@ fn production_queue_system(
                         supply_cost: 1,
                     },
                     Worker::default(),
+                    TacticalStance::default(),
                     Health::new(80.0),
                     Radius(14.0),
                     MoveSpeed(190.0),
@@ -111,10 +115,7 @@ fn production_queue_system(
                         net_id,
                         owner_peer_id: if *faction == Faction::Player1 { 1 } else { 2 },
                     },
-                    MoveTarget {
-                        destination: prod.rally_point,
-                        is_attack_move: false,
-                    },
+                    MoveTarget::with_waypoints(prod.rally_point, false, rally_waypoints),
                     Transform::from_xyz(spawn_pos.x, spawn_pos.y, 2.0),
                 ));
             } else if is_tank {
@@ -124,6 +125,7 @@ fn production_queue_system(
                         supply_cost: 3,
                     },
                     SiegeTank::default(),
+                    TacticalStance::default(),
                     Health::new(220.0),
                     Radius(22.0),
                     MoveSpeed(140.0),
@@ -134,10 +136,7 @@ fn production_queue_system(
                         net_id,
                         owner_peer_id: if *faction == Faction::Player1 { 1 } else { 2 },
                     },
-                    MoveTarget {
-                        destination: prod.rally_point,
-                        is_attack_move: false,
-                    },
+                    MoveTarget::with_waypoints(prod.rally_point, false, rally_waypoints),
                     Transform::from_xyz(spawn_pos.x, spawn_pos.y, 2.0),
                 ));
             } else {
@@ -147,6 +146,8 @@ fn production_queue_system(
                         supply_cost: 2,
                     },
                     Soldier::default(),
+                    Stimpack::default(),
+                    TacticalStance::default(),
                     Health::new(120.0),
                     Radius(16.0),
                     MoveSpeed(180.0),
@@ -157,10 +158,7 @@ fn production_queue_system(
                         net_id,
                         owner_peer_id: if *faction == Faction::Player1 { 1 } else { 2 },
                     },
-                    MoveTarget {
-                        destination: prod.rally_point,
-                        is_attack_move: false,
-                    },
+                    MoveTarget::with_waypoints(prod.rally_point, false, rally_waypoints),
                     Transform::from_xyz(spawn_pos.x, spawn_pos.y, 2.0),
                 ));
             }
@@ -178,6 +176,7 @@ fn handle_production_hotkeys(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut net_client: ResMut<NetClient>,
     mut economy: ResMut<PlayerEconomy>,
+    all_buildings: Query<(&Building, &Faction, Option<&SupplyDepot>)>,
     mut prod_query: Query<(
         &mut ProductionBuilding,
         &Building,
@@ -252,10 +251,19 @@ fn handle_production_hotkeys(
         }
     }
 
-    // Key 'T' for Siege Tank at Barracks
+    // Key 'T' for Siege Tank at Barracks (requires Supply Depot)
     if keyboard.just_pressed(KeyCode::KeyT) {
+        let has_supply_depot = all_buildings.iter().any(|(b, f, d)| {
+            *f == my_faction && d.is_some() && b.is_constructed
+        });
+
         for (mut prod, building, faction, selectable, net_entity_opt, _, barracks) in &mut prod_query {
             if *faction == my_faction && selectable.is_selected && building.is_constructed && barracks.is_some() {
+                if !has_supply_depot {
+                    info!("⚠️ [Tech Tree] Siege Tank requires a constructed Supply Depot!");
+                    continue;
+                }
+
                 if prod.queue.len() < prod.max_queue_size {
                     if economy.has_minerals(*faction, 200) && economy.has_supply(*faction, 3) {
                         economy.spend_minerals(*faction, 200);

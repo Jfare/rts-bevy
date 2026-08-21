@@ -106,11 +106,64 @@ impl Default for MoveSpeed {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Component, Default, Reflect)]
 pub struct Velocity(pub Vec2);
 
-/// Move target destination
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Component, Reflect)]
+/// Move target destination with waypoint navigation support
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Component, Reflect)]
 pub struct MoveTarget {
     pub destination: Vec2,
     pub is_attack_move: bool,
+    pub waypoints: Vec<Vec2>,
+    pub current_waypoint_idx: usize,
+}
+
+impl MoveTarget {
+    pub fn new(destination: Vec2, is_attack_move: bool) -> Self {
+        Self {
+            destination,
+            is_attack_move,
+            waypoints: vec![destination],
+            current_waypoint_idx: 0,
+        }
+    }
+
+    pub fn with_waypoints(destination: Vec2, is_attack_move: bool, waypoints: Vec<Vec2>) -> Self {
+        let wps = if waypoints.is_empty() {
+            vec![destination]
+        } else {
+            waypoints
+        };
+        Self {
+            destination,
+            is_attack_move,
+            waypoints: wps,
+            current_waypoint_idx: 0,
+        }
+    }
+
+    pub fn current_goal(&self) -> Vec2 {
+        if self.current_waypoint_idx < self.waypoints.len() {
+            self.waypoints[self.current_waypoint_idx]
+        } else {
+            self.destination
+        }
+    }
+
+    pub fn advance_waypoint(&mut self) -> bool {
+        self.current_waypoint_idx += 1;
+        self.current_waypoint_idx < self.waypoints.len()
+    }
+}
+
+/// Tactical command stance
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Component, Default, Reflect)]
+pub enum TacticalStance {
+    #[default]
+    Aggressive,
+    HoldPosition,
+    Patrol {
+        origin: Vec2,
+        target: Vec2,
+        heading_to_target: bool,
+    },
 }
 
 /// Selection marker
@@ -178,6 +231,24 @@ pub enum SoldierState {
     Attacking,
 }
 
+/// Marine Stimpack ability (+50% move/attack speed for 6s at cost of 15 HP)
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Component, Reflect)]
+pub struct Stimpack {
+    pub is_active: bool,
+    pub timer: f32,
+    pub duration: f32,
+}
+
+impl Default for Stimpack {
+    fn default() -> Self {
+        Self {
+            is_active: false,
+            timer: 0.0,
+            duration: 6.0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Component, Reflect)]
 pub struct Soldier {
     pub state: SoldierState,
@@ -237,13 +308,25 @@ impl Default for GunTurret {
     }
 }
 
-/// Heavy armored Siege Tank
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, Reflect)]
+pub enum TankMode {
+    #[default]
+    Tank,
+    TransformingToSiege,
+    Siege,
+    TransformingToTank,
+}
+
+/// Heavy armored Siege Tank with Siege Mode capability
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Component, Reflect)]
 pub struct SiegeTank {
+    pub mode: TankMode,
+    pub transform_timer: f32,
     pub attack_range: f32,
     pub attack_damage: f32,
     pub attack_cooldown: f32,
     pub attack_timer: f32,
+    pub splash_radius: f32,
     pub target: Option<Entity>,
     pub turret_angle: f32,
 }
@@ -251,10 +334,13 @@ pub struct SiegeTank {
 impl Default for SiegeTank {
     fn default() -> Self {
         Self {
+            mode: TankMode::Tank,
+            transform_timer: 0.0,
             attack_range: 240.0,
             attack_damage: 35.0,
             attack_cooldown: 1.6,
             attack_timer: 0.0,
+            splash_radius: 0.0,
             target: None,
             turret_angle: 0.0,
         }
@@ -273,6 +359,7 @@ pub struct Projectile {
     pub target_pos: Vec2,
     pub speed: f32,
     pub damage: f32,
+    pub splash_radius: f32,
     pub faction: Faction,
     pub lifetime: f32,
     pub max_lifetime: f32,
@@ -403,3 +490,47 @@ pub struct NetEntity {
     pub net_id: u32,
     pub owner_peer_id: u64,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_move_target_waypoints() {
+        let dest = Vec2::new(100.0, 200.0);
+        let wp1 = Vec2::new(50.0, 50.0);
+        let wp2 = Vec2::new(80.0, 150.0);
+        let mut target = MoveTarget::with_waypoints(dest, true, vec![wp1, wp2, dest]);
+
+        assert_eq!(target.current_goal(), wp1);
+        assert!(target.advance_waypoint());
+        assert_eq!(target.current_goal(), wp2);
+        assert!(target.advance_waypoint());
+        assert_eq!(target.current_goal(), dest);
+        assert!(!target.advance_waypoint());
+    }
+
+    #[test]
+    fn test_stimpack_defaults() {
+        let stim = Stimpack::default();
+        assert!(!stim.is_active);
+        assert_eq!(stim.duration, 6.0);
+    }
+
+    #[test]
+    fn test_siege_tank_modes() {
+        let mut tank = SiegeTank::default();
+        assert_eq!(tank.mode, TankMode::Tank);
+        assert_eq!(tank.attack_range, 240.0);
+
+        tank.mode = TankMode::Siege;
+        tank.attack_range = 380.0;
+        tank.attack_damage = 70.0;
+        tank.splash_radius = 45.0;
+
+        assert_eq!(tank.mode, TankMode::Siege);
+        assert_eq!(tank.attack_range, 380.0);
+        assert_eq!(tank.splash_radius, 45.0);
+    }
+}
+

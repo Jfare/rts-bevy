@@ -105,6 +105,16 @@ pub enum ClientMessage {
     RequestHoldPosition {
         unit_net_ids: Vec<u32>,
     },
+    RequestPatrol {
+        unit_net_ids: Vec<u32>,
+        target_position: Vec2,
+    },
+    RequestStimpack {
+        unit_net_ids: Vec<u32>,
+    },
+    RequestToggleSiegeMode {
+        unit_net_ids: Vec<u32>,
+    },
     Ping {
         timestamp: u64,
     },

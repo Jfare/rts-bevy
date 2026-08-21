@@ -184,11 +184,12 @@ fn handle_placement_input(
     }
 }
 
-/// Validates ghost placement against map boundaries, collisions, and mineral costs
+/// Validates ghost placement against map boundaries, collisions, tech prerequisites, and mineral costs
 fn update_placement_validation(
     economy: Res<PlayerEconomy>,
+    net_client: Res<NetClient>,
     mut state: ResMut<PlacementState>,
-    building_query: Query<(&Transform, &Radius, &Building)>,
+    building_query: Query<(&Transform, &Radius, &Building, &Faction)>,
     resource_query: Query<(&Transform, &Radius), With<ResourceNode>>,
     unit_query: Query<(&Transform, &Radius), With<Unit>>,
 ) {
@@ -197,8 +198,21 @@ fn update_placement_validation(
         return;
     };
 
-    // 1. Check Mineral Funds
-    if !economy.has_minerals(Faction::Player1, state.mineral_cost) {
+    let my_faction = net_client.my_faction;
+
+    // 1. Check Tech Tree Prerequisites
+    if building_kind == BuildingKind::Turret {
+        let has_barracks = building_query.iter().any(|(_, _, b, f)| {
+            *f == my_faction && b.name.contains("Barracks") && b.is_constructed
+        });
+        if !has_barracks {
+            state.is_valid = false;
+            return;
+        }
+    }
+
+    // 2. Check Mineral Funds
+    if !economy.has_minerals(my_faction, state.mineral_cost) {
         state.is_valid = false;
         return;
     }
@@ -213,7 +227,7 @@ fn update_placement_validation(
     };
 
 
-    // 2. Check Map Boundaries (-1500 .. 1500)
+    // 3. Check Map Boundaries (-1500 .. 1500)
     if ghost_pos.x - size.x * 0.5 < -1500.0
         || ghost_pos.x + size.x * 0.5 > 1500.0
         || ghost_pos.y - size.y * 0.5 < -1500.0
@@ -223,8 +237,8 @@ fn update_placement_validation(
         return;
     }
 
-    // 3. Check Overlap with Existing Buildings
-    for (transform, radius, _) in &building_query {
+    // 4. Check Overlap with Existing Buildings
+    for (transform, radius, _, _) in &building_query {
         let b_pos = transform.translation.truncate();
         let min_dist = ghost_radius + radius.0 + 8.0;
         if ghost_pos.distance(b_pos) < min_dist {
@@ -233,7 +247,7 @@ fn update_placement_validation(
         }
     }
 
-    // 4. Check Overlap with Resource Nodes
+    // 5. Check Overlap with Resource Nodes
     for (transform, radius) in &resource_query {
         let r_pos = transform.translation.truncate();
         let min_dist = ghost_radius + radius.0 + 16.0;
@@ -243,7 +257,7 @@ fn update_placement_validation(
         }
     }
 
-    // 5. Check Overlap with Units
+    // 6. Check Overlap with Units
     for (transform, radius) in &unit_query {
         let u_pos = transform.translation.truncate();
         let min_dist = ghost_radius + radius.0;

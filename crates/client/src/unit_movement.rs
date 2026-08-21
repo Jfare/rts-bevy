@@ -1,50 +1,203 @@
 use bevy::prelude::*;
-use shared::components::{BaseHQ, Building, Faction, MoveSpeed, MoveTarget, Radius, ResourceNode, Unit, Worker, WorkerState};
+use shared::components::{
+    BaseHQ, Building, Faction, MoveSpeed, MoveTarget, Radius, ResourceNode, SiegeTank,
+    Soldier, SoldierState, Stimpack, TacticalStance, TankMode, Unit, Worker, WorkerState,
+};
+use shared::grid::NavGrid;
 
 pub struct UnitMovementPlugin;
 
 impl Plugin for UnitMovementPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (
-                unit_movement_system,
-                unit_separation_and_collision_system,
-            ),
-        );
+        app.init_resource::<NavGrid>()
+            .add_systems(
+                Update,
+                (
+                    update_nav_grid_system,
+                    unit_movement_system,
+                    update_tactical_stances_and_abilities_system,
+                    unit_separation_and_collision_system,
+                ),
+            );
     }
 }
 
-/// Moves units smoothly towards their MoveTarget destination with orientation
+/// Dynamically updates the A* Navigation Grid with building and mineral obstacles
+fn update_nav_grid_system(
+    mut nav_grid: ResMut<NavGrid>,
+    buildings: Query<(&Transform, &Radius, &Building)>,
+    resources: Query<(&Transform, &Radius), With<ResourceNode>>,
+) {
+    nav_grid.clear();
+
+    for (tf, radius, building) in &buildings {
+        let pos = tf.translation.truncate();
+        let r = if building.name.contains("Base HQ") {
+            radius.0 + 8.0
+        } else {
+            radius.0 + 4.0
+        };
+        nav_grid.mark_circle(pos, r);
+    }
+
+    for (tf, radius) in &resources {
+        let pos = tf.translation.truncate();
+        nav_grid.mark_circle(pos, radius.0 + 4.0);
+    }
+}
+
+/// Moves units smoothly along A* waypoints towards their MoveTarget destination with orientation
 fn unit_movement_system(
     mut commands: Commands,
     time: Res<Time>,
-    mut query: Query<(Entity, &mut Transform, &MoveTarget, &MoveSpeed, &Radius)>,
+    mut query: Query<(
+        Entity,
+        &mut Transform,
+        &mut MoveTarget,
+        &MoveSpeed,
+        Option<&Stimpack>,
+        Option<&SiegeTank>,
+    )>,
 ) {
     let dt = time.delta_secs();
 
-    for (entity, mut transform, move_target, move_speed, _radius) in &mut query {
+    for (entity, mut transform, mut move_target, move_speed, stim_opt, tank_opt) in &mut query {
+        // Immobilize Siege Tanks when in Siege Mode or Transforming
+        if let Some(tank) = tank_opt {
+            if tank.mode != TankMode::Tank {
+                continue;
+            }
+        }
+
         let current_pos = transform.translation.truncate();
-        let target_pos = move_target.destination;
-        let delta = target_pos - current_pos;
+        let goal_pos = move_target.current_goal();
+        let delta = goal_pos - current_pos;
         let dist = delta.length();
 
-        if dist <= 6.0 {
-            // Arrived at destination
+        // If close to intermediate waypoint, advance to next waypoint
+        if dist <= 14.0 && move_target.current_waypoint_idx < (move_target.waypoints.len() - 1) {
+            move_target.advance_waypoint();
+            continue;
+        }
+
+        // Final destination reached
+        if dist <= 8.0 && move_target.current_waypoint_idx >= (move_target.waypoints.len() - 1) {
             commands.entity(entity).remove::<MoveTarget>();
             continue;
         }
 
-        let direction = delta / dist;
-        let move_amount = (move_speed.0 * dt).min(dist);
+        let direction = delta.normalize_or_zero();
+        let speed_mult = stim_opt
+            .map(|s| if s.is_active { 1.5 } else { 1.0 })
+            .unwrap_or(1.0);
+
+        let move_amount = (move_speed.0 * speed_mult * dt).min(dist);
         transform.translation.x += direction.x * move_amount;
         transform.translation.y += direction.y * move_amount;
 
         // Rotate facing direction smoothly towards movement vector
-        let target_angle = direction.y.atan2(direction.x);
-        let current_angle = transform.rotation.to_euler(EulerRot::ZYX).0;
-        let new_angle = current_angle + (target_angle - current_angle) * (dt * 14.0).min(1.0);
-        transform.rotation = Quat::from_rotation_z(new_angle);
+        if direction.length_squared() > 0.001 {
+            let target_angle = direction.y.atan2(direction.x);
+            let current_angle = transform.rotation.to_euler(EulerRot::ZYX).0;
+            let new_angle = current_angle + (target_angle - current_angle) * (dt * 14.0).min(1.0);
+            transform.rotation = Quat::from_rotation_z(new_angle);
+        }
+    }
+}
+
+/// Updates active ability durations (Stimpack, Siege Mode) and patrol cycling
+fn update_tactical_stances_and_abilities_system(
+    mut commands: Commands,
+    time: Res<Time>,
+    nav_grid: Res<NavGrid>,
+    mut stim_query: Query<&mut Stimpack>,
+    mut tank_query: Query<&mut SiegeTank>,
+    mut stance_query: Query<(
+        Entity,
+        &Transform,
+        &mut TacticalStance,
+        Option<&MoveTarget>,
+        Option<&mut Soldier>,
+    ), With<Unit>>,
+) {
+    let dt = time.delta_secs();
+
+    // 1. Update Stimpack timers
+    for mut stim in &mut stim_query {
+        if stim.is_active {
+            stim.timer -= dt;
+            if stim.timer <= 0.0 {
+                stim.is_active = false;
+                stim.timer = 0.0;
+            }
+        }
+    }
+
+    // 2. Update Siege Tank transformation transitions
+    for mut tank in &mut tank_query {
+        match tank.mode {
+            TankMode::TransformingToSiege => {
+                tank.transform_timer -= dt;
+                if tank.transform_timer <= 0.0 {
+                    tank.mode = TankMode::Siege;
+                    tank.transform_timer = 0.0;
+                    tank.attack_range = 380.0;
+                    tank.attack_damage = 70.0;
+                    tank.attack_cooldown = 2.2;
+                    tank.splash_radius = 45.0;
+                }
+            }
+            TankMode::TransformingToTank => {
+                tank.transform_timer -= dt;
+                if tank.transform_timer <= 0.0 {
+                    tank.mode = TankMode::Tank;
+                    tank.transform_timer = 0.0;
+                    tank.attack_range = 240.0;
+                    tank.attack_damage = 35.0;
+                    tank.attack_cooldown = 1.6;
+                    tank.splash_radius = 0.0;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // 3. Update Patrol stance cycling when idle
+    for (entity, transform, mut stance, move_target_opt, mut soldier_opt) in &mut stance_query {
+        if let TacticalStance::Patrol {
+            origin,
+            target,
+            ref mut heading_to_target,
+        } = *stance
+        {
+            if move_target_opt.is_none() {
+                let current_pos = transform.translation.truncate();
+                let next_dest = if *heading_to_target {
+                    if current_pos.distance(target) <= 24.0 {
+                        *heading_to_target = false;
+                        origin
+                    } else {
+                        target
+                    }
+                } else if current_pos.distance(origin) <= 24.0 {
+                    *heading_to_target = true;
+                    target
+                } else {
+                    origin
+                };
+
+                let waypoints = nav_grid.find_path(current_pos, next_dest);
+                commands.entity(entity).insert(MoveTarget::with_waypoints(
+                    next_dest,
+                    true,
+                    waypoints,
+                ));
+
+                if let Some(ref mut soldier) = soldier_opt {
+                    soldier.state = SoldierState::AttackMoving;
+                }
+            }
+        }
     }
 }
 
@@ -88,7 +241,6 @@ fn unit_separation_and_collision_system(
             let u1 = &snapshots[i];
             let u2 = &snapshots[j];
 
-            // If both are active workers mining/returning cargo, allow them to pass through each other smoothly
             if u1.is_active_worker && u2.is_active_worker {
                 continue;
             }
@@ -102,7 +254,6 @@ fn unit_separation_and_collision_system(
                 let dir = if dist > 0.001 {
                     delta / dist
                 } else {
-                    // Small offset if exactly superimposed
                     let angle = ((u1.entity.index() + u2.entity.index()) as f32) * 1.5;
                     Vec2::new(angle.cos(), angle.sin())
                 };
@@ -135,7 +286,6 @@ fn unit_separation_and_collision_system(
         // Push away from buildings (ignoring friendly BaseHQ for active returning workers)
         for (b_trans, b_radius, b_faction, base_hq_opt) in &building_query {
             if is_active_worker && base_hq_opt.is_some() && b_faction == faction {
-                // Active workers delivering cargo need to approach their friendly BaseHQ without collision pushback
                 continue;
             }
 

@@ -3,7 +3,7 @@ use crate::game_session::{spawn_match_entities, Matchmaker, PlayerSession, Room}
 use crate::net_server::{IncomingNetEvent, OutgoingNetEvent, ServerNetworkChannels};
 use shared::components::*;
 use shared::economy::PlayerEconomy;
-use shared::grid::BuildingKind;
+use shared::grid::{BuildingKind, NavGrid};
 use shared::protocol::{
     EntitySnapshot, GameMode, ServerMessage, UnitKind,
 };
@@ -20,6 +20,7 @@ impl Plugin for ServerSimulationPlugin {
 
         app.insert_resource(Matchmaker::new())
             .insert_resource(economy)
+            .init_resource::<NavGrid>()
             .insert_resource(ServerTickTimer(Timer::from_seconds(
                 1.0 / 30.0,
                 TimerMode::Repeating,
@@ -28,7 +29,9 @@ impl Plugin for ServerSimulationPlugin {
                 Update,
                 (
                     handle_incoming_network_events,
+                    update_server_nav_grid_system,
                     server_movement_system,
+                    server_abilities_and_stances_system,
                     server_boids_separation_system,
                     server_mining_system,
                     server_production_system,
@@ -51,13 +54,19 @@ fn handle_incoming_network_events(
     net_channels: Res<ServerNetworkChannels>,
     mut matchmaker: ResMut<Matchmaker>,
     mut economy: ResMut<PlayerEconomy>,
+    nav_grid: Res<NavGrid>,
     mut unit_query: Query<(
         Entity,
+        &Transform,
         &NetEntity,
         &Faction,
         Option<&mut MoveTarget>,
         Option<&mut Soldier>,
         Option<&mut Worker>,
+        Option<&mut Stimpack>,
+        Option<&mut SiegeTank>,
+        Option<&mut Health>,
+        Option<&mut TacticalStance>,
     ), Without<ResourceNode>>,
     node_query: Query<(Entity, &NetEntity, &Transform), With<ResourceNode>>,
     mut prod_query: Query<(Entity, &NetEntity, &Faction, &mut ProductionBuilding)>,
@@ -98,7 +107,7 @@ fn handle_incoming_network_events(
                             .map(|p| p.faction)
                             .unwrap_or(Faction::Player1);
 
-                        for (_, net_entity, faction, move_target_opt, soldier_opt, worker_opt) in
+                        for (e, tf, net_entity, faction, move_target_opt, soldier_opt, worker_opt, _, _, _, stance_opt) in
                             &mut unit_query
                         {
                             if unit_net_ids.contains(&net_entity.net_id) && *faction == player_faction
@@ -115,10 +124,76 @@ fn handle_incoming_network_events(
                                     worker.state = WorkerState::Idle;
                                     worker.target_node = None;
                                 }
+                                if let Some(mut stance) = stance_opt {
+                                    *stance = TacticalStance::Aggressive;
+                                }
+
+                                let unit_pos = tf.translation.truncate();
+                                let waypoints = nav_grid.find_path(unit_pos, target_position);
 
                                 if let Some(mut mt) = move_target_opt {
                                     mt.destination = target_position;
                                     mt.is_attack_move = is_attack_move;
+                                    mt.waypoints = waypoints;
+                                    mt.current_waypoint_idx = 0;
+                                } else {
+                                    commands.entity(e).insert(MoveTarget::with_waypoints(
+                                        target_position,
+                                        is_attack_move,
+                                        waypoints,
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                    shared::protocol::ClientMessage::RequestPatrol {
+                        unit_net_ids,
+                        target_position,
+                    } => {
+                        let player_faction = matchmaker
+                            .players
+                            .get(&peer_id)
+                            .map(|p| p.faction)
+                            .unwrap_or(Faction::Player1);
+
+                        for (e, tf, net_entity, faction, move_target_opt, soldier_opt, _, _, _, _, stance_opt) in
+                            &mut unit_query
+                        {
+                            if unit_net_ids.contains(&net_entity.net_id) && *faction == player_faction
+                            {
+                                let unit_pos = tf.translation.truncate();
+                                let waypoints = nav_grid.find_path(unit_pos, target_position);
+
+                                if let Some(mut stance) = stance_opt {
+                                    *stance = TacticalStance::Patrol {
+                                        origin: unit_pos,
+                                        target: target_position,
+                                        heading_to_target: true,
+                                    };
+                                } else {
+                                    commands.entity(e).insert(TacticalStance::Patrol {
+                                        origin: unit_pos,
+                                        target: target_position,
+                                        heading_to_target: true,
+                                    });
+                                }
+
+                                if let Some(mut soldier) = soldier_opt {
+                                    soldier.target = None;
+                                    soldier.state = SoldierState::AttackMoving;
+                                }
+
+                                if let Some(mut mt) = move_target_opt {
+                                    mt.destination = target_position;
+                                    mt.is_attack_move = true;
+                                    mt.waypoints = waypoints;
+                                    mt.current_waypoint_idx = 0;
+                                } else {
+                                    commands.entity(e).insert(MoveTarget::with_waypoints(
+                                        target_position,
+                                        true,
+                                        waypoints,
+                                    ));
                                 }
                             }
                         }
@@ -135,11 +210,11 @@ fn handle_incoming_network_events(
 
                         let target_entity = unit_query
                             .iter()
-                            .find(|(_, net_entity, _, _, _, _)| net_entity.net_id == target_net_id)
-                            .map(|(e, _, _, _, _, _)| e);
+                            .find(|(_, _, net_entity, _, _, _, _, _, _, _, _)| net_entity.net_id == target_net_id)
+                            .map(|(e, _, _, _, _, _, _, _, _, _, _)| e);
 
                         if let Some(target) = target_entity {
-                            for (_, net_entity, faction, _, soldier_opt, _) in &mut unit_query {
+                            for (_, _, net_entity, faction, _, soldier_opt, _, _, _, _, _) in &mut unit_query {
                                 if unit_net_ids.contains(&net_entity.net_id)
                                     && *faction == player_faction
                                 {
@@ -167,7 +242,7 @@ fn handle_incoming_network_events(
                             .map(|(e, _, _)| e);
 
                         if let Some(node_e) = target_node {
-                            for (e, net_entity, faction, _, _, worker_opt) in &mut unit_query {
+                            for (e, _, net_entity, faction, _, _, worker_opt, _, _, _, _) in &mut unit_query {
                                 if worker_net_ids.contains(&net_entity.net_id)
                                     && *faction == player_faction
                                 {
@@ -189,7 +264,7 @@ fn handle_incoming_network_events(
                             .map(|p| p.faction)
                             .unwrap_or(Faction::Player1);
 
-                        for (e, net_entity, faction, _, soldier_opt, worker_opt) in
+                        for (e, _, net_entity, faction, _, soldier_opt, worker_opt, _, _, _, stance_opt) in
                             &mut unit_query
                         {
                             if unit_net_ids.contains(&net_entity.net_id) && *faction == player_faction
@@ -202,6 +277,9 @@ fn handle_incoming_network_events(
                                 if let Some(mut worker) = worker_opt {
                                     worker.state = WorkerState::Idle;
                                 }
+                                if let Some(mut stance) = stance_opt {
+                                    *stance = TacticalStance::Aggressive;
+                                }
                             }
                         }
                     }
@@ -212,13 +290,71 @@ fn handle_incoming_network_events(
                             .map(|p| p.faction)
                             .unwrap_or(Faction::Player1);
 
-                        for (e, net_entity, faction, _, soldier_opt, _) in &mut unit_query {
+                        for (e, _, net_entity, faction, _, soldier_opt, _, _, _, _, stance_opt) in &mut unit_query {
                             if unit_net_ids.contains(&net_entity.net_id) && *faction == player_faction
                             {
                                 commands.entity(e).remove::<MoveTarget>();
                                 if let Some(mut soldier) = soldier_opt {
                                     soldier.target = None;
                                     soldier.state = SoldierState::HoldingPosition;
+                                }
+                                if let Some(mut stance) = stance_opt {
+                                    *stance = TacticalStance::HoldPosition;
+                                } else {
+                                    commands.entity(e).insert(TacticalStance::HoldPosition);
+                                }
+                            }
+                        }
+                    }
+                    shared::protocol::ClientMessage::RequestStimpack { unit_net_ids } => {
+                        let player_faction = matchmaker
+                            .players
+                            .get(&peer_id)
+                            .map(|p| p.faction)
+                            .unwrap_or(Faction::Player1);
+
+                        for (e, _, net_entity, faction, _, _, _, stim_opt, _, health_opt, _) in &mut unit_query {
+                            if unit_net_ids.contains(&net_entity.net_id) && *faction == player_faction {
+                                if let Some(mut health) = health_opt {
+                                    if health.current > 20.0 {
+                                        health.take_damage(15.0);
+                                        if let Some(mut stim) = stim_opt {
+                                            stim.is_active = true;
+                                            stim.timer = 6.0;
+                                        } else {
+                                            commands.entity(e).insert(Stimpack {
+                                                is_active: true,
+                                                timer: 6.0,
+                                                duration: 6.0,
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    shared::protocol::ClientMessage::RequestToggleSiegeMode { unit_net_ids } => {
+                        let player_faction = matchmaker
+                            .players
+                            .get(&peer_id)
+                            .map(|p| p.faction)
+                            .unwrap_or(Faction::Player1);
+
+                        for (e, _, net_entity, faction, _, _, _, _, tank_opt, _, _) in &mut unit_query {
+                            if unit_net_ids.contains(&net_entity.net_id) && *faction == player_faction {
+                                if let Some(mut tank) = tank_opt {
+                                    match tank.mode {
+                                        TankMode::Tank => {
+                                            tank.mode = TankMode::TransformingToSiege;
+                                            tank.transform_timer = 1.0;
+                                            commands.entity(e).remove::<MoveTarget>();
+                                        }
+                                        TankMode::Siege => {
+                                            tank.mode = TankMode::TransformingToTank;
+                                            tank.transform_timer = 1.0;
+                                        }
+                                        _ => {}
+                                    }
                                 }
                             }
                         }
@@ -550,24 +686,166 @@ fn handle_join_lobby(
     }
 }
 
-/// Authoritative unit steering and movement
+/// Server A* navigation grid obstacle updates
+fn update_server_nav_grid_system(
+    mut nav_grid: ResMut<NavGrid>,
+    buildings: Query<(&Transform, &Radius, &Building)>,
+    resources: Query<(&Transform, &Radius), With<ResourceNode>>,
+) {
+    nav_grid.clear();
+    for (tf, radius, building) in &buildings {
+        let pos = tf.translation.truncate();
+        let r = if building.name.contains("Base HQ") {
+            radius.0 + 8.0
+        } else {
+            radius.0 + 4.0
+        };
+        nav_grid.mark_circle(pos, r);
+    }
+    for (tf, radius) in &resources {
+        let pos = tf.translation.truncate();
+        nav_grid.mark_circle(pos, radius.0 + 4.0);
+    }
+}
+
+/// Server ability timers (Stimpack, Siege Mode transitions) and Patrol cycling
+fn server_abilities_and_stances_system(
+    mut commands: Commands,
+    time: Res<Time>,
+    nav_grid: Res<NavGrid>,
+    mut stim_query: Query<&mut Stimpack>,
+    mut tank_query: Query<&mut SiegeTank>,
+    mut stance_query: Query<(
+        Entity,
+        &Transform,
+        &mut TacticalStance,
+        Option<&MoveTarget>,
+        Option<&mut Soldier>,
+    ), With<Unit>>,
+) {
+    let dt = time.delta_secs();
+
+    // 1. Stimpack timers
+    for mut stim in &mut stim_query {
+        if stim.is_active {
+            stim.timer -= dt;
+            if stim.timer <= 0.0 {
+                stim.is_active = false;
+                stim.timer = 0.0;
+            }
+        }
+    }
+
+    // 2. Siege Tank transformations
+    for mut tank in &mut tank_query {
+        match tank.mode {
+            TankMode::TransformingToSiege => {
+                tank.transform_timer -= dt;
+                if tank.transform_timer <= 0.0 {
+                    tank.mode = TankMode::Siege;
+                    tank.transform_timer = 0.0;
+                    tank.attack_range = 380.0;
+                    tank.attack_damage = 70.0;
+                    tank.attack_cooldown = 2.2;
+                    tank.splash_radius = 45.0;
+                }
+            }
+            TankMode::TransformingToTank => {
+                tank.transform_timer -= dt;
+                if tank.transform_timer <= 0.0 {
+                    tank.mode = TankMode::Tank;
+                    tank.transform_timer = 0.0;
+                    tank.attack_range = 240.0;
+                    tank.attack_damage = 35.0;
+                    tank.attack_cooldown = 1.6;
+                    tank.splash_radius = 0.0;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // 3. Patrol cycle
+    for (entity, transform, mut stance, move_target_opt, mut soldier_opt) in &mut stance_query {
+        if let TacticalStance::Patrol {
+            origin,
+            target,
+            ref mut heading_to_target,
+        } = *stance
+        {
+            if move_target_opt.is_none() {
+                let current_pos = transform.translation.truncate();
+                let next_dest = if *heading_to_target {
+                    if current_pos.distance(target) <= 24.0 {
+                        *heading_to_target = false;
+                        origin
+                    } else {
+                        target
+                    }
+                } else if current_pos.distance(origin) <= 24.0 {
+                    *heading_to_target = true;
+                    target
+                } else {
+                    origin
+                };
+
+                let waypoints = nav_grid.find_path(current_pos, next_dest);
+                commands.entity(entity).insert(MoveTarget::with_waypoints(
+                    next_dest,
+                    true,
+                    waypoints,
+                ));
+
+                if let Some(ref mut soldier) = soldier_opt {
+                    soldier.state = SoldierState::AttackMoving;
+                }
+            }
+        }
+    }
+}
+
+/// Authoritative unit steering and movement along waypoints
 fn server_movement_system(
     mut commands: Commands,
     time: Res<Time>,
-    mut query: Query<(Entity, &mut Transform, &MoveSpeed, &mut Velocity, &MoveTarget)>,
+    mut query: Query<(
+        Entity,
+        &mut Transform,
+        &MoveSpeed,
+        &mut Velocity,
+        &mut MoveTarget,
+        Option<&Stimpack>,
+        Option<&SiegeTank>,
+    )>,
 ) {
     let dt = time.delta_secs();
-    for (entity, mut transform, speed, mut velocity, move_target) in &mut query {
+    for (entity, mut transform, speed, mut velocity, mut move_target, stim_opt, tank_opt) in &mut query {
+        if let Some(tank) = tank_opt {
+            if tank.mode != TankMode::Tank {
+                velocity.0 = Vec2::ZERO;
+                continue;
+            }
+        }
+
         let current_pos = transform.translation.truncate();
-        let diff = move_target.destination - current_pos;
+        let goal_pos = move_target.current_goal();
+        let diff = goal_pos - current_pos;
         let dist = diff.length();
 
-        if dist <= 12.0 {
+        if dist <= 14.0 && move_target.current_waypoint_idx < (move_target.waypoints.len() - 1) {
+            move_target.advance_waypoint();
+            continue;
+        }
+
+        if dist <= 10.0 && move_target.current_waypoint_idx >= (move_target.waypoints.len() - 1) {
             velocity.0 = Vec2::ZERO;
             commands.entity(entity).remove::<MoveTarget>();
         } else {
-            let dir = diff / dist;
-            velocity.0 = dir * speed.0;
+            let dir = diff.normalize_or_zero();
+            let speed_mult = stim_opt
+                .map(|s| if s.is_active { 1.5 } else { 1.0 })
+                .unwrap_or(1.0);
+            velocity.0 = dir * speed.0 * speed_mult;
             transform.translation.x += velocity.0.x * dt;
             transform.translation.y += velocity.0.y * dt;
 
@@ -703,6 +981,7 @@ fn server_production_system(
     net_channels: Res<ServerNetworkChannels>,
     mut matchmaker: ResMut<Matchmaker>,
     mut economy: ResMut<PlayerEconomy>,
+    nav_grid: Res<NavGrid>,
     mut buildings: Query<(
         Entity,
         &NetEntity,
@@ -750,6 +1029,7 @@ fn server_production_system(
                         let net_id = matchmaker.alloc_net_id();
                         let spawn_pos = transform.translation.truncate() + Vec2::new(0.0, -60.0);
                         let rally = prod.rally_point;
+                        let waypoints = nav_grid.find_path(spawn_pos, rally);
 
                         let mut unit_cmds = commands.spawn((
                             Unit {
@@ -762,10 +1042,7 @@ fn server_production_system(
                                 net_id,
                                 owner_peer_id: net_entity.owner_peer_id,
                             },
-                            MoveTarget {
-                                destination: rally,
-                                is_attack_move: false,
-                            },
+                            MoveTarget::with_waypoints(rally, false, waypoints),
                             Transform::from_xyz(spawn_pos.x, spawn_pos.y, 2.0),
                         ));
 
@@ -773,6 +1050,7 @@ fn server_production_system(
                             UnitKind::Worker => {
                                 unit_cmds.insert((
                                     Worker::default(),
+                                    TacticalStance::default(),
                                     Radius(14.0),
                                     MoveSpeed(190.0),
                                     Velocity::default(),
@@ -788,6 +1066,8 @@ fn server_production_system(
                                         attack_cooldown: 0.85,
                                         ..default()
                                     },
+                                    Stimpack::default(),
+                                    TacticalStance::default(),
                                     Radius(16.0),
                                     MoveSpeed(180.0),
                                     Velocity::default(),
@@ -796,6 +1076,7 @@ fn server_production_system(
                             UnitKind::Tank => {
                                 unit_cmds.insert((
                                     SiegeTank::default(),
+                                    TacticalStance::default(),
                                     Radius(22.0),
                                     MoveSpeed(140.0),
                                     Velocity::default(),
@@ -840,6 +1121,7 @@ fn server_combat_system(
         &Faction,
         &Transform,
         &mut Soldier,
+        Option<&Stimpack>,
     )>,
     mut targets: Query<(
         Entity,
@@ -852,9 +1134,13 @@ fn server_combat_system(
 ) {
     let dt = time.delta_secs();
 
-    for (_s_entity, attacker_net, attacker_faction, attacker_tf, mut soldier) in &mut soldiers {
+    for (_s_entity, attacker_net, attacker_faction, attacker_tf, mut soldier, stim_opt) in &mut soldiers {
         soldier.attack_timer += dt;
         let attacker_pos = attacker_tf.translation.truncate();
+
+        let cooldown_mult = stim_opt
+            .map(|s| if s.is_active { 0.5 } else { 1.0 })
+            .unwrap_or(1.0);
 
         // 1. Scan for nearest hostile target if idle or attack-moving without target
         if soldier.target.is_none()
@@ -889,7 +1175,7 @@ fn server_combat_system(
                 let dist = (target_pos - attacker_pos).length();
 
                 if dist <= soldier.attack_range {
-                    if soldier.attack_timer >= soldier.attack_cooldown {
+                    if soldier.attack_timer >= (soldier.attack_cooldown * cooldown_mult) {
                         soldier.attack_timer = 0.0;
                         target_hp.take_damage(soldier.attack_damage);
 

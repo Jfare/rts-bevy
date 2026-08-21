@@ -249,6 +249,8 @@ fn handle_minimap_input(
             if *faction == my_faction && selectable.is_selected {
                 mt.destination = target_world_pos;
                 mt.is_attack_move = is_attack_move;
+                mt.waypoints = vec![target_world_pos];
+                mt.current_waypoint_idx = 0;
                 if let Some(net) = net_opt {
                     unit_net_ids.push(net.net_id);
                 }
