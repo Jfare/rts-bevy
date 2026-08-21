@@ -20,6 +20,18 @@ pub enum NetStatus {
     InGame,
 }
 
+#[allow(dead_code)]
+#[derive(Resource, Default, Debug, Clone, Copy)]
+pub struct ServerTelemetry {
+    pub queue_1v1: u32,
+    pub active_1v1_matches: u32,
+    pub max_1v1_matches: u32,
+    pub active_solo_matches: u32,
+    pub max_solo_matches: u32,
+    pub total_online: u32,
+    pub last_updated_ms: u64,
+}
+
 /// Thread-safe client network state resource accessible across all systems
 #[derive(Resource)]
 pub struct NetClient {
@@ -32,6 +44,7 @@ pub struct NetClient {
     pub ping_timer: Timer,
     pub last_ping_sent: u64,
     pub rtt_ms: u32,
+    pub last_error_message: Option<String>,
 }
 
 impl Default for NetClient {
@@ -48,6 +61,7 @@ impl Default for NetClient {
             ping_timer: Timer::from_seconds(2.0, TimerMode::Repeating),
             last_ping_sent: 0,
             rtt_ms: 0,
+            last_error_message: None,
         }
     }
 }
@@ -100,7 +114,8 @@ impl Plugin for NetClientPlugin {
 
         let mut net_client = NetClient::default();
         net_client.tx_outgoing_cmds = tx_cmds;
-        app.insert_resource(net_client);
+        app.insert_resource(net_client)
+            .init_resource::<ServerTelemetry>();
 
         app.insert_non_send_resource(WsConnection {
             sender: None,
@@ -109,7 +124,54 @@ impl Plugin for NetClientPlugin {
         });
 
         app.add_systems(Startup, connect_to_server_startup)
-            .add_systems(Update, (poll_network_events, net_heartbeat_system));
+            .add_systems(
+                Update,
+                (
+                    poll_network_events,
+                    net_heartbeat_system,
+                    poll_web_portal_launch_requests,
+                ),
+            );
+    }
+}
+
+#[allow(unused_mut, unused_variables)]
+fn poll_web_portal_launch_requests(
+    mut net_client: ResMut<NetClient>,
+    mut wave_ai_opt: Option<ResMut<bot_ai::WaveAiState>>,
+) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        if let Ok(val) = js_sys::eval("window.__rts_requested_mode || ''") {
+            if let Some(mode_str) = val.as_string() {
+                if !mode_str.is_empty() {
+                    let _ = js_sys::eval("window.__rts_requested_mode = null;");
+                    if mode_str == "1v1" {
+                        info!("⚔️ [Portal] Launching 1v1 Multiplayer matchmaking");
+                        net_client.current_mode = GameMode::Multiplayer1v1;
+                        if let Some(ref mut wave_ai) = wave_ai_opt {
+                            wave_ai.is_active = false;
+                        }
+                        net_client.send(&ClientMessage::JoinLobby {
+                            player_name: "Commander".to_string(),
+                            mode: GameMode::Multiplayer1v1,
+                        });
+                    } else if mode_str == "solo" {
+                        info!("🤖 [Portal] Launching Solo vs AI match");
+                        net_client.current_mode = GameMode::SoloVsAi;
+                        if let Some(ref mut wave_ai) = wave_ai_opt {
+                            wave_ai.is_active = true;
+                            wave_ai.time_until_next_wave = 40.0;
+                            wave_ai.current_wave = 0;
+                        }
+                        net_client.send(&ClientMessage::JoinLobby {
+                            player_name: "Commander".to_string(),
+                            mode: GameMode::SoloVsAi,
+                        });
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -176,14 +238,9 @@ fn poll_network_events(
     for event in received_events {
         match event {
             WsEvent::Opened => {
-                info!("🟢 [NetClient] Connected to server! Joining lobby...");
+                info!("🟢 [NetClient] Connected to server (Standby / Lobby Ready)");
                 net_client.status = NetStatus::Connected;
-
-                let mode = net_client.current_mode;
-                net_client.send(&ClientMessage::JoinLobby {
-                    player_name: "Commander".to_string(),
-                    mode,
-                });
+                net_client.send(&ClientMessage::RequestLobbyStats);
             }
             WsEvent::Message(WsMessage::Binary(bytes)) => {
                 if let Ok(server_msg) = decode_server_msg(&bytes) {
@@ -502,6 +559,28 @@ fn handle_server_message(
             if now_ms >= client_timestamp {
                 net_client.rtt_ms = (now_ms - client_timestamp) as u32;
             }
+        }
+        ServerMessage::LobbyStats {
+            queue_1v1,
+            active_1v1_matches,
+            max_1v1_matches,
+            active_solo_matches,
+            max_solo_matches,
+            total_online,
+        } => {
+            commands.insert_resource(ServerTelemetry {
+                queue_1v1,
+                active_1v1_matches,
+                max_1v1_matches,
+                active_solo_matches,
+                max_solo_matches,
+                total_online,
+                last_updated_ms: now_ms,
+            });
+        }
+        ServerMessage::ErrorMessage { reason } => {
+            warn!("🛑 [NetClient] Server message: {}", reason);
+            net_client.last_error_message = Some(reason);
         }
         _ => {}
     }

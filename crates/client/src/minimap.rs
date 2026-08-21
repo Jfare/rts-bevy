@@ -5,6 +5,7 @@ use shared::components::{Building, Faction, Health, MoveTarget, ResourceNode, Se
 use shared::grid::WorldGridConfig;
 use shared::protocol::ClientMessage;
 use crate::camera::RtsCamera;
+use crate::fog_of_war::{FogOfWarGrid, FogState, FOG_GRID_DIM};
 use crate::net::{NetClient, NetStatus};
 
 pub struct MinimapPlugin;
@@ -38,8 +39,8 @@ impl Default for MinimapState {
 /// Helper to get the screen-space Rect of the minimap (bottom-left area)
 pub fn get_minimap_screen_rect(window: &Window, state: &MinimapState) -> Rect {
     let x_min = state.padding;
-    let x_max = state.padding + state.width;
     let y_max = window.height() - state.padding;
+    let x_max = x_min + state.width;
     let y_min = y_max - state.height;
     Rect {
         min: Vec2::new(x_min, y_min),
@@ -48,25 +49,34 @@ pub fn get_minimap_screen_rect(window: &Window, state: &MinimapState) -> Rect {
 }
 
 
-/// Converts a world coordinate (-1600..1600) to a minimap screen coordinate
-pub fn world_to_minimap_screen(world_pos: Vec2, grid_cfg: &WorldGridConfig, rect: &Rect) -> Vec2 {
-    let t_x = (world_pos.x - grid_cfg.min_bounds.x) / grid_cfg.width();
-    let t_y = (world_pos.y - grid_cfg.min_bounds.y) / grid_cfg.height();
+/// Transforms a 2D world coordinate into a screen-space coordinate inside the minimap Rect
+pub fn world_to_minimap_screen(
+    world_pos: Vec2,
+    grid_cfg: &WorldGridConfig,
+    minimap_rect: &Rect,
+) -> Vec2 {
+    let norm_x = ((world_pos.x - grid_cfg.min_bounds.x) / grid_cfg.width()).clamp(0.0, 1.0);
+    let norm_y = ((world_pos.y - grid_cfg.min_bounds.y) / grid_cfg.height()).clamp(0.0, 1.0);
 
-    // Map: t_x (0..1) -> (rect.min.x .. rect.max.x)
-    // Map: t_y (0..1) -> (rect.max.y .. rect.min.y) (invert Y because screen Y goes down)
-    let screen_x = rect.min.x + t_x.clamp(0.0, 1.0) * (rect.max.x - rect.min.x);
-    let screen_y = rect.max.y - t_y.clamp(0.0, 1.0) * (rect.max.y - rect.min.y);
+    let screen_x = minimap_rect.min.x + norm_x * (minimap_rect.max.x - minimap_rect.min.x);
+    // Invert Y because Bevy UI / Screen origin is Top-Left, whereas World Y is Up
+    let screen_y = minimap_rect.max.y - norm_y * (minimap_rect.max.y - minimap_rect.min.y);
+
     Vec2::new(screen_x, screen_y)
 }
 
-/// Converts a minimap screen coordinate back to world coordinates
-pub fn minimap_screen_to_world(screen_pos: Vec2, grid_cfg: &WorldGridConfig, rect: &Rect) -> Vec2 {
-    let t_x = (screen_pos.x - rect.min.x) / (rect.max.x - rect.min.x);
-    let t_y = (rect.max.y - screen_pos.y) / (rect.max.y - rect.min.y);
+/// Transforms a screen-space coordinate inside the minimap Rect back into a 2D world coordinate
+pub fn minimap_screen_to_world(
+    screen_pos: Vec2,
+    grid_cfg: &WorldGridConfig,
+    minimap_rect: &Rect,
+) -> Vec2 {
+    let norm_x = ((screen_pos.x - minimap_rect.min.x) / (minimap_rect.max.x - minimap_rect.min.x)).clamp(0.0, 1.0);
+    let norm_y = ((minimap_rect.max.y - screen_pos.y) / (minimap_rect.max.y - minimap_rect.min.y)).clamp(0.0, 1.0);
 
-    let world_x = grid_cfg.min_bounds.x + t_x.clamp(0.0, 1.0) * grid_cfg.width();
-    let world_y = grid_cfg.min_bounds.y + t_y.clamp(0.0, 1.0) * grid_cfg.height();
+    let world_x = grid_cfg.min_bounds.x + norm_x * grid_cfg.width();
+    let world_y = grid_cfg.min_bounds.y + norm_y * grid_cfg.height();
+
     Vec2::new(world_x, world_y)
 }
 
@@ -75,6 +85,7 @@ fn draw_minimap_system(
     mut gizmos: Gizmos,
     minimap_state: Res<MinimapState>,
     grid_cfg: Option<Res<WorldGridConfig>>,
+    fog: Res<FogOfWarGrid>,
     window_query: Query<&Window, With<PrimaryWindow>>,
     camera_query: Query<(&Camera, &Transform, Option<&OrthographicProjection>), With<RtsCamera>>,
     net_client: Res<NetClient>,
@@ -127,20 +138,31 @@ fn draw_minimap_system(
         Color::srgba(0.15, 0.30, 0.45, 0.35),
     );
 
-    // 2. Draw Mineral Nodes (Gold Diamonds)
+    // 2. Draw Mineral Nodes (Gold Diamonds) - shrouded if unexplored
     let gold_color = Color::srgb(0.95, 0.80, 0.20);
     for (res_tf, _) in &resources_query {
-        let sc = world_to_minimap_screen(res_tf.translation.truncate(), config, &mm_rect);
+        let r_pos = res_tf.translation.truncate();
+        if fog.get_state_at_world_pos(r_pos, config) == FogState::Unexplored {
+            continue;
+        }
+        let sc = world_to_minimap_screen(r_pos, config, &mm_rect);
         let wp = to_world(sc);
         gizmos.rect_2d(wp, Vec2::splat(3.5 * cam_scale), gold_color);
     }
 
-    // 3. Draw Buildings (Sized colored boxes)
+    // 3. Draw Buildings (Sized colored boxes) - shrouded if hostile & unexplored
     for (b_tf, faction, hp) in &buildings_query {
         if hp.is_dead() {
             continue;
         }
-        let sc = world_to_minimap_screen(b_tf.translation.truncate(), config, &mm_rect);
+        let b_pos = b_tf.translation.truncate();
+        if *faction != net_client.my_faction && *faction != Faction::Neutral {
+            if fog.get_state_at_world_pos(b_pos, config) == FogState::Unexplored {
+                continue;
+            }
+        }
+
+        let sc = world_to_minimap_screen(b_pos, config, &mm_rect);
         let wp = to_world(sc);
         let b_color = if *faction == net_client.my_faction {
             Color::srgb(0.25, 0.75, 1.0)
@@ -152,12 +174,19 @@ fn draw_minimap_system(
         gizmos.rect_2d(wp, Vec2::splat(6.0 * cam_scale), b_color);
     }
 
-    // 4. Draw Units (Small dots)
+    // 4. Draw Units (Small dots) - shrouded if hostile & not visible
     for (u_tf, faction, hp) in &units_query {
         if hp.is_dead() {
             continue;
         }
-        let sc = world_to_minimap_screen(u_tf.translation.truncate(), config, &mm_rect);
+        let u_pos = u_tf.translation.truncate();
+        if *faction != net_client.my_faction && *faction != Faction::Neutral {
+            if fog.get_state_at_world_pos(u_pos, config) != FogState::Visible {
+                continue;
+            }
+        }
+
+        let sc = world_to_minimap_screen(u_pos, config, &mm_rect);
         let wp = to_world(sc);
         let u_color = if *faction == net_client.my_faction {
             Color::srgb(0.35, 0.90, 1.0)
@@ -167,7 +196,31 @@ fn draw_minimap_system(
         gizmos.circle_2d(wp, 2.5 * cam_scale, u_color);
     }
 
-    // 5. Draw Camera View Frustum Rect (White outline box)
+    // 5. Draw Fog of War Shroud Tiles on Minimap
+    let f_cell_w = (mm_rect.max.x - mm_rect.min.x) / FOG_GRID_DIM as f32;
+    let f_cell_h = (mm_rect.max.y - mm_rect.min.y) / FOG_GRID_DIM as f32;
+    for cy in 0..FOG_GRID_DIM {
+        for cx in 0..FOG_GRID_DIM {
+            let state = fog.get_state(cx, cy);
+            if state == FogState::Unexplored {
+                let sc_center = Vec2::new(
+                    mm_rect.min.x + (cx as f32 + 0.5) * f_cell_w,
+                    mm_rect.max.y - (cy as f32 + 0.5) * f_cell_h,
+                );
+                let wp = to_world(sc_center);
+                gizmos.rect_2d(wp, Vec2::new(f_cell_w * cam_scale + 0.5, f_cell_h * cam_scale + 0.5), Color::srgba(0.01, 0.02, 0.04, 0.88));
+            } else if state == FogState::Explored {
+                let sc_center = Vec2::new(
+                    mm_rect.min.x + (cx as f32 + 0.5) * f_cell_w,
+                    mm_rect.max.y - (cy as f32 + 0.5) * f_cell_h,
+                );
+                let wp = to_world(sc_center);
+                gizmos.rect_2d(wp, Vec2::new(f_cell_w * cam_scale + 0.5, f_cell_h * cam_scale + 0.5), Color::srgba(0.02, 0.04, 0.06, 0.45));
+            }
+        }
+    }
+
+    // 6. Draw Camera View Frustum Rect (White outline box)
     let view_w = win_size.x * cam_scale;
     let view_h = win_size.y * cam_scale;
     let cam_world_min = cam_pos - Vec2::new(view_w, view_h) * 0.5;

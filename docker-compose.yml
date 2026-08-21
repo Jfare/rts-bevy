@@ -14,7 +14,7 @@ services:
     networks:
       - rts-net
 
-  # Web Client Static Host & Reverse Proxy
+  # Web Client Static Host, Caddy HTTPS & Reverse Proxy
   web-client:
     build:
       context: .
@@ -22,8 +22,12 @@ services:
     container_name: rts-bevy-web
     restart: unless-stopped
     ports:
+      - "80:80"
+      - "443:443"
       - "8000:80"
-      - "8443:443"
+    environment:
+      - RTS_DOMAIN=${RTS_DOMAIN:-mini-rtx.ax}
+      - RTS_ALT_DOMAIN=${RTS_ALT_DOMAIN:-mini-rts.ax}
     depends_on:
       - game-server
     networks:
@@ -32,3 +36,4 @@ services:
 networks:
   rts-net:
     driver: bridge
+

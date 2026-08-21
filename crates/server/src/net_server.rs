@@ -4,13 +4,26 @@ use futures_util::{SinkExt, StreamExt};
 use shared::protocol::{decode_client_msg, encode_server_msg, ClientMessage, ServerMessage};
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
+use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 
 static NEXT_PEER_ID: AtomicU64 = AtomicU64::new(1);
+
+pub static TELEMETRY_QUEUE: AtomicU32 = AtomicU32::new(0);
+pub static TELEMETRY_ACTIVE_1V1: AtomicU32 = AtomicU32::new(0);
+pub static TELEMETRY_ACTIVE_SOLO: AtomicU32 = AtomicU32::new(0);
+pub static TELEMETRY_TOTAL_ONLINE: AtomicU32 = AtomicU32::new(0);
+
+pub fn update_global_telemetry(q: u32, a1: u32, aso: u32, tot: u32) {
+    TELEMETRY_QUEUE.store(q, Ordering::Relaxed);
+    TELEMETRY_ACTIVE_1V1.store(a1, Ordering::Relaxed);
+    TELEMETRY_ACTIVE_SOLO.store(aso, Ordering::Relaxed);
+    TELEMETRY_TOTAL_ONLINE.store(tot, Ordering::Relaxed);
+}
 
 #[derive(Debug)]
 pub enum IncomingNetEvent {
@@ -152,10 +165,40 @@ async fn run_network_server(
 async fn handle_connection(
     peer_id: u64,
     addr: SocketAddr,
-    stream: TcpStream,
+    mut stream: TcpStream,
     tx_incoming: Sender<IncomingNetEvent>,
     peers: Arc<tokio::sync::Mutex<HashMap<u64, mpsc::UnboundedSender<ServerMessage>>>>,
 ) {
+    let mut peek_buf = [0u8; 512];
+    let n = stream.peek(&mut peek_buf).await.unwrap_or(0);
+    let peek_str = String::from_utf8_lossy(&peek_buf[..n]);
+
+    if peek_str.starts_with("GET /health") {
+        let resp = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\nContent-Length: 15\r\n\r\n{\"status\":\"ok\"}";
+        let _ = stream.write_all(resp.as_bytes()).await;
+        let _ = stream.flush().await;
+        return;
+    }
+
+    if peek_str.starts_with("GET /api/stats") || peek_str.starts_with("GET /stats") {
+        let q = TELEMETRY_QUEUE.load(Ordering::Relaxed);
+        let a1 = TELEMETRY_ACTIVE_1V1.load(Ordering::Relaxed);
+        let aso = TELEMETRY_ACTIVE_SOLO.load(Ordering::Relaxed);
+        let tot = TELEMETRY_TOTAL_ONLINE.load(Ordering::Relaxed);
+        let body = format!(
+            "{{\"queue_1v1\":{},\"active_1v1_matches\":{},\"max_1v1_matches\":10,\"active_solo_matches\":{},\"max_solo_matches\":10,\"total_online\":{},\"status\":\"online\"}}",
+            q, a1, aso, tot
+        );
+        let resp = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        let _ = stream.write_all(resp.as_bytes()).await;
+        let _ = stream.flush().await;
+        return;
+    }
+
     let ws_stream = match tokio_tungstenite::accept_async(stream).await {
         Ok(ws) => ws,
         Err(err) => {

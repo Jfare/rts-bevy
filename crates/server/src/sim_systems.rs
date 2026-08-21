@@ -25,6 +25,10 @@ impl Plugin for ServerSimulationPlugin {
                 1.0 / 30.0,
                 TimerMode::Repeating,
             )))
+            .insert_resource(ServerStatsTimer(Timer::from_seconds(
+                2.0,
+                TimerMode::Repeating,
+            )))
             .add_systems(
                 Update,
                 (
@@ -40,6 +44,7 @@ impl Plugin for ServerSimulationPlugin {
                     server_siege_tank_combat_system,
                     server_match_outcome_system,
                     server_tick_snapshot_system,
+                    server_lobby_stats_broadcast_system,
                 ),
             );
     }
@@ -47,6 +52,35 @@ impl Plugin for ServerSimulationPlugin {
 
 #[derive(Resource)]
 pub struct ServerTickTimer(pub Timer);
+
+#[derive(Resource)]
+pub struct ServerStatsTimer(pub Timer);
+
+fn server_lobby_stats_broadcast_system(
+    time: Res<Time>,
+    mut timer: ResMut<ServerStatsTimer>,
+    matchmaker: Res<Matchmaker>,
+    net_channels: Res<ServerNetworkChannels>,
+) {
+    timer.0.tick(time.delta());
+    if timer.0.just_finished() {
+        let (q, a1, m1, aso, mso, tot) = matchmaker.get_telemetry();
+        crate::net_server::update_global_telemetry(q, a1, aso, tot);
+
+        if !matchmaker.players.is_empty() {
+            let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::Broadcast {
+                msg: ServerMessage::LobbyStats {
+                    queue_1v1: q,
+                    active_1v1_matches: a1,
+                    max_1v1_matches: m1,
+                    active_solo_matches: aso,
+                    max_solo_matches: mso,
+                    total_online: tot,
+                },
+            });
+        }
+    }
+}
 
 /// Reads and executes client network commands
 fn handle_incoming_network_events(
@@ -95,6 +129,20 @@ fn handle_incoming_network_events(
                             player_name,
                             mode,
                         );
+                    }
+                    shared::protocol::ClientMessage::RequestLobbyStats => {
+                        let (q, a1, m1, aso, mso, tot) = matchmaker.get_telemetry();
+                        let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::SendToPeer {
+                            peer_id,
+                            msg: ServerMessage::LobbyStats {
+                                queue_1v1: q,
+                                active_1v1_matches: a1,
+                                max_1v1_matches: m1,
+                                active_solo_matches: aso,
+                                max_solo_matches: mso,
+                                total_online: tot,
+                            },
+                        });
                     }
                     shared::protocol::ClientMessage::RequestMove {
                         unit_net_ids,
@@ -214,13 +262,17 @@ fn handle_incoming_network_events(
                             .map(|(e, _, _, _, _, _, _, _, _, _, _)| e);
 
                         if let Some(target) = target_entity {
-                            for (_, _, net_entity, faction, _, soldier_opt, _, _, _, _, _) in &mut unit_query {
+                            for (e, _, net_entity, faction, _, soldier_opt, _, _, tank_opt, _, _) in &mut unit_query {
                                 if unit_net_ids.contains(&net_entity.net_id)
                                     && *faction == player_faction
                                 {
+                                    commands.entity(e).remove::<MoveTarget>();
                                     if let Some(mut soldier) = soldier_opt {
                                         soldier.target = Some(target);
                                         soldier.state = SoldierState::ChasingTarget;
+                                    }
+                                    if let Some(mut tank) = tank_opt {
+                                        tank.target = Some(target);
                                     }
                                 }
                             }
@@ -519,6 +571,16 @@ fn handle_join_lobby(
 ) {
     match mode {
         GameMode::SoloVsAi => {
+            if !matchmaker.can_start_solo() {
+                let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::SendToPeer {
+                    peer_id,
+                    msg: ServerMessage::ErrorMessage {
+                        reason: "Server Solo-kapacitet full (10/10 matcher). Försök igen om en stund.".to_string(),
+                    },
+                });
+                return;
+            }
+
             let room_id = matchmaker.next_room_id;
             matchmaker.next_room_id += 1;
 
@@ -588,7 +650,17 @@ fn handle_join_lobby(
             });
         }
         GameMode::Multiplayer1v1 => {
-            if let Some(waiting_p1) = matchmaker.waiting_1v1_peer.take() {
+            if let Some(waiting_p1) = matchmaker.waiting_1v1_peer {
+                if !matchmaker.can_start_pvp() {
+                    let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::SendToPeer {
+                        peer_id,
+                        msg: ServerMessage::ErrorMessage {
+                            reason: "Server PvP-kapacitet full (10/10 matcher). Väntar på ledig plats...".to_string(),
+                        },
+                    });
+                    return;
+                }
+                matchmaker.waiting_1v1_peer.take();
                 // Pair both players!
                 let room_id = matchmaker.next_room_id;
                 matchmaker.next_room_id += 1;

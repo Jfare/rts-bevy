@@ -4,9 +4,10 @@ use bevy::window::PrimaryWindow;
 use shared::components::*;
 use shared::economy::PlayerEconomy;
 use shared::grid::BuildingKind;
-use shared::protocol::ClientMessage;
+use crate::audio_sfx::SoundEffect;
 use crate::net::{NetClient, NetStatus};
 use crate::selection::screen_to_world_2d;
+use crate::stats::MatchStats;
 
 /// Active placement state when the player is positioning a new building
 #[derive(Debug, Resource, Default)]
@@ -40,6 +41,8 @@ fn handle_placement_input(
     mouse_button: Res<ButtonInput<MouseButton>>,
     mut net_client: ResMut<NetClient>,
     mut economy: ResMut<PlayerEconomy>,
+    mut stats: ResMut<MatchStats>,
+    mut sound_events: EventWriter<SoundEffect>,
     mut state: ResMut<PlacementState>,
     window_query: Query<&Window, With<PrimaryWindow>>,
     camera_query: Query<(&Camera, &Transform, Option<&OrthographicProjection>)>,
@@ -104,9 +107,13 @@ fn handle_placement_input(
         let my_faction = net_client.my_faction;
         if economy.spend_minerals(my_faction, state.mineral_cost) {
             let spawn_pos = state.ghost_pos;
+            sound_events.send(SoundEffect::BuildPlaced);
+            if my_faction == Faction::Player1 {
+                stats.minerals_spent += state.mineral_cost;
+            }
 
             if net_client.status != NetStatus::Disconnected {
-                net_client.send(&ClientMessage::RequestBuild {
+                net_client.send(&shared::protocol::ClientMessage::RequestBuild {
                     building_kind,
                     position: spawn_pos,
                 });

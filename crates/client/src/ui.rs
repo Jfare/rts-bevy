@@ -9,6 +9,7 @@ use shared::economy::PlayerEconomy;
 use shared::protocol::{ClientMessage, GameMode};
 use crate::net::{NetClient, NetStatus};
 use crate::placement::PlacementState;
+use crate::stats::MatchStats;
 
 pub struct RtsUiPlugin;
 
@@ -25,6 +26,7 @@ impl Plugin for RtsUiPlugin {
                     update_command_card_text,
                     update_match_outcome_banner,
                     handle_lobby_button_interactions,
+                    handle_play_again_button_interaction,
                     update_lobby_modal_status_text,
                 ),
             );
@@ -55,6 +57,9 @@ struct MineralsText;
 struct SupplyText;
 
 #[derive(Component)]
+struct ApmText;
+
+#[derive(Component)]
 struct WaveCountdownText;
 
 #[derive(Component)]
@@ -74,6 +79,12 @@ struct MatchBannerContainer;
 
 #[derive(Component)]
 struct MatchBannerText;
+
+#[derive(Component)]
+struct MatchStatsSummaryText;
+
+#[derive(Component)]
+struct PlayAgainButton;
 
 fn setup_hud(mut commands: Commands) {
     // Root UI container overlay (FocusPolicy::Pass allows mouse clicks to pass to the 2D world)
@@ -190,6 +201,16 @@ fn setup_hud(mut commands: Commands) {
                             FocusPolicy::Pass,
                         ));
                         res_group.spawn((
+                            Text::new("⚡ APM: 0"),
+                            TextFont {
+                                font_size: 15.0,
+                                ..default()
+                            },
+                            TextColor(Color::srgb(1.0, 0.75, 0.2)),
+                            ApmText,
+                            FocusPolicy::Pass,
+                        ));
+                        res_group.spawn((
                             Text::new("⏳ Wave 1 in: 40s"),
                             TextFont {
                                 font_size: 16.0,
@@ -213,32 +234,80 @@ fn setup_hud(mut commands: Commands) {
             });
 
             // ─────────────────────────────────────────────────────────────────
-            // CENTER MATCH OUTCOME BANNER (Hidden until Victory/Defeat)
+            // CENTER MATCH OUTCOME SCOREBOARD (Hidden until Victory/Defeat)
             // ─────────────────────────────────────────────────────────────────
             root.spawn((
                 Node {
-                    align_self: AlignSelf::Center,
-                    padding: UiRect::axes(Val::Px(32.0), Val::Px(16.0)),
+                    position_type: PositionType::Absolute,
+                    left: Val::Percent(50.0),
+                    top: Val::Percent(50.0),
+                    margin: UiRect {
+                        left: Val::Px(-270.0),
+                        top: Val::Px(-200.0),
+                        right: Val::Px(0.0),
+                        bottom: Val::Px(0.0),
+                    },
+                    width: Val::Px(540.0),
+                    padding: UiRect::all(Val::Px(24.0)),
                     border: UiRect::all(Val::Px(2.0)),
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    row_gap: Val::Px(16.0),
                     display: Display::None,
                     ..default()
                 },
-                BackgroundColor(Color::srgba(0.04, 0.06, 0.08, 0.96)),
+                BorderRadius::all(Val::Px(8.0)),
+                BackgroundColor(Color::srgba(0.04, 0.06, 0.09, 0.98)),
                 BorderColor(Color::srgb(0.3, 0.8, 1.0)),
                 MatchBannerContainer,
-                FocusPolicy::Pass,
             ))
             .with_children(|banner| {
                 banner.spawn((
                     Text::new(""),
                     TextFont {
-                        font_size: 28.0,
+                        font_size: 26.0,
                         ..default()
                     },
                     TextColor(Color::WHITE),
                     MatchBannerText,
-                    FocusPolicy::Pass,
                 ));
+
+                banner.spawn((
+                    Text::new(""),
+                    TextFont {
+                        font_size: 14.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.85, 0.90, 0.95)),
+                    MatchStatsSummaryText,
+                ));
+
+                // Play Again / Restart Button
+                banner
+                    .spawn((
+                        Button,
+                        Node {
+                            padding: UiRect::axes(Val::Px(24.0), Val::Px(10.0)),
+                            border: UiRect::all(Val::Px(1.5)),
+                            align_items: AlignItems::Center,
+                            justify_content: JustifyContent::Center,
+                            ..default()
+                        },
+                        BorderRadius::all(Val::Px(6.0)),
+                        BackgroundColor(Color::srgba(0.15, 0.35, 0.55, 0.95)),
+                        BorderColor(Color::srgb(0.35, 0.85, 1.0)),
+                        PlayAgainButton,
+                    ))
+                    .with_children(|btn| {
+                        btn.spawn((
+                            Text::new("🔄 PLAY AGAIN (RESTART)"),
+                            TextFont {
+                                font_size: 14.0,
+                                ..default()
+                            },
+                            TextColor(Color::WHITE),
+                        ));
+                    });
             });
 
             // ─────────────────────────────────────────────────────────────────
@@ -605,8 +674,18 @@ fn handle_lobby_button_interactions(
 
 fn update_lobby_modal_status_text(
     net_client: Res<NetClient>,
+    telemetry: Option<Res<crate::net::ServerTelemetry>>,
     mut text_query: Query<&mut Text, With<LobbyStatusText>>,
 ) {
+    let telem_str = if let Some(t) = telemetry {
+        format!(
+            " | 👥 Kö: {} | ⚔️ 1v1: {}/{} | 🤖 Solo: {}/{}",
+            t.queue_1v1, t.active_1v1_matches, t.max_1v1_matches, t.active_solo_matches, t.max_solo_matches
+        )
+    } else {
+        String::new()
+    };
+
     for mut text in &mut text_query {
         match net_client.status {
             NetStatus::InGame => {
@@ -615,19 +694,19 @@ fn update_lobby_modal_status_text(
                 } else {
                     "Player 2 (Red / East Base)"
                 };
-                text.0 = format!("🟢 Live Match Active! You are: {}", role);
+                text.0 = format!("🟢 Match igång! Du är: {}{}", role, telem_str);
             }
             NetStatus::InLobby => {
-                text.0 = "🟡 In Matchmaking Queue... Waiting for Opponent (1/2)".to_string();
+                text.0 = format!("🟡 I Matchmaking-kö... Väntar på motståndare (1/2){}", telem_str);
             }
             NetStatus::Connected => {
-                text.0 = "🟢 Connected to Dedicated Server (Ready)".to_string();
+                text.0 = format!("🟢 Ansluten till server{}", telem_str);
             }
             NetStatus::Connecting => {
-                text.0 = "🟡 Connecting to Server...".to_string();
+                text.0 = "🟡 Ansluter till server...".to_string();
             }
             NetStatus::Disconnected => {
-                text.0 = "⚪ Offline (Solo Practice Active)".to_string();
+                text.0 = "⚪ Offline (Solo-läge aktivt)".to_string();
             }
         }
     }
@@ -636,8 +715,10 @@ fn update_lobby_modal_status_text(
 fn update_hud_economy_text(
     economy: Res<PlayerEconomy>,
     net_client: Res<NetClient>,
-    mut min_query: Query<&mut Text, (With<MineralsText>, Without<SupplyText>)>,
-    mut sup_query: Query<&mut Text, (With<SupplyText>, Without<MineralsText>)>,
+    stats: Res<MatchStats>,
+    mut min_query: Query<&mut Text, (With<MineralsText>, Without<SupplyText>, Without<ApmText>)>,
+    mut sup_query: Query<&mut Text, (With<SupplyText>, Without<MineralsText>, Without<ApmText>)>,
+    mut apm_query: Query<&mut Text, (With<ApmText>, Without<MineralsText>, Without<SupplyText>)>,
 ) {
     let my_eco = economy.get(net_client.my_faction);
     for mut text in &mut min_query {
@@ -645,6 +726,9 @@ fn update_hud_economy_text(
     }
     for mut text in &mut sup_query {
         text.0 = format!("⚡ Supply: {} / {}", my_eco.current_supply, my_eco.max_supply);
+    }
+    for mut text in &mut apm_query {
+        text.0 = format!("⚡ APM: {}", stats.current_apm());
     }
 }
 
@@ -768,7 +852,7 @@ fn update_selection_info_text(
             let train_prompt = if building.name.contains("Base HQ") {
                 "Press [V] to Train SCV Worker (50 💎, 1 ⚡)"
             } else if building.name.contains("Barracks") {
-                "Press [M] Marine (100 💎, 2 ⚡) | [T] Siege Tank (200 💎, 3 ⚡, Req Depot)"
+                "Press [M] Marine (100 💎, 2 ⚡) | [T] / [S] Siege Tank (200 💎, 3 ⚡)"
             } else {
                 "Right-click ground to set Rally Point"
             };
@@ -866,8 +950,10 @@ fn update_command_card_text(
 
 fn update_match_outcome_banner(
     outcome: Option<Res<MatchOutcome>>,
+    stats: Res<MatchStats>,
     mut banner_query: Query<(&mut Node, &mut BorderColor), With<MatchBannerContainer>>,
-    mut text_query: Query<(&mut Text, &mut TextColor), With<MatchBannerText>>,
+    mut text_query: Query<(&mut Text, &mut TextColor), (With<MatchBannerText>, Without<MatchStatsSummaryText>)>,
+    mut summary_query: Query<&mut Text, (With<MatchStatsSummaryText>, Without<MatchBannerText>)>,
 ) {
     let Some(outcome) = outcome else {
         return;
@@ -879,6 +965,9 @@ fn update_match_outcome_banner(
     let Ok((mut text, mut color)) = text_query.get_single_mut() else {
         return;
     };
+    let Ok(mut summary_text) = summary_query.get_single_mut() else {
+        return;
+    };
 
     match *outcome {
         MatchOutcome::InProgress => {
@@ -887,14 +976,90 @@ fn update_match_outcome_banner(
         MatchOutcome::Victory => {
             node.display = Display::Flex;
             *border = BorderColor(Color::srgb(0.20, 0.95, 0.45));
-            text.0 = "🏆 VICTORY! Hostile Base HQ Destroyed!".to_string();
+            text.0 = "🏆 VICTORY - MISSION COMPLETE!".to_string();
             *color = TextColor(Color::srgb(0.25, 0.95, 0.50));
+
+            let mins = (stats.elapsed_seconds / 60.0) as u32;
+            let secs = (stats.elapsed_seconds % 60.0) as u32;
+
+            summary_text.0 = format!(
+                "⏱️ Match Duration: {:02}:{:02} | ⚡ APM: {} ({} Actions)\n\
+                 💎 Minerals Mined: {} | Spent: {}\n\
+                 🎖️ Units Trained: {} | Units Lost: {} | Kills: {}\n\
+                 💥 Enemy Bases Destroyed: {} | Damage Dealt: {:.0}\n\
+                 🎯 Kill / Death Ratio: {:.2}",
+                mins,
+                secs,
+                stats.current_apm(),
+                stats.total_commands,
+                stats.minerals_mined,
+                stats.minerals_spent,
+                stats.units_trained,
+                stats.units_lost,
+                stats.enemy_units_killed,
+                stats.enemy_buildings_destroyed,
+                stats.damage_dealt,
+                stats.kd_ratio()
+            );
         }
         MatchOutcome::Defeat => {
             node.display = Display::Flex;
             *border = BorderColor(Color::srgb(0.95, 0.25, 0.25));
-            text.0 = "💥 DEFEAT! Your Base HQ has Fallen!".to_string();
+            text.0 = "💥 DEFEAT - BASE OVERRUN!".to_string();
             *color = TextColor(Color::srgb(0.95, 0.35, 0.35));
+
+            let mins = (stats.elapsed_seconds / 60.0) as u32;
+            let secs = (stats.elapsed_seconds % 60.0) as u32;
+
+            summary_text.0 = format!(
+                "⏱️ Match Duration: {:02}:{:02} | ⚡ APM: {} ({} Actions)\n\
+                 💎 Minerals Mined: {} | Spent: {}\n\
+                 🎖️ Units Trained: {} | Units Lost: {} | Kills: {}\n\
+                 💥 Enemy Bases Destroyed: {} | Damage Dealt: {:.0}\n\
+                 🎯 Kill / Death Ratio: {:.2}",
+                mins,
+                secs,
+                stats.current_apm(),
+                stats.total_commands,
+                stats.minerals_mined,
+                stats.minerals_spent,
+                stats.units_trained,
+                stats.units_lost,
+                stats.enemy_units_killed,
+                stats.enemy_buildings_destroyed,
+                stats.damage_dealt,
+                stats.kd_ratio()
+            );
+        }
+    }
+}
+
+fn handle_play_again_button_interaction(
+    mut interaction_query: Query<
+        (&Interaction, &mut BackgroundColor),
+        (Changed<Interaction>, With<PlayAgainButton>),
+    >,
+) {
+    for (interaction, mut bg_color) in &mut interaction_query {
+        match *interaction {
+            Interaction::Pressed => {
+                #[cfg(target_arch = "wasm32")]
+                {
+                    if let Some(win) = web_sys::window() {
+                        let _ = win.location().reload();
+                    }
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    info!("🔄 Play Again requested (Restart the client binary to replay).");
+                }
+            }
+            Interaction::Hovered => {
+                bg_color.0 = Color::srgba(0.25, 0.55, 0.85, 0.95);
+            }
+            Interaction::None => {
+                bg_color.0 = Color::srgba(0.15, 0.35, 0.55, 0.95);
+            }
         }
     }
 }

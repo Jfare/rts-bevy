@@ -5,8 +5,10 @@ use shared::components::*;
 use shared::economy::PlayerEconomy;
 use shared::grid::NavGrid;
 use shared::protocol::{ClientMessage, UnitKind};
+use crate::audio_sfx::SoundEffect;
 use crate::net::{NetClient, NetStatus};
 use crate::selection::screen_to_world_2d;
+use crate::stats::MatchStats;
 
 pub struct ProductionPlugin;
 
@@ -176,7 +178,8 @@ fn handle_production_hotkeys(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut net_client: ResMut<NetClient>,
     mut economy: ResMut<PlayerEconomy>,
-    all_buildings: Query<(&Building, &Faction, Option<&SupplyDepot>)>,
+    mut stats: ResMut<MatchStats>,
+    mut sound_events: EventWriter<SoundEffect>,
     mut prod_query: Query<(
         &mut ProductionBuilding,
         &Building,
@@ -194,27 +197,42 @@ fn handle_production_hotkeys(
         for (mut prod, building, faction, selectable, net_entity_opt, base_hq, _) in &mut prod_query {
             if *faction == my_faction && selectable.is_selected && building.is_constructed && base_hq.is_some() {
                 if prod.queue.len() < prod.max_queue_size {
-                    if economy.has_minerals(*faction, 50) && economy.has_supply(*faction, 1) {
-                        economy.spend_minerals(*faction, 50);
-                        economy.register_supply(*faction, 1);
-                        prod.queue.push(QueuedUnit {
-                            name: "SCV Worker".to_string(),
-                            mineral_cost: 50,
-                            supply_cost: 1,
-                            build_duration: 3.0,
-                        });
-
-                        if let Some(net) = net_entity_opt {
-                            if net_client.status != NetStatus::Disconnected {
-                                net_client.send(&ClientMessage::RequestTrainUnit {
-                                    building_net_id: net.net_id,
-                                    unit_kind: UnitKind::Worker,
-                                });
-                            }
-                        }
-
-                        info!("⛏️ [Queue] SCV Worker queued! Queue size: {}", prod.queue.len());
+                    if !economy.has_minerals(*faction, 50) {
+                        info!("⚠️ [Economy] Not enough minerals for SCV Worker (Requires 50 💎)!");
+                        continue;
                     }
+
+                    if !economy.has_supply(*faction, 1) {
+                        sound_events.send(SoundEffect::SupplyBlocked);
+                        info!("⚠️ [Economy] Not enough supply for SCV Worker (Requires 1 ⚡) - Build a Supply Depot [P]!");
+                        continue;
+                    }
+
+                    economy.spend_minerals(*faction, 50);
+                    economy.register_supply(*faction, 1);
+                    if *faction == Faction::Player1 {
+                        stats.minerals_spent += 50;
+                        stats.units_trained += 1;
+                    }
+                    sound_events.send(SoundEffect::UnitTrained);
+
+                    prod.queue.push(QueuedUnit {
+                        name: "SCV Worker".to_string(),
+                        mineral_cost: 50,
+                        supply_cost: 1,
+                        build_duration: 3.0,
+                    });
+
+                    if let Some(net) = net_entity_opt {
+                        if net_client.status != NetStatus::Disconnected {
+                            net_client.send(&ClientMessage::RequestTrainUnit {
+                                building_net_id: net.net_id,
+                                unit_kind: UnitKind::Worker,
+                            });
+                        }
+                    }
+
+                    info!("⛏️ [Queue] SCV Worker queued! Queue size: {}", prod.queue.len());
                 }
             }
         }
@@ -224,69 +242,96 @@ fn handle_production_hotkeys(
     if keyboard.just_pressed(KeyCode::KeyM) {
         for (mut prod, building, faction, selectable, net_entity_opt, _, barracks) in &mut prod_query {
             if *faction == my_faction && selectable.is_selected && building.is_constructed && barracks.is_some() {
-                if prod.queue.len() < prod.max_queue_size {
-                    if economy.has_minerals(*faction, 100) && economy.has_supply(*faction, 2) {
-                        economy.spend_minerals(*faction, 100);
-                        economy.register_supply(*faction, 2);
-                        prod.queue.push(QueuedUnit {
-                            name: "Marine Soldier".to_string(),
-                            mineral_cost: 100,
-                            supply_cost: 2,
-                            build_duration: 4.0,
+                if prod.queue.len() >= prod.max_queue_size {
+                    info!("⚠️ [Queue] Production queue is full!");
+                    continue;
+                }
+
+                if !economy.has_minerals(*faction, 100) {
+                    info!("⚠️ [Economy] Not enough minerals for Marine (Requires 100 💎)!");
+                    continue;
+                }
+
+                if !economy.has_supply(*faction, 2) {
+                    sound_events.send(SoundEffect::SupplyBlocked);
+                    info!("⚠️ [Economy] Not enough supply for Marine (Requires 2 ⚡) - Build a Supply Depot [P]!");
+                    continue;
+                }
+
+                economy.spend_minerals(*faction, 100);
+                economy.register_supply(*faction, 2);
+                if *faction == Faction::Player1 {
+                    stats.minerals_spent += 100;
+                    stats.units_trained += 1;
+                }
+                sound_events.send(SoundEffect::UnitTrained);
+
+                prod.queue.push(QueuedUnit {
+                    name: "Marine Soldier".to_string(),
+                    mineral_cost: 100,
+                    supply_cost: 2,
+                    build_duration: 4.0,
+                });
+
+                if let Some(net) = net_entity_opt {
+                    if net_client.status != NetStatus::Disconnected {
+                        net_client.send(&ClientMessage::RequestTrainUnit {
+                            building_net_id: net.net_id,
+                            unit_kind: UnitKind::Soldier,
                         });
-
-                        if let Some(net) = net_entity_opt {
-                            if net_client.status != NetStatus::Disconnected {
-                                net_client.send(&ClientMessage::RequestTrainUnit {
-                                    building_net_id: net.net_id,
-                                    unit_kind: UnitKind::Soldier,
-                                });
-                            }
-                        }
-
-                        info!("🔫 [Queue] Marine Soldier queued! Queue size: {}", prod.queue.len());
                     }
                 }
+
+                info!("🔫 [Queue] Marine Soldier queued! Queue size: {}", prod.queue.len());
             }
         }
     }
 
-    // Key 'T' for Siege Tank at Barracks (requires Supply Depot)
-    if keyboard.just_pressed(KeyCode::KeyT) {
-        let has_supply_depot = all_buildings.iter().any(|(b, f, d)| {
-            *f == my_faction && d.is_some() && b.is_constructed
-        });
-
+    // Key 'T', 'S', or 'K' for Siege Tank at Barracks
+    if keyboard.just_pressed(KeyCode::KeyT) || keyboard.just_pressed(KeyCode::KeyS) || keyboard.just_pressed(KeyCode::KeyK) {
         for (mut prod, building, faction, selectable, net_entity_opt, _, barracks) in &mut prod_query {
             if *faction == my_faction && selectable.is_selected && building.is_constructed && barracks.is_some() {
-                if !has_supply_depot {
-                    info!("⚠️ [Tech Tree] Siege Tank requires a constructed Supply Depot!");
+                if prod.queue.len() >= prod.max_queue_size {
+                    info!("⚠️ [Queue] Production queue is full!");
                     continue;
                 }
 
-                if prod.queue.len() < prod.max_queue_size {
-                    if economy.has_minerals(*faction, 200) && economy.has_supply(*faction, 3) {
-                        economy.spend_minerals(*faction, 200);
-                        economy.register_supply(*faction, 3);
-                        prod.queue.push(QueuedUnit {
-                            name: "Siege Tank".to_string(),
-                            mineral_cost: 200,
-                            supply_cost: 3,
-                            build_duration: 5.0,
+                if !economy.has_minerals(*faction, 200) {
+                    info!("⚠️ [Economy] Not enough minerals for Siege Tank (Requires 200 💎)!");
+                    continue;
+                }
+
+                if !economy.has_supply(*faction, 3) {
+                    sound_events.send(SoundEffect::SupplyBlocked);
+                    info!("⚠️ [Economy] Not enough supply for Siege Tank (Requires 3 ⚡) - Build a Supply Depot [P]!");
+                    continue;
+                }
+
+                economy.spend_minerals(*faction, 200);
+                economy.register_supply(*faction, 3);
+                if *faction == Faction::Player1 {
+                    stats.minerals_spent += 200;
+                    stats.units_trained += 1;
+                }
+                sound_events.send(SoundEffect::UnitTrained);
+
+                prod.queue.push(QueuedUnit {
+                    name: "Siege Tank".to_string(),
+                    mineral_cost: 200,
+                    supply_cost: 3,
+                    build_duration: 5.0,
+                });
+
+                if let Some(net) = net_entity_opt {
+                    if net_client.status != NetStatus::Disconnected {
+                        net_client.send(&ClientMessage::RequestTrainUnit {
+                            building_net_id: net.net_id,
+                            unit_kind: UnitKind::Tank,
                         });
-
-                        if let Some(net) = net_entity_opt {
-                            if net_client.status != NetStatus::Disconnected {
-                                net_client.send(&ClientMessage::RequestTrainUnit {
-                                    building_net_id: net.net_id,
-                                    unit_kind: UnitKind::Tank,
-                                });
-                            }
-                        }
-
-                        info!("🛡️ [Queue] Siege Tank queued! Queue size: {}", prod.queue.len());
                     }
                 }
+
+                info!("🛡️ [Queue] Siege Tank queued! Queue size: {}", prod.queue.len());
             }
         }
     }

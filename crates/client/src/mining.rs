@@ -7,6 +7,7 @@ use shared::protocol::ClientMessage;
 use crate::audio_sfx::SoundEffect;
 use crate::net::{NetClient, NetStatus};
 use crate::selection::screen_to_world_2d;
+use crate::stats::MatchStats;
 
 pub struct MiningPlugin;
 
@@ -58,44 +59,39 @@ fn handle_mining_click_orders(
     let mut clicked_node = None;
     for (node_entity, node_transform, radius, resource_node, net_opt) in &node_query {
         let node_pos = node_transform.translation.truncate();
-        if node_pos.distance(click_pos) <= (radius.0 + 20.0) && resource_node.remaining_minerals > 0 {
-            clicked_node = Some((node_entity, node_pos, net_opt.map(|n| n.net_id)));
+        if node_pos.distance(click_pos) <= (radius.0 + 16.0) && resource_node.remaining_minerals > 0 {
+            clicked_node = Some((node_entity, net_opt.map(|n| n.net_id)));
             break;
         }
     }
 
-    let Some((target_node_entity, _, node_net_id_opt)) = clicked_node else {
+    let Some((target_node_entity, target_node_net_opt)) = clicked_node else {
         return;
     };
 
+    // Assign harvest order to all selected friendly workers
+    let my_faction = net_client.my_faction;
     let mut worker_net_ids = Vec::new();
-    let mut any_assigned = false;
 
-    // Assign mining order to all selected friendly SCVs
-    for (worker_entity, faction, selectable, mut worker, net_opt) in &mut worker_query {
-        if *faction == net_client.my_faction && selectable.is_selected {
-            // Remove any MoveTarget so standard pathfinding doesn't conflict with mining state machine
-            commands.entity(worker_entity).remove::<MoveTarget>();
+    for (worker_entity, faction, selectable, mut worker, net_entity_opt) in &mut worker_query {
+        if *faction == my_faction && selectable.is_selected {
             worker.target_node = Some(target_node_entity);
             worker.state = WorkerState::MovingToResource;
-            worker.harvest_timer = 0.0;
-            any_assigned = true;
+            commands.entity(worker_entity).remove::<MoveTarget>();
 
-            if let Some(net) = net_opt {
+            if let Some(net) = net_entity_opt {
                 worker_net_ids.push(net.net_id);
             }
         }
     }
 
-    if any_assigned {
+    if !worker_net_ids.is_empty() {
         sound_events.send(SoundEffect::OrderIssued);
-
-        // Sync with multiplayer server if connected
         if net_client.status != NetStatus::Disconnected {
-            if let Some(node_net_id) = node_net_id_opt {
+            if let Some(resource_net_id) = target_node_net_opt {
                 net_client.send(&ClientMessage::RequestHarvest {
                     worker_net_ids,
-                    resource_net_id: node_net_id,
+                    resource_net_id,
                 });
             }
         }
@@ -107,6 +103,7 @@ fn worker_mining_state_machine(
     mut commands: Commands,
     time: Res<Time>,
     mut economy: ResMut<PlayerEconomy>,
+    mut stats: ResMut<MatchStats>,
     mut worker_query: Query<(
         Entity,
         &mut Worker,
@@ -257,6 +254,9 @@ fn worker_mining_state_machine(
                     // Deposit minerals into economy!
                     if worker.carried_minerals > 0 {
                         economy.add_minerals(*faction, worker.carried_minerals);
+                        if *faction == Faction::Player1 {
+                            stats.minerals_mined += worker.carried_minerals;
+                        }
                         info!("💎 [Mining] Worker deposited {} minerals for {:?}! New Bank Total: {}", worker.carried_minerals, faction, economy.get_minerals(*faction));
                         worker.carried_minerals = 0;
                     }

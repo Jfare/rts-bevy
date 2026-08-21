@@ -1,11 +1,12 @@
 use bevy::prelude::*;
 use bevy::render::camera::OrthographicProjection;
 use bevy::window::PrimaryWindow;
-use shared::components::{Faction, Radius, Selectable};
-
+use shared::components::{Faction, Radius, Selectable, SiegeTank, Soldier, Worker};
+use shared::grid::WorldGridConfig;
+use crate::audio_sfx::SoundEffect;
+use crate::fog_of_war::{FogOfWarGrid, FogState};
 use crate::minimap::{get_minimap_screen_rect, MinimapState};
 use crate::net::NetClient;
-
 
 /// Helper to convert screen cursor coordinates to 2D world coordinates accurately across all platforms
 pub fn screen_to_world_2d(
@@ -39,17 +40,30 @@ impl Plugin for SelectionPlugin {
     }
 }
 
-
 /// Handles mouse input for single-click and drag-box entity selection
 fn handle_selection_input(
     mouse_button: Res<ButtonInput<MouseButton>>,
     keyboard: Res<ButtonInput<KeyCode>>,
     net_client: Res<NetClient>,
+    grid_cfg: Option<Res<WorldGridConfig>>,
+    fog: Res<FogOfWarGrid>,
     window_query: Query<&Window, With<PrimaryWindow>>,
     camera_query: Query<(&Camera, &Transform, Option<&OrthographicProjection>)>,
     mut selection_state: ResMut<SelectionState>,
-    mut selectable_query: Query<(Entity, &Transform, &Radius, &Faction, &mut Selectable)>,
+    mut sound_events: EventWriter<SoundEffect>,
+    mut selectable_query: Query<(
+        Entity,
+        &Transform,
+        &Radius,
+        &Faction,
+        &mut Selectable,
+        Option<&Soldier>,
+        Option<&SiegeTank>,
+        Option<&Worker>,
+    )>,
 ) {
+    let default_cfg = WorldGridConfig::default();
+    let config = grid_cfg.as_deref().unwrap_or(&default_cfg);
 
     let Ok((_camera, cam_transform, ortho_opt)) = camera_query.get_single() else {
         return;
@@ -104,7 +118,7 @@ fn handle_selection_input(
 
         if !shift_held {
             // Clear existing selection if not shift-adding
-            for (_, _, _, _, mut sel) in &mut selectable_query {
+            for (_, _, _, _, mut sel, _, _, _) in &mut selectable_query {
                 sel.is_selected = false;
             }
         }
@@ -117,24 +131,40 @@ fn handle_selection_input(
             let max_y = start_world.y.max(current_world.y);
 
             let mut friendly_selected = false;
+            let mut sound_played = false;
 
             // Pass 1: Select friendly units inside the box
-            for (_, transform, _, faction, mut sel) in &mut selectable_query {
+            for (_, transform, _, faction, mut sel, soldier_opt, tank_opt, worker_opt) in &mut selectable_query {
                 let pos = transform.translation.truncate();
                 if pos.x >= min_x && pos.x <= max_x && pos.y >= min_y && pos.y <= max_y {
                     if *faction == net_client.my_faction {
                         sel.is_selected = true;
                         friendly_selected = true;
-                    }
 
+                        if !sound_played {
+                            if tank_opt.is_some() {
+                                sound_events.send(SoundEffect::TankSelect);
+                            } else if soldier_opt.is_some() {
+                                sound_events.send(SoundEffect::MarineSelect);
+                            } else if worker_opt.is_some() {
+                                sound_events.send(SoundEffect::WorkerSelect);
+                            }
+                            sound_played = true;
+                        }
+                    }
                 }
             }
 
-            // Pass 2: If no friendly units were inside, select any units inside for inspection
+            // Pass 2: If no friendly units were inside, select any visible units/buildings inside for inspection
             if !friendly_selected {
-                for (_, transform, _, _, mut sel) in &mut selectable_query {
+                for (_, transform, _, faction, mut sel, _, _, _) in &mut selectable_query {
                     let pos = transform.translation.truncate();
                     if pos.x >= min_x && pos.x <= max_x && pos.y >= min_y && pos.y <= max_y {
+                        if *faction != net_client.my_faction && *faction != Faction::Neutral {
+                            if fog.get_state_at_world_pos(pos, config) != FogState::Visible {
+                                continue;
+                            }
+                        }
                         sel.is_selected = true;
                     }
                 }
@@ -144,8 +174,15 @@ fn handle_selection_input(
             let mut closest_entity = None;
             let mut closest_dist = f32::MAX;
 
-            for (entity, transform, radius, _, _) in &selectable_query {
+            for (entity, transform, radius, faction, _, _, _, _) in &selectable_query {
                 let pos = transform.translation.truncate();
+                // Skip selecting shrouded enemies in unexplored or non-visible fog
+                if *faction != net_client.my_faction && *faction != Faction::Neutral {
+                    if fog.get_state_at_world_pos(pos, config) != FogState::Visible {
+                        continue;
+                    }
+                }
+
                 let dist = pos.distance(start_world);
                 if dist <= (radius.0 + 24.0) && dist < closest_dist {
                     closest_dist = dist;
@@ -154,11 +191,18 @@ fn handle_selection_input(
             }
 
             if let Some(target_entity) = closest_entity {
-                if let Ok((_, _, _, _, mut sel)) = selectable_query.get_mut(target_entity) {
-                    if shift_held {
-                        sel.is_selected = !sel.is_selected;
-                    } else {
-                        sel.is_selected = true;
+                if let Ok((_, _, _, faction, mut sel, soldier_opt, tank_opt, worker_opt)) = selectable_query.get_mut(target_entity) {
+                    let new_state = if shift_held { !sel.is_selected } else { true };
+                    sel.is_selected = new_state;
+
+                    if new_state && *faction == net_client.my_faction {
+                        if tank_opt.is_some() {
+                            sound_events.send(SoundEffect::TankSelect);
+                        } else if soldier_opt.is_some() {
+                            sound_events.send(SoundEffect::MarineSelect);
+                        } else if worker_opt.is_some() {
+                            sound_events.send(SoundEffect::WorkerSelect);
+                        }
                     }
                 }
             }

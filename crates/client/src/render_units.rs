@@ -3,6 +3,9 @@ use shared::components::{
     Barracks, BaseHQ, Building, Faction, GunTurret, Health, Radius, ResourceNode, Selectable,
     SiegeTank, Soldier, Stimpack, SupplyDepot, TacticalStance, TankMode, Unit, Worker,
 };
+use shared::grid::WorldGridConfig;
+use crate::fog_of_war::{FogOfWarGrid, FogState};
+use crate::net::NetClient;
 
 pub struct RenderUnitsPlugin;
 
@@ -23,6 +26,9 @@ impl Plugin for RenderUnitsPlugin {
 /// Renders units (Workers, Soldiers, Siege Tanks) with faction colors, heading indicators, and weapons
 fn draw_units_system(
     mut gizmos: Gizmos,
+    fog: Res<FogOfWarGrid>,
+    grid_cfg: Option<Res<WorldGridConfig>>,
+    net_client: Res<NetClient>,
     query: Query<(
         &Transform,
         &Radius,
@@ -35,8 +41,18 @@ fn draw_units_system(
         Option<&TacticalStance>,
     ), With<Unit>>,
 ) {
+    let default_cfg = WorldGridConfig::default();
+    let config = grid_cfg.as_deref().unwrap_or(&default_cfg);
+
     for (transform, radius, faction, selectable, worker_opt, soldier_opt, tank_opt, stim_opt, stance_opt) in &query {
         let pos = transform.translation.truncate();
+
+        // Shroud hostile units outside active friendly vision
+        if *faction != net_client.my_faction && *faction != Faction::Neutral {
+            if fog.get_state_at_world_pos(pos, config) != FogState::Visible {
+                continue;
+            }
+        }
         let r = radius.0;
         let rot = transform.rotation.to_euler(EulerRot::ZYX).0;
 
@@ -168,6 +184,9 @@ fn draw_units_system(
 /// Renders buildings with distinct architectural silhouettes based on building type
 fn draw_buildings_system(
     mut gizmos: Gizmos,
+    fog: Res<FogOfWarGrid>,
+    grid_cfg: Option<Res<WorldGridConfig>>,
+    net_client: Res<NetClient>,
     query: Query<(
         &Transform,
         &Building,
@@ -178,8 +197,20 @@ fn draw_buildings_system(
         Option<&GunTurret>,
     )>,
 ) {
+    let default_cfg = WorldGridConfig::default();
+    let config = grid_cfg.as_deref().unwrap_or(&default_cfg);
+
     for (transform, building, faction, hq_opt, barracks_opt, supply_opt, turret_opt) in &query {
         let pos = transform.translation.truncate();
+
+        // Shroud hostile buildings in unexplored fog
+        if *faction != net_client.my_faction && *faction != Faction::Neutral {
+            let fog_state = fog.get_state_at_world_pos(pos, config);
+            if fog_state == FogState::Unexplored {
+                continue;
+            }
+        }
+
         let size = building.size;
 
         let [cr, cg, cb, _] = faction.color_rgba();
@@ -253,7 +284,15 @@ fn draw_buildings_system(
 }
 
 /// Renders mineral crystal fields with crystalline facets and remaining node clusters
-fn draw_resources_system(mut gizmos: Gizmos, query: Query<(&Transform, &ResourceNode)>) {
+fn draw_resources_system(
+    mut gizmos: Gizmos,
+    fog: Res<FogOfWarGrid>,
+    grid_cfg: Option<Res<WorldGridConfig>>,
+    query: Query<(&Transform, &ResourceNode)>,
+) {
+    let default_cfg = WorldGridConfig::default();
+    let config = grid_cfg.as_deref().unwrap_or(&default_cfg);
+
     let crystal_col = Color::srgb(0.22, 0.90, 1.0);
     let crystal_glow = Color::srgba(0.22, 0.90, 1.0, 0.35);
 
@@ -263,6 +302,12 @@ fn draw_resources_system(mut gizmos: Gizmos, query: Query<(&Transform, &Resource
         }
 
         let pos = transform.translation.truncate();
+
+        // Shroud mineral fields in unexplored fog
+        if fog.get_state_at_world_pos(pos, config) == FogState::Unexplored {
+            continue;
+        }
+
         let fullness = (resource.remaining_minerals as f32 / resource.max_minerals as f32).clamp(0.2, 1.0);
         let size = 26.0 * fullness;
 
@@ -292,8 +337,14 @@ fn draw_resources_system(mut gizmos: Gizmos, query: Query<(&Transform, &Resource
 /// Renders floating health bars above damaged entities
 fn draw_health_bars_system(
     mut gizmos: Gizmos,
+    fog: Res<FogOfWarGrid>,
+    grid_cfg: Option<Res<WorldGridConfig>>,
+    net_client: Res<NetClient>,
     query: Query<(&Transform, &Radius, &Health, &Faction, Option<&Building>)>,
 ) {
+    let default_cfg = WorldGridConfig::default();
+    let config = grid_cfg.as_deref().unwrap_or(&default_cfg);
+
     for (transform, radius, health, faction, building_opt) in &query {
         let is_building = building_opt.is_some();
         let is_damaged = health.current < health.max - 0.5;
@@ -303,6 +354,14 @@ fn draw_health_bars_system(
         }
 
         let pos = transform.translation.truncate();
+
+        // Shroud health bars of non-friendly entities in fog
+        if *faction != net_client.my_faction && *faction != Faction::Neutral {
+            if fog.get_state_at_world_pos(pos, config) != FogState::Visible {
+                continue;
+            }
+        }
+
         let bar_w = radius.0 * 2.2;
         let bar_h = 5.0;
         let bar_y = pos.y + radius.0 + 8.0;

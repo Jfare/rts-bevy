@@ -118,6 +118,7 @@ pub enum ClientMessage {
     Ping {
         timestamp: u64,
     },
+    RequestLobbyStats,
 }
 
 /// 30 Hz position, rotation, HP, and visual state for an active entity
@@ -152,6 +153,14 @@ pub enum ServerMessage {
         assigned_faction: Faction,
         room_id: u32,
         is_game_ready: bool,
+    },
+    LobbyStats {
+        queue_1v1: u32,
+        active_1v1_matches: u32,
+        max_1v1_matches: u32,
+        active_solo_matches: u32,
+        max_solo_matches: u32,
+        total_online: u32,
     },
     GameStarted {
         p1_pos: Vec2,

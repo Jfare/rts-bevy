@@ -3,9 +3,21 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Mini-RTS (Bevy 0.15 Wasm)</title>
+    <title>Mini-RTS // Tactical Command (Rust & Bevy 0.15)</title>
     <link data-trunk rel="rust" href="crates/client/Cargo.toml" data-bin="client" />
     <style>
+        :root {
+            --bg-dark: #070a0e;
+            --panel-bg: rgba(13, 20, 30, 0.88);
+            --panel-border: rgba(56, 189, 248, 0.35);
+            --primary: #38bdf8;
+            --primary-glow: rgba(56, 189, 248, 0.4);
+            --accent-orange: #fb923c;
+            --accent-green: #4ade80;
+            --text-main: #f1f5f9;
+            --text-dim: #94a3b8;
+        }
+
         * {
             box-sizing: border-box;
             margin: 0;
@@ -18,12 +30,12 @@
             width: 100%;
             height: 100%;
             overflow: hidden;
-            background-color: #0b0e11;
+            background-color: var(--bg-dark);
             display: flex;
             justify-content: center;
             align-items: center;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            color: #d1d5db;
+            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+            color: var(--text-main);
         }
 
         #bevy-canvas {
@@ -36,9 +48,11 @@
             outline: none;
             touch-action: none;
             cursor: crosshair;
+            z-index: 1;
         }
 
-        #loading-overlay {
+        /* ── Landing Page Portal Overlay ── */
+        #portal-overlay {
             position: absolute;
             top: 0;
             left: 0;
@@ -48,27 +62,219 @@
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            gap: 16px;
-            z-index: 10;
-            pointer-events: none;
-            transition: opacity 0.4s ease-out;
-            background-color: #0b0e11;
+            z-index: 20;
+            background: radial-gradient(circle at center, rgba(15, 23, 42, 0.92) 0%, rgba(7, 10, 14, 0.98) 100%);
+            backdrop-filter: blur(12px);
+            transition: opacity 0.45s ease, transform 0.45s ease;
+            padding: 24px;
         }
 
-        .spinner {
-            width: 48px;
-            height: 48px;
-            border: 4px solid rgba(56, 189, 248, 0.2);
-            border-top: 4px solid #38bdf8;
+        #portal-overlay.hidden {
+            opacity: 0;
+            pointer-events: none;
+            transform: scale(1.02);
+        }
+
+        .portal-card {
+            width: 100%;
+            max-width: 720px;
+            background: var(--panel-bg);
+            border: 1px solid var(--panel-border);
+            border-radius: 12px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8), 0 0 30px var(--primary-glow);
+            padding: 32px;
+            display: flex;
+            flex-direction: column;
+            gap: 22px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .portal-header {
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .portal-title {
+            font-size: 2.1rem;
+            font-weight: 900;
+            letter-spacing: 0.08em;
+            color: #ffffff;
+            text-shadow: 0 0 16px rgba(56, 189, 248, 0.6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+        }
+
+        .portal-subtitle {
+            font-size: 0.95rem;
+            color: var(--text-dim);
+            letter-spacing: 0.03em;
+        }
+
+        /* ── Live Server Telemetry Grid ── */
+        .telemetry-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            background: rgba(15, 23, 42, 0.65);
+            border: 1px solid rgba(56, 189, 248, 0.2);
+            border-radius: 8px;
+            padding: 14px;
+        }
+
+        .telemetry-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            gap: 4px;
+        }
+
+        .telemetry-label {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--text-dim);
+            font-weight: 600;
+        }
+
+        .telemetry-val {
+            font-size: 1.35rem;
+            font-weight: 800;
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .pulse-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: var(--accent-green);
+            box-shadow: 0 0 8px var(--accent-green);
+            animation: pulse 1.8s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.9); opacity: 0.7; }
+            50% { transform: scale(1.3); opacity: 1; }
+            100% { transform: scale(0.9); opacity: 0.7; }
+        }
+
+        /* ── Action Buttons ── */
+        .btn-group {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 14px;
+        }
+
+        .portal-btn {
+            padding: 16px 20px;
+            border-radius: 8px;
+            font-size: 1.05rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            text-transform: uppercase;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+            color: #ffffff;
+            box-shadow: 0 4px 14px rgba(2, 132, 199, 0.4);
+            border: 1px solid rgba(56, 189, 248, 0.6);
+        }
+
+        .btn-primary:hover {
+            background: linear-gradient(135deg, #38bdf8 0%, #0284c7 100%);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(56, 189, 248, 0.6);
+        }
+
+        .btn-secondary {
+            background: linear-gradient(135deg, #0f766e 0%, #115e59 100%);
+            color: #ffffff;
+            box-shadow: 0 4px 14px rgba(15, 118, 110, 0.4);
+            border: 1px solid rgba(45, 212, 191, 0.5);
+        }
+
+        .btn-secondary:hover {
+            background: linear-gradient(135deg, #14b8a6 0%, #0f766e 100%);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(20, 184, 166, 0.6);
+        }
+
+        /* ── Controls Field Manual Drawer ── */
+        .controls-card {
+            background: rgba(10, 16, 24, 0.6);
+            border: 1px solid rgba(148, 163, 184, 0.15);
+            border-radius: 8px;
+            padding: 14px 18px;
+            font-size: 0.85rem;
+            color: var(--text-dim);
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .controls-title {
+            font-weight: 700;
+            color: var(--primary);
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .controls-row {
+            display: flex;
+            justify-content: space-between;
+            line-height: 1.4;
+        }
+
+        .kbd {
+            background: rgba(30, 41, 59, 0.8);
+            border: 1px solid rgba(148, 163, 184, 0.3);
+            border-radius: 4px;
+            padding: 2px 6px;
+            font-family: monospace;
+            font-size: 0.8rem;
+            color: #e2e8f0;
+        }
+
+        .server-status-bar {
+            text-align: center;
+            font-size: 0.8rem;
+            color: #64748b;
+            letter-spacing: 0.04em;
+        }
+
+        #loading-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--primary);
+            font-weight: 600;
+        }
+
+        .mini-spinner {
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(56, 189, 248, 0.2);
+            border-top: 2px solid #38bdf8;
             border-radius: 50%;
             animation: spin 1s linear infinite;
-        }
-
-        .loading-text {
-            font-size: 1.1rem;
-            letter-spacing: 0.05em;
-            color: #94a3b8;
-            font-weight: 500;
         }
 
         @keyframes spin {
@@ -80,9 +286,64 @@
 <body>
     <canvas id="bevy-canvas" tabindex="0"></canvas>
 
-    <div id="loading-overlay">
-        <div class="spinner"></div>
-        <div class="loading-text">Loading Mini-RTS (Bevy 0.15 Wasm)...</div>
+    <div id="portal-overlay">
+        <div class="portal-card">
+            <div class="portal-header">
+                <div class="portal-title">⚡ MINI-RTS // TACTICAL COMMAND</div>
+                <div class="portal-subtitle">Real-Time Strategy i Webbläsaren (Rust & Bevy 0.15 Wasm)</div>
+            </div>
+
+            <!-- Live Server Telemetry -->
+            <div class="telemetry-grid">
+                <div class="telemetry-item">
+                    <div class="telemetry-label">Matchmaking Kö (1v1)</div>
+                    <div class="telemetry-val" style="color: #38bdf8;">
+                        <span class="pulse-dot"></span>
+                        <span id="stat-queue">0</span>
+                    </div>
+                </div>
+                <div class="telemetry-item">
+                    <div class="telemetry-label">1v1 PvP Matcher</div>
+                    <div class="telemetry-val" style="color: #fb923c;" id="stat-pvp">0 / 10</div>
+                </div>
+                <div class="telemetry-item">
+                    <div class="telemetry-label">Solo vs AI Matcher</div>
+                    <div class="telemetry-val" style="color: #4ade80;" id="stat-solo">0 / 10</div>
+                </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="btn-group">
+                <button class="portal-btn btn-primary" id="btn-play-1v1">
+                    ⚔️ Hitta 1v1 Match
+                </button>
+                <button class="portal-btn btn-secondary" id="btn-play-solo">
+                    🤖 Spela Solo vs AI
+                </button>
+            </div>
+
+            <!-- Tactical Field Manual -->
+            <div class="controls-card">
+                <div class="controls-title">🎮 SNABB GUIDE & KONTROLLER</div>
+                <div class="controls-row">
+                    <span><strong>Markera:</strong> Vänsterklick / Drag-box</span>
+                    <span><strong>Order:</strong> Högerklick (Förflytta / Attack / Bryt)</span>
+                </div>
+                <div class="controls-row">
+                    <span><strong>Taktik:</strong> <span class="kbd">A</span> Attack-Move | <span class="kbd">S</span> Stop | <span class="kbd">H</span> Hold | <span class="kbd">P</span> Patrol</span>
+                    <span><strong>Abilities:</strong> <span class="kbd">T</span> Stimpack | <span class="kbd">E</span> Siege Mode</span>
+                </div>
+                <div class="controls-row">
+                    <span><strong>Byggnader:</strong> <span class="kbd">B</span> Bygg-meny (HQ, Barracks, Supply Depot, Gun Turret)</span>
+                    <span><strong>Meny:</strong> <span class="kbd">Tab</span> / <span class="kbd">F1</span> för Match-Lobby</span>
+                </div>
+            </div>
+
+            <div class="server-status-bar">
+                <span id="loading-badge"><div class="mini-spinner"></div> Laddar Wasm Game Engine...</span>
+                <span id="server-cloud-badge" style="display:none;">🌐 Server: <strong>Online (UpCloud FI-HEL1)</strong></span>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -94,24 +355,66 @@
             canvas.addEventListener('contextmenu', (e) => e.preventDefault());
         }
 
-        // Hide overlay once Bevy initializes
+        const portalOverlay = document.getElementById('portal-overlay');
+        const btnPlay1v1 = document.getElementById('btn-play-1v1');
+        const btnPlaySolo = document.getElementById('btn-play-solo');
+        const loadingBadge = document.getElementById('loading-badge');
+        const serverCloudBadge = document.getElementById('server-cloud-badge');
+
+        function launchGame(mode) {
+            window.__rts_requested_mode = mode;
+            if (portalOverlay) {
+                portalOverlay.classList.add('hidden');
+                if (canvas) {
+                    canvas.focus();
+                }
+            }
+        }
+
+        if (btnPlay1v1) {
+            btnPlay1v1.addEventListener('click', () => launchGame('1v1'));
+        }
+        if (btnPlaySolo) {
+            btnPlaySolo.addEventListener('click', () => launchGame('solo'));
+        }
+
+        // Live Telemetry Polling via /api/stats
+        async function fetchServerTelemetry() {
+            try {
+                const res = await fetch('/api/stats');
+                if (res.ok) {
+                    const data = await res.json();
+                    const qEl = document.getElementById('stat-queue');
+                    const pvpEl = document.getElementById('stat-pvp');
+                    const soloEl = document.getElementById('stat-solo');
+
+                    if (qEl) qEl.innerText = data.queue_1v1 ?? 0;
+                    if (pvpEl) pvpEl.innerText = `${data.active_1v1_matches ?? 0} / ${data.max_1v1_matches ?? 10}`;
+                    if (soloEl) soloEl.innerText = `${data.active_solo_matches ?? 0} / ${data.max_solo_matches ?? 10}`;
+                }
+            } catch (err) {
+                // Server might be starting
+            }
+        }
+
+        setInterval(fetchServerTelemetry, 2500);
+        fetchServerTelemetry();
+
+        // Reveal ready state when Wasm canvas initializes
         const observer = new MutationObserver(() => {
-            const overlay = document.getElementById('loading-overlay');
-            if (overlay && canvas.getAttribute('data-raw-handle')) {
-                overlay.style.opacity = '0';
-                setTimeout(() => overlay.remove(), 400);
+            if (canvas && canvas.getAttribute('data-raw-handle')) {
+                if (loadingBadge) loadingBadge.style.display = 'none';
+                if (serverCloudBadge) serverCloudBadge.style.display = 'inline';
                 observer.disconnect();
             }
         });
         observer.observe(document.body, { attributes: true, childList: true, subtree: true });
 
         setTimeout(() => {
-            const overlay = document.getElementById('loading-overlay');
-            if (overlay) {
-                overlay.style.opacity = '0';
-                setTimeout(() => overlay.remove(), 400);
-            }
-        }, 2500);
+            if (loadingBadge) loadingBadge.style.display = 'none';
+            if (serverCloudBadge) serverCloudBadge.style.display = 'inline';
+        }, 3000);
     </script>
 </body>
 </html>
+

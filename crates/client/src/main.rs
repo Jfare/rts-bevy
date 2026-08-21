@@ -6,10 +6,12 @@ mod fog_of_war;
 mod mining;
 mod minimap;
 mod net;
+mod particles;
 mod placement;
 mod production;
 mod render_units;
 mod selection;
+mod stats;
 mod ui;
 mod unit_movement;
 mod world_grid;
@@ -24,6 +26,7 @@ use fog_of_war::FogOfWarPlugin;
 use mining::MiningPlugin;
 use minimap::MinimapPlugin;
 use net::NetClientPlugin;
+use particles::ParticlesPlugin;
 use placement::PlacementPlugin;
 use production::ProductionPlugin;
 use render_units::RenderUnitsPlugin;
@@ -31,6 +34,7 @@ use selection::SelectionPlugin;
 use shared::components::*;
 use shared::economy::PlayerEconomy;
 use shared::grid::BuildingKind;
+use stats::StatsPlugin;
 use ui::RtsUiPlugin;
 use unit_movement::UnitMovementPlugin;
 use world_grid::WorldGridPlugin;
@@ -78,6 +82,8 @@ fn main() {
         PlacementPlugin,
         CombatPlugin,
         AudioSfxPlugin,
+        ParticlesPlugin,
+        StatsPlugin,
         MinimapPlugin,
         FogOfWarPlugin,
         RtsUiPlugin,

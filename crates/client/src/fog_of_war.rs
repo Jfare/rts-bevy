@@ -68,6 +68,14 @@ impl FogOfWarGrid {
             self.cells[cy * FOG_GRID_DIM + cx] = state as u8;
         }
     }
+
+    pub fn get_state_at_world_pos(&self, pos: Vec2, grid_cfg: &WorldGridConfig) -> FogState {
+        if let Some((cx, cy)) = self.world_to_grid(pos, grid_cfg) {
+            self.get_state(cx, cy)
+        } else {
+            FogState::Unexplored
+        }
+    }
 }
 
 pub struct FogOfWarPlugin;
@@ -106,7 +114,6 @@ fn update_fog_of_war(
     }
 
     let reveal_circle = |center_pos: Vec2, radius: f32, fog: &mut FogOfWarGrid| {
-
         let cell_radius = (radius / (config.width() / FOG_GRID_DIM as f32)).ceil() as isize;
         if let Some((cx, cy)) = fog.world_to_grid(center_pos, config) {
             let cx_i = cx as isize;
@@ -150,12 +157,13 @@ fn update_fog_of_war(
     }
 }
 
-/// Toggles visibility of hostile units based on fog of war
+/// Toggles visibility of hostile units and buildings based on fog of war
 fn update_fog_unit_visibility(
     fog: Res<FogOfWarGrid>,
     grid_cfg: Option<Res<WorldGridConfig>>,
     net_client: Res<NetClient>,
-    mut hostiles_query: Query<(&Transform, &Faction, &mut Visibility), With<Unit>>,
+    mut hostiles_query: Query<(&Transform, &Faction, &mut Visibility), (With<Unit>, Without<Building>)>,
+    mut buildings_query: Query<(&Transform, &Faction, &mut Visibility), With<Building>>,
 ) {
     let default_cfg = WorldGridConfig::default();
     let config = grid_cfg.as_deref().unwrap_or(&default_cfg);
@@ -164,11 +172,21 @@ fn update_fog_unit_visibility(
     for (tf, faction, mut visibility) in &mut hostiles_query {
         if *faction != my_faction && *faction != Faction::Neutral {
             let pos = tf.translation.truncate();
-            let is_visible = if let Some((cx, cy)) = fog.world_to_grid(pos, config) {
-                fog.get_state(cx, cy) == FogState::Visible
+            let is_visible = fog.get_state_at_world_pos(pos, config) == FogState::Visible;
+
+            *visibility = if is_visible {
+                Visibility::Inherited
             } else {
-                false
+                Visibility::Hidden
             };
+        }
+    }
+
+    for (tf, faction, mut visibility) in &mut buildings_query {
+        if *faction != my_faction && *faction != Faction::Neutral {
+            let pos = tf.translation.truncate();
+            let state = fog.get_state_at_world_pos(pos, config);
+            let is_visible = state != FogState::Unexplored;
 
             *visibility = if is_visible {
                 Visibility::Inherited
@@ -206,8 +224,8 @@ fn draw_fog_of_war_overlay(
     let max_view = cam_pos + Vec2::new(view_w, view_h) * 0.6;
 
     let cell_size = Vec2::splat(FOG_CELL_SIZE + 1.0); // +1.0 to prevent seams
-    let unexplored_color = Color::srgba(0.015, 0.025, 0.04, 0.94);
-    let explored_color = Color::srgba(0.03, 0.05, 0.08, 0.60);
+    let unexplored_color = Color::srgba(0.015, 0.025, 0.04, 0.98);
+    let explored_color = Color::srgba(0.03, 0.05, 0.08, 0.65);
 
     for cy in 0..FOG_GRID_DIM {
         for cx in 0..FOG_GRID_DIM {

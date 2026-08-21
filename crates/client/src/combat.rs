@@ -1,10 +1,9 @@
 use bevy::prelude::*;
-use bevy::render::camera::OrthographicProjection;
-use bevy::window::PrimaryWindow;
 use shared::components::*;
 use shared::economy::PlayerEconomy;
 use crate::audio_sfx::SoundEffect;
-use crate::selection::screen_to_world_2d;
+use crate::particles::ParticleEvent;
+use crate::stats::MatchStats;
 
 pub struct CombatPlugin;
 
@@ -14,7 +13,6 @@ impl Plugin for CombatPlugin {
             .add_systems(
                 Update,
                 (
-                    handle_attack_click_orders,
                     soldier_combat_system,
                     turret_combat_system,
                     siege_tank_combat_system,
@@ -24,78 +22,6 @@ impl Plugin for CombatPlugin {
                     draw_combat_gizmos,
                 ),
             );
-    }
-}
-
-/// Contextual right-click handler for direct attack orders on enemy units/buildings
-fn handle_attack_click_orders(
-    mouse_button: Res<ButtonInput<MouseButton>>,
-    window_query: Query<&Window, With<PrimaryWindow>>,
-    camera_query: Query<(&Camera, &Transform, Option<&OrthographicProjection>), With<Camera>>,
-    hostile_query: Query<(Entity, &Transform, &Radius, &Faction), (Without<Unit>, Without<Camera>)>,
-    hostile_units: Query<(Entity, &Transform, &Radius, &Faction), (With<Unit>, Without<Camera>)>,
-    mut soldier_query: Query<(&mut Soldier, &Faction, &Selectable)>,
-    mut tank_query: Query<(&mut SiegeTank, &Faction, &Selectable)>,
-) {
-    if !mouse_button.just_pressed(MouseButton::Right) {
-        return;
-    }
-
-    let Ok((_camera, cam_transform, ortho_opt)) = camera_query.get_single() else {
-        return;
-    };
-    let Ok(window) = window_query.get_single() else {
-        return;
-    };
-    let Some(cursor_screen) = window.cursor_position() else {
-        return;
-    };
-
-    let win_size = Vec2::new(window.width(), window.height());
-    let cam_pos = cam_transform.translation.truncate();
-    let cam_scale = ortho_opt.map(|o| o.scale).unwrap_or(1.0);
-    let click_pos = screen_to_world_2d(cursor_screen, win_size, cam_pos, cam_scale);
-
-    // 1. Check if clicked an enemy unit
-    let mut clicked_enemy = None;
-    for (entity, transform, radius, faction) in &hostile_units {
-        if *faction != Faction::Player1 {
-            let pos = transform.translation.truncate();
-            if pos.distance(click_pos) <= (radius.0 + 16.0) {
-                clicked_enemy = Some(entity);
-                break;
-            }
-        }
-    }
-
-    // 2. Check if clicked an enemy building
-    if clicked_enemy.is_none() {
-        for (entity, transform, radius, faction) in &hostile_query {
-            if *faction != Faction::Player1 {
-                let pos = transform.translation.truncate();
-                if pos.distance(click_pos) <= (radius.0 + 20.0) {
-                    clicked_enemy = Some(entity);
-                    break;
-                }
-            }
-        }
-    }
-
-    let Some(target_entity) = clicked_enemy else {
-        return;
-    };
-
-    // Assign focus-fire attack order to all selected friendly combat units
-    for (mut soldier, faction, selectable) in &mut soldier_query {
-        if *faction == Faction::Player1 && selectable.is_selected {
-            soldier.target = Some(target_entity);
-            soldier.state = SoldierState::ChasingTarget;
-        }
-    }
-    for (mut tank, faction, selectable) in &mut tank_query {
-        if *faction == Faction::Player1 && selectable.is_selected {
-            tank.target = Some(target_entity);
-        }
     }
 }
 
@@ -113,6 +39,7 @@ fn soldier_combat_system(
     mut commands: Commands,
     time: Res<Time>,
     mut sound_events: EventWriter<SoundEffect>,
+    mut particle_events: EventWriter<ParticleEvent>,
     mut queries: ParamSet<(
         Query<(Entity, &Transform, &Radius, &Faction, &Health)>,
         Query<(
@@ -130,17 +57,17 @@ fn soldier_combat_system(
 ) {
     let dt = time.delta_secs();
 
-    // 1. Snapshot all potential targets in the world
-    let mut targets = Vec::new();
-    for (entity, transform, radius, faction, health) in &queries.p0() {
-        targets.push(TargetSnapshot {
+    let targets: Vec<TargetSnapshot> = queries
+        .p0()
+        .iter()
+        .map(|(entity, transform, radius, faction, health)| TargetSnapshot {
             entity,
             pos: transform.translation.truncate(),
             radius: radius.0,
             faction: *faction,
             is_dead: health.is_dead(),
-        });
-    }
+        })
+        .collect();
 
     // 2. Update all soldiers using the snapshot
     for (soldier_entity, mut soldier, mut soldier_transform, move_speed, faction, radius, move_target_opt, stim_opt, stance_opt) in
@@ -207,6 +134,9 @@ fn soldier_combat_system(
 
                 if dist <= effective_range {
                     soldier.state = SoldierState::Attacking;
+                    if move_target_opt.is_some() {
+                        commands.entity(soldier_entity).remove::<MoveTarget>();
+                    }
 
                     if soldier.attack_timer >= (soldier.attack_cooldown * cooldown_mult) {
                         soldier.attack_timer = 0.0;
@@ -214,6 +144,11 @@ fn soldier_combat_system(
 
                         let muzzle_offset = dir * (radius.0 + 8.0);
                         let projectile_start = soldier_pos + muzzle_offset;
+
+                        particle_events.send(ParticleEvent::MuzzleSmoke {
+                            pos: projectile_start,
+                            dir,
+                        });
 
                         commands.spawn((
                             Projectile {
@@ -244,7 +179,9 @@ fn soldier_combat_system(
                     let speed_mult = stim_opt
                         .map(|s| if s.is_active { 1.5 } else { 1.0 })
                         .unwrap_or(1.0);
-                    let step = dir * move_speed.0 * speed_mult * dt;
+                    let stop_dist = (effective_range * 0.90).max(10.0);
+                    let travel_needed = (dist - stop_dist).max(0.0);
+                    let step = dir * (move_speed.0 * speed_mult * dt).min(travel_needed);
                     soldier_transform.translation.x += step.x;
                     soldier_transform.translation.y += step.y;
                 }
@@ -258,6 +195,7 @@ fn turret_combat_system(
     mut commands: Commands,
     time: Res<Time>,
     mut sound_events: EventWriter<SoundEffect>,
+    mut particle_events: EventWriter<ParticleEvent>,
     mut turret_query: Query<(Entity, &mut GunTurret, &Transform, &Faction, &Building)>,
     target_query: Query<(Entity, &Transform, &Radius, &Faction, &Health)>,
 ) {
@@ -310,6 +248,11 @@ fn turret_combat_system(
                 sound_events.send(SoundEffect::Gunshot);
 
                 let muzzle_start = turret_pos + dir * 28.0;
+                particle_events.send(ParticleEvent::MuzzleSmoke {
+                    pos: muzzle_start,
+                    dir,
+                });
+
                 commands.spawn((
                     Projectile {
                         origin: muzzle_start,
@@ -328,8 +271,8 @@ fn turret_combat_system(
                 commands.spawn((
                     MuzzleFlash {
                         lifetime: 0.0,
-                        max_lifetime: 0.08,
-                        color: Color::srgb(1.0, 0.95, 0.4),
+                        max_lifetime: 0.09,
+                        color: Color::srgb(1.0, 0.85, 0.2),
                     },
                     Transform::from_xyz(muzzle_start.x, muzzle_start.y, 3.5),
                 ));
@@ -338,48 +281,91 @@ fn turret_combat_system(
     }
 }
 
-/// Siege Tank Combat System with Siege Mode transformation and splash damage
+/// Siege Tank Combat & Artillery System
 fn siege_tank_combat_system(
     mut commands: Commands,
     time: Res<Time>,
     mut sound_events: EventWriter<SoundEffect>,
-    mut tank_query: Query<(Entity, &mut SiegeTank, &mut Transform, &MoveSpeed, &Faction, &Radius, Option<&mut MoveTarget>, Option<&TacticalStance>)>,
-    target_query: Query<(Entity, &Transform, &Radius, &Faction, &Health), Without<SiegeTank>>,
+    mut particle_events: EventWriter<ParticleEvent>,
+    mut queries: ParamSet<(
+        Query<(Entity, &Transform, &Radius, &Faction, &Health)>,
+        Query<(
+            Entity,
+            &mut SiegeTank,
+            &mut Transform,
+            &Faction,
+            &Radius,
+            &MoveSpeed,
+            Option<&MoveTarget>,
+            Option<&TacticalStance>,
+        )>,
+    )>,
 ) {
     let dt = time.delta_secs();
 
-    for (tank_ent, mut tank, mut tank_tf, move_speed, faction, radius, move_target_opt, stance_opt) in &mut tank_query {
-        // Skip firing during transformation transitions
-        if tank.mode == TankMode::TransformingToSiege || tank.mode == TankMode::TransformingToTank {
-            continue;
+    let targets: Vec<TargetSnapshot> = queries
+        .p0()
+        .iter()
+        .map(|(entity, transform, radius, faction, health)| TargetSnapshot {
+            entity,
+            pos: transform.translation.truncate(),
+            radius: radius.0,
+            faction: *faction,
+            is_dead: health.is_dead(),
+        })
+        .collect();
+
+    for (tank_ent, mut tank, mut tank_tf, faction, radius, move_speed, move_target_opt, stance_opt) in &mut queries.p1() {
+        tank.attack_timer += dt;
+
+        // Handle transformation timer
+        if tank.mode == TankMode::TransformingToSiege {
+            tank.transform_timer -= dt;
+            if tank.transform_timer <= 0.0 {
+                tank.mode = TankMode::Siege;
+                tank.attack_range = 380.0;
+                tank.attack_damage = 70.0;
+                tank.attack_cooldown = 2.2;
+                tank.transform_timer = 0.0;
+            }
+        } else if tank.mode == TankMode::TransformingToTank {
+            tank.transform_timer -= dt;
+            if tank.transform_timer <= 0.0 {
+                tank.mode = TankMode::Tank;
+                tank.attack_range = 240.0;
+                tank.attack_damage = 35.0;
+                tank.attack_cooldown = 1.3;
+                tank.transform_timer = 0.0;
+            }
         }
 
-        tank.attack_timer += dt;
-        let tank_pos = tank_tf.translation.truncate();
-        let is_siege = tank.mode == TankMode::Siege;
-        let is_hold_pos = is_siege || stance_opt.map(|s| *s == TacticalStance::HoldPosition).unwrap_or(false);
+        let is_hold_pos = stance_opt.map(|s| *s == TacticalStance::HoldPosition).unwrap_or(false)
+            || tank.mode == TankMode::Siege
+            || tank.mode == TankMode::TransformingToSiege
+            || tank.mode == TankMode::TransformingToTank;
 
-        let current_target = tank.target.and_then(|t_ent| {
-            if let Ok((ent, target_tf, t_rad, t_fac, hp)) = target_query.get(t_ent) {
-                if !hp.is_dead() && faction.is_hostile_to(t_fac) {
-                    return Some((ent, target_tf.translation.truncate(), t_rad.0));
-                }
-            }
-            None
+        let is_siege = tank.mode == TankMode::Siege;
+        let tank_pos = tank_tf.translation.truncate();
+
+        let target_valid = tank.target.and_then(|t_ent| {
+            targets
+                .iter()
+                .find(|t| t.entity == t_ent && !t.is_dead && faction.is_hostile_to(&t.faction) && t.pos.distance(tank_pos) <= (tank.attack_range + t.radius))
+                .map(|t| (t.entity, t.pos, t.radius))
         });
 
-        let active_target = match current_target {
+        let active_target = match target_valid {
             Some(t) => Some(t),
             None => {
                 tank.target = None;
                 let mut best = None;
-                let mut best_dist = tank.attack_range + (if is_siege { 20.0 } else { 100.0 });
-                for (ent, t_tf, t_rad, t_fac, hp) in &target_query {
-                    if ent != tank_ent && faction.is_hostile_to(t_fac) && !hp.is_dead() {
-                        let d = t_tf.translation.truncate().distance(tank_pos);
-                        if d < best_dist {
+                let mut best_dist = tank.attack_range;
+                for t in &targets {
+                    if t.entity != tank_ent && faction.is_hostile_to(&t.faction) && !t.is_dead {
+                        let d = t.pos.distance(tank_pos);
+                        if d <= (tank.attack_range + t.radius) && d < best_dist {
                             best_dist = d;
-                            best = Some((ent, t_tf.translation.truncate(), t_rad.0));
+                            best = Some((t.entity, t.pos, t.radius));
                         }
                     }
                 }
@@ -398,12 +384,29 @@ fn siege_tank_combat_system(
             let effective_range = tank.attack_range + target_rad;
 
             if dist <= effective_range {
+                if move_target_opt.is_some() {
+                    commands.entity(tank_ent).remove::<MoveTarget>();
+                }
+
                 if tank.attack_timer >= tank.attack_cooldown {
                     tank.attack_timer = 0.0;
-                    sound_events.send(SoundEffect::Gunshot);
+                    sound_events.send(SoundEffect::SiegeTankShot);
 
                     let muzzle_dist = if is_siege { radius.0 * 2.2 } else { radius.0 * 1.5 };
                     let muzzle_start = tank_pos + dir * muzzle_dist;
+
+                    particle_events.send(ParticleEvent::MuzzleSmoke {
+                        pos: muzzle_start,
+                        dir,
+                    });
+
+                    if is_siege {
+                        particle_events.send(ParticleEvent::Shockwave {
+                            pos: muzzle_start,
+                            radius: 25.0,
+                            color: Color::srgba(1.0, 0.6, 0.2, 0.8),
+                        });
+                    }
 
                     commands.spawn((
                         Projectile {
@@ -429,8 +432,10 @@ fn siege_tank_combat_system(
                         Transform::from_xyz(muzzle_start.x, muzzle_start.y, 3.5),
                     ));
                 }
-            } else if !is_hold_pos && move_target_opt.is_none() {
-                let step = dir * move_speed.0 * dt;
+            } else if !is_hold_pos && tank.mode == TankMode::Tank {
+                let stop_dist = (effective_range * 0.90).max(20.0);
+                let travel_needed = (dist - stop_dist).max(0.0);
+                let step = dir * (move_speed.0 * dt).min(travel_needed);
                 tank_tf.translation.x += step.x;
                 tank_tf.translation.y += step.y;
             }
@@ -442,6 +447,9 @@ fn siege_tank_combat_system(
 fn projectile_movement_and_impact_system(
     mut commands: Commands,
     time: Res<Time>,
+    mut stats: ResMut<MatchStats>,
+    mut sound_events: EventWriter<SoundEffect>,
+    mut particle_events: EventWriter<ParticleEvent>,
     mut projectile_query: Query<(Entity, &mut Projectile, &mut Transform)>,
     mut health_query: Query<(Entity, &Transform, &Faction, &mut Health), Without<Projectile>>,
 ) {
@@ -466,6 +474,9 @@ fn projectile_movement_and_impact_system(
             if let Some(target_ent) = projectile.target_entity {
                 if let Ok((_, _, _, mut health)) = health_query.get_mut(target_ent) {
                     health.take_damage(projectile.damage);
+                    if projectile.faction == Faction::Player1 {
+                        stats.damage_dealt += projectile.damage;
+                    }
                 }
             }
 
@@ -475,15 +486,32 @@ fn projectile_movement_and_impact_system(
                 let proj_faction = projectile.faction;
                 let splash_dmg = projectile.damage * 0.65;
 
+                particle_events.send(ParticleEvent::Explosion {
+                    pos: impact_pos,
+                    is_heavy: true,
+                });
+                sound_events.send(SoundEffect::Explosion);
+
                 for (ent, tf, faction, mut hp) in &mut health_query {
                     if Some(ent) != projectile.target_entity && proj_faction.is_hostile_to(faction) {
                         let d = tf.translation.truncate().distance(impact_pos);
                         if d <= splash_r {
                             let falloff = 1.0 - (d / splash_r) * 0.5;
-                            hp.take_damage(splash_dmg * falloff);
+                            let dmg = splash_dmg * falloff;
+                            hp.take_damage(dmg);
+                            if projectile.faction == Faction::Player1 {
+                                stats.damage_dealt += dmg;
+                            }
                         }
                     }
                 }
+            } else {
+                let dir = (target_pos - projectile.origin).normalize_or_zero();
+                particle_events.send(ParticleEvent::Sparks {
+                    pos: impact_pos,
+                    dir,
+                    count: 6,
+                });
             }
 
             commands.entity(proj_entity).despawn();
@@ -515,23 +543,46 @@ fn death_and_elimination_system(
     mut commands: Commands,
     mut outcome: ResMut<MatchOutcome>,
     mut economy: ResMut<PlayerEconomy>,
+    mut stats: ResMut<MatchStats>,
     mut sound_events: EventWriter<SoundEffect>,
+    mut particle_events: EventWriter<ParticleEvent>,
     query: Query<(
         Entity,
+        &Transform,
         &Health,
         &Faction,
         Option<&Unit>,
         Option<&BaseHQ>,
     )>,
 ) {
-    for (entity, health, faction, unit_opt, base_hq_opt) in &query {
+    for (entity, transform, health, faction, unit_opt, base_hq_opt) in &query {
         if health.is_dead() {
+            let pos = transform.translation.truncate();
+            let is_hq = base_hq_opt.is_some();
+
+            sound_events.send(SoundEffect::Explosion);
+            particle_events.send(ParticleEvent::Explosion {
+                pos,
+                is_heavy: is_hq,
+            });
+
             if let Some(unit) = unit_opt {
                 economy.unregister_supply(*faction, unit.supply_cost);
                 info!("💀 [{:?}] {} destroyed!", faction, unit.name);
             }
 
-            if base_hq_opt.is_some() {
+            if *faction == Faction::Player1 {
+                stats.units_lost += 1;
+            } else if *faction == Faction::HostileAi {
+                if unit_opt.is_some() {
+                    stats.enemy_units_killed += 1;
+                }
+                if is_hq {
+                    stats.enemy_buildings_destroyed += 1;
+                }
+            }
+
+            if is_hq {
                 if *faction == Faction::HostileAi {
                     *outcome = MatchOutcome::Victory;
                     sound_events.send(SoundEffect::Victory);
@@ -548,14 +599,11 @@ fn death_and_elimination_system(
     }
 }
 
-/// Renders combat visual effects (tracers, muzzle flashes, weapon ranges)
+/// Renders combat visual effects (tracers, muzzle flashes)
 fn draw_combat_gizmos(
     mut gizmos: Gizmos,
     projectiles: Query<(&Transform, &Projectile)>,
     flashes: Query<(&Transform, &MuzzleFlash)>,
-    selected_soldiers: Query<(&Transform, &Soldier, &Selectable)>,
-    selected_tanks: Query<(&Transform, &SiegeTank, &Selectable)>,
-    selected_turrets: Query<(&Transform, &GunTurret, &Selectable)>,
 ) {
     // 1. Draw Projectile Tracers
     for (transform, proj) in &projectiles {
@@ -580,25 +628,5 @@ fn draw_combat_gizmos(
         let pos = transform.translation.truncate();
         gizmos.circle_2d(pos, 5.0, flash.color);
         gizmos.circle_2d(pos, 2.5, Color::WHITE);
-    }
-
-    // 3. Draw Tactical Attack Ranges for Selected Combat Units
-    for (transform, soldier, selectable) in &selected_soldiers {
-        if selectable.is_selected {
-            let pos = transform.translation.truncate();
-            gizmos.circle_2d(pos, soldier.attack_range, Color::srgba(0.95, 0.4, 0.4, 0.35));
-        }
-    }
-    for (transform, tank, selectable) in &selected_tanks {
-        if selectable.is_selected {
-            let pos = transform.translation.truncate();
-            gizmos.circle_2d(pos, tank.attack_range, Color::srgba(0.95, 0.6, 0.2, 0.45));
-        }
-    }
-    for (transform, turret, selectable) in &selected_turrets {
-        if selectable.is_selected {
-            let pos = transform.translation.truncate();
-            gizmos.circle_2d(pos, turret.attack_range, Color::srgba(0.35, 0.85, 1.0, 0.35));
-        }
     }
 }

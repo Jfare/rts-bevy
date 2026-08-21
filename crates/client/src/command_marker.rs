@@ -5,9 +5,10 @@ use shared::components::{
     Faction, Health, MoveTarget, NetEntity, Radius, ResourceNode, Selectable, SiegeTank, Soldier,
     SoldierState, Stimpack, TacticalStance, TankMode, Worker,
 };
-use shared::grid::NavGrid;
+use shared::grid::{NavGrid, WorldGridConfig};
 use shared::protocol::ClientMessage;
 use crate::audio_sfx::SoundEffect;
+use crate::fog_of_war::{FogOfWarGrid, FogState};
 use crate::net::{NetClient, NetStatus};
 use crate::selection::screen_to_world_2d;
 
@@ -42,9 +43,12 @@ fn handle_right_click_orders(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut net_client: ResMut<NetClient>,
     nav_grid: Res<NavGrid>,
+    grid_cfg: Option<Res<WorldGridConfig>>,
+    fog: Res<FogOfWarGrid>,
     window_query: Query<&Window, With<PrimaryWindow>>,
     camera_query: Query<(&Camera, &Transform, Option<&OrthographicProjection>)>,
     node_query: Query<(&Transform, &Radius, &ResourceNode), With<ResourceNode>>,
+    hostile_query: Query<(Entity, &Transform, &Radius, &Faction, Option<&NetEntity>), (Without<Camera>, Without<ResourceNode>)>,
     mut unit_query: Query<(
         Entity,
         &Transform,
@@ -54,6 +58,8 @@ fn handle_right_click_orders(
         Option<&mut MoveTarget>,
         Option<&mut TacticalStance>,
         Option<&Worker>,
+        Option<&mut Soldier>,
+        Option<&mut SiegeTank>,
     )>,
 ) {
     if !mouse_button.just_pressed(MouseButton::Right) {
@@ -89,14 +95,14 @@ fn handle_right_click_orders(
     let mut selected_net_ids = Vec::new();
     let mut has_workers = false;
 
-    for (entity, tf, faction, selectable, net_entity_opt, move_target, stance_opt, worker_opt) in &mut unit_query {
+    for (entity, tf, faction, selectable, net_entity_opt, _, _, worker_opt, _, _) in &unit_query {
         if *faction == net_client.my_faction && selectable.is_selected {
             if is_clicking_mineral && worker_opt.is_some() {
                 has_workers = true;
                 continue;
             }
 
-            selected_units.push((entity, tf.translation.truncate(), move_target, stance_opt));
+            selected_units.push((entity, tf.translation.truncate()));
             if let Some(net) = net_entity_opt {
                 selected_net_ids.push(net.net_id);
             }
@@ -120,6 +126,61 @@ fn handle_right_click_orders(
         return;
     }
 
+    // Check if clicked on a visible hostile enemy unit or building
+    let default_cfg = WorldGridConfig::default();
+    let config = grid_cfg.as_deref().unwrap_or(&default_cfg);
+
+    let mut clicked_hostile = None;
+    for (h_ent, h_tf, h_radius, h_fac, h_net_opt) in &hostile_query {
+        if h_fac.is_hostile_to(&net_client.my_faction) {
+            let pos = h_tf.translation.truncate();
+            let is_visible = fog.get_state_at_world_pos(pos, config) == FogState::Visible;
+            if is_visible && pos.distance(target_world_pos) <= (h_radius.0 + 16.0) {
+                clicked_hostile = Some((h_ent, h_net_opt.map(|n| n.net_id)));
+                break;
+            }
+        }
+    }
+
+    // Direct Focus-Fire Attack Order on Enemy Target
+    if let Some((target_entity, target_net_opt)) = clicked_hostile {
+        // Spawn bright red attack pulse marker
+        commands.spawn((
+            CommandMarker {
+                lifetime: 0.0,
+                max_lifetime: 0.45,
+                initial_radius: 22.0,
+                color: Color::srgba(0.95, 0.25, 0.25, 0.95), // Red attack marker
+            },
+            Transform::from_xyz(target_world_pos.x, target_world_pos.y, 1.0),
+        ));
+
+        // Network command dispatch
+        if net_client.status != NetStatus::Disconnected && !selected_net_ids.is_empty() {
+            if let Some(target_net_id) = target_net_opt {
+                net_client.send(&ClientMessage::RequestAttackTarget {
+                    unit_net_ids: selected_net_ids,
+                    target_net_id,
+                });
+            }
+        }
+
+        // Set attack target and remove ground MoveTarget so unit stops at weapon range
+        for (entity, _, faction, selectable, _, _, _, _, soldier_opt, tank_opt) in &mut unit_query {
+            if *faction == net_client.my_faction && selectable.is_selected {
+                commands.entity(entity).remove::<MoveTarget>();
+                if let Some(mut soldier) = soldier_opt {
+                    soldier.target = Some(target_entity);
+                    soldier.state = SoldierState::ChasingTarget;
+                }
+                if let Some(mut tank) = tank_opt {
+                    tank.target = Some(target_entity);
+                }
+            }
+        }
+        return;
+    }
+
     // Send networked command if online
     if net_client.status != NetStatus::Disconnected && !selected_net_ids.is_empty() {
         if is_patrol {
@@ -139,7 +200,7 @@ fn handle_right_click_orders(
     let unit_count = selected_units.len();
 
     // 2. Assign formation destinations and A* paths (Client-side local prediction)
-    for (i, (entity, unit_pos, move_target_opt, stance_opt)) in selected_units.into_iter().enumerate() {
+    for (i, (entity, unit_pos)) in selected_units.iter().enumerate() {
         let formation_offset = if unit_count > 1 {
             let angle = (i as f32) * 2.39996; // Golden angle spread
             let dist = 24.0 * (i as f32).sqrt();
@@ -149,37 +210,53 @@ fn handle_right_click_orders(
         };
 
         let destination = target_world_pos + formation_offset;
-        let waypoints = nav_grid.find_path(unit_pos, destination);
+        let waypoints = nav_grid.find_path(*unit_pos, destination);
 
-        if is_patrol {
-            if let Some(mut stance) = stance_opt {
-                *stance = TacticalStance::Patrol {
-                    origin: unit_pos,
-                    target: destination,
-                    heading_to_target: true,
-                };
-            } else {
-                commands.entity(entity).insert(TacticalStance::Patrol {
-                    origin: unit_pos,
-                    target: destination,
-                    heading_to_target: true,
-                });
+        if let Ok((_, _, _, _, _, move_target_opt, stance_opt, _, soldier_opt, tank_opt)) = unit_query.get_mut(*entity) {
+            if let Some(mut soldier) = soldier_opt {
+                soldier.target = None;
+                if soldier.state == SoldierState::Attacking || soldier.state == SoldierState::ChasingTarget {
+                    soldier.state = if is_attack_move || is_patrol {
+                        SoldierState::AttackMoving
+                    } else {
+                        SoldierState::MovingToGround
+                    };
+                }
             }
-        } else if let Some(mut stance) = stance_opt {
-            *stance = TacticalStance::Aggressive;
-        }
+            if let Some(mut tank) = tank_opt {
+                tank.target = None;
+            }
 
-        if let Some(mut existing_target) = move_target_opt {
-            existing_target.destination = destination;
-            existing_target.is_attack_move = is_attack_move || is_patrol;
-            existing_target.waypoints = waypoints;
-            existing_target.current_waypoint_idx = 0;
-        } else {
-            commands.entity(entity).insert(MoveTarget::with_waypoints(
-                destination,
-                is_attack_move || is_patrol,
-                waypoints,
-            ));
+            if is_patrol {
+                if let Some(mut stance) = stance_opt {
+                    *stance = TacticalStance::Patrol {
+                        origin: *unit_pos,
+                        target: destination,
+                        heading_to_target: true,
+                    };
+                } else {
+                    commands.entity(*entity).insert(TacticalStance::Patrol {
+                        origin: *unit_pos,
+                        target: destination,
+                        heading_to_target: true,
+                    });
+                }
+            } else if let Some(mut stance) = stance_opt {
+                *stance = TacticalStance::Aggressive;
+            }
+
+            if let Some(mut existing_target) = move_target_opt {
+                existing_target.destination = destination;
+                existing_target.is_attack_move = is_attack_move || is_patrol;
+                existing_target.waypoints = waypoints;
+                existing_target.current_waypoint_idx = 0;
+            } else {
+                commands.entity(*entity).insert(MoveTarget::with_waypoints(
+                    destination,
+                    is_attack_move || is_patrol,
+                    waypoints,
+                ));
+            }
         }
     }
 
@@ -203,14 +280,18 @@ fn handle_right_click_orders(
     ));
 }
 
+use crate::particles::ParticleEvent;
+
 /// Handles tactical stance hotkeys (Stop [S], Hold [H], Stimpack [T], Siege Mode [E])
 fn handle_stance_and_ability_hotkeys(
     mut commands: Commands,
     keyboard: Res<ButtonInput<KeyCode>>,
     mut net_client: ResMut<NetClient>,
     mut sound_events: EventWriter<SoundEffect>,
+    mut particle_events: EventWriter<ParticleEvent>,
     mut unit_query: Query<(
         Entity,
+        &Transform,
         &Faction,
         &Selectable,
         Option<&NetEntity>,
@@ -226,7 +307,7 @@ fn handle_stance_and_ability_hotkeys(
     // 1. [S] Key: Stop Order
     if keyboard.just_pressed(KeyCode::KeyS) {
         let mut net_ids = Vec::new();
-        for (entity, faction, selectable, net_opt, _, mut soldier_opt, _, _, mut stance_opt) in &mut unit_query {
+        for (entity, _, faction, selectable, net_opt, _, mut soldier_opt, _, _, mut stance_opt) in &mut unit_query {
             if *faction == my_faction && selectable.is_selected {
                 commands.entity(entity).remove::<MoveTarget>();
                 if let Some(ref mut soldier) = soldier_opt {
@@ -251,7 +332,7 @@ fn handle_stance_and_ability_hotkeys(
     // 2. [H] Key: Hold Position Order
     if keyboard.just_pressed(KeyCode::KeyH) {
         let mut net_ids = Vec::new();
-        for (entity, faction, selectable, net_opt, _, mut soldier_opt, _, _, mut stance_opt) in &mut unit_query {
+        for (entity, _, faction, selectable, net_opt, _, mut soldier_opt, _, _, mut stance_opt) in &mut unit_query {
             if *faction == my_faction && selectable.is_selected {
                 commands.entity(entity).remove::<MoveTarget>();
                 if let Some(ref mut soldier) = soldier_opt {
@@ -277,11 +358,14 @@ fn handle_stance_and_ability_hotkeys(
     // 3. [T] Key: Marine Stimpack Ability
     if keyboard.just_pressed(KeyCode::KeyT) {
         let mut net_ids = Vec::new();
-        for (entity, faction, selectable, net_opt, health_opt, soldier_opt, stim_opt, _, _) in &mut unit_query {
+        for (entity, tf, faction, selectable, net_opt, health_opt, soldier_opt, stim_opt, _, _) in &mut unit_query {
             if *faction == my_faction && selectable.is_selected && soldier_opt.is_some() {
                 if let Some(mut health) = health_opt {
                     if health.current > 20.0 {
                         health.take_damage(15.0);
+                        let pos = tf.translation.truncate();
+                        particle_events.send(ParticleEvent::StimpackVapor { pos });
+
                         if let Some(mut stim) = stim_opt {
                             stim.is_active = true;
                             stim.timer = stim.duration;
@@ -300,7 +384,7 @@ fn handle_stance_and_ability_hotkeys(
             }
         }
         if !net_ids.is_empty() {
-            sound_events.send(SoundEffect::OrderIssued);
+            sound_events.send(SoundEffect::Stimpack);
             info!("💉 [Ability] Stimpack activated on {} Marines!", net_ids.len());
             if net_client.status != NetStatus::Disconnected {
                 net_client.send(&ClientMessage::RequestStimpack { unit_net_ids: net_ids });
@@ -311,14 +395,20 @@ fn handle_stance_and_ability_hotkeys(
     // 4. [E] Key: Toggle Siege Tank Mode
     if keyboard.just_pressed(KeyCode::KeyE) {
         let mut net_ids = Vec::new();
-        for (entity, faction, selectable, net_opt, _, _, _, tank_opt, _) in &mut unit_query {
+        for (entity, tf, faction, selectable, net_opt, _, _, _, tank_opt, _) in &mut unit_query {
             if *faction == my_faction && selectable.is_selected {
                 if let Some(mut tank) = tank_opt {
+                    let pos = tf.translation.truncate();
                     match tank.mode {
                         TankMode::Tank => {
                             tank.mode = TankMode::TransformingToSiege;
                             tank.transform_timer = 1.0;
                             commands.entity(entity).remove::<MoveTarget>();
+                            particle_events.send(ParticleEvent::Shockwave {
+                                pos,
+                                radius: 45.0,
+                                color: Color::srgba(1.0, 0.6, 0.2, 0.8),
+                            });
                             if let Some(net) = net_opt {
                                 net_ids.push(net.net_id);
                             }
@@ -327,6 +417,11 @@ fn handle_stance_and_ability_hotkeys(
                         TankMode::Siege => {
                             tank.mode = TankMode::TransformingToTank;
                             tank.transform_timer = 1.0;
+                            particle_events.send(ParticleEvent::Shockwave {
+                                pos,
+                                radius: 30.0,
+                                color: Color::srgba(0.4, 0.8, 1.0, 0.8),
+                            });
                             if let Some(net) = net_opt {
                                 net_ids.push(net.net_id);
                             }
@@ -338,7 +433,7 @@ fn handle_stance_and_ability_hotkeys(
             }
         }
         if !net_ids.is_empty() {
-            sound_events.send(SoundEffect::OrderIssued);
+            sound_events.send(SoundEffect::SiegeModeToggle);
             if net_client.status != NetStatus::Disconnected {
                 net_client.send(&ClientMessage::RequestToggleSiegeMode { unit_net_ids: net_ids });
             }

@@ -26,6 +26,9 @@ pub struct Room {
 }
 
 
+pub const MAX_ACTIVE_PVP_MATCHES: usize = 10;
+pub const MAX_ACTIVE_SOLO_MATCHES: usize = 10;
+
 #[derive(Resource, Default)]
 pub struct Matchmaker {
     pub players: HashMap<u64, PlayerSession>,
@@ -50,6 +53,39 @@ impl Matchmaker {
         let id = self.next_net_id;
         self.next_net_id += 1;
         id
+    }
+
+    pub fn active_1v1_count(&self) -> usize {
+        self.rooms
+            .values()
+            .filter(|r| r.mode == GameMode::Multiplayer1v1 && r.is_active)
+            .count()
+    }
+
+    pub fn active_solo_count(&self) -> usize {
+        self.rooms
+            .values()
+            .filter(|r| r.mode == GameMode::SoloVsAi && r.is_active)
+            .count()
+    }
+
+    pub fn can_start_pvp(&self) -> bool {
+        self.active_1v1_count() < MAX_ACTIVE_PVP_MATCHES
+    }
+
+    pub fn can_start_solo(&self) -> bool {
+        self.active_solo_count() < MAX_ACTIVE_SOLO_MATCHES
+    }
+
+    /// Returns (queue_1v1, active_1v1, max_1v1, active_solo, max_solo, total_online)
+    pub fn get_telemetry(&self) -> (u32, u32, u32, u32, u32, u32) {
+        let queue_1v1 = if self.waiting_1v1_peer.is_some() { 1 } else { 0 };
+        let active_1v1 = self.active_1v1_count() as u32;
+        let max_1v1 = MAX_ACTIVE_PVP_MATCHES as u32;
+        let active_solo = self.active_solo_count() as u32;
+        let max_solo = MAX_ACTIVE_SOLO_MATCHES as u32;
+        let total_online = self.players.len() as u32;
+        (queue_1v1, active_1v1, max_1v1, active_solo, max_solo, total_online)
     }
 }
 
