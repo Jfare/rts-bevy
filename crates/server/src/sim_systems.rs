@@ -33,6 +33,8 @@ impl Plugin for ServerSimulationPlugin {
                     server_mining_system,
                     server_production_system,
                     server_combat_system,
+                    server_turret_combat_system,
+                    server_siege_tank_combat_system,
                     server_match_outcome_system,
                     server_tick_snapshot_system,
                 ),
@@ -937,6 +939,248 @@ fn server_combat_system(
                 }
             } else {
                 soldier.target = None;
+            }
+        }
+    }
+}
+
+/// Automated defensive gun turret combat on dedicated server
+fn server_turret_combat_system(
+    mut commands: Commands,
+    time: Res<Time>,
+    net_channels: Res<ServerNetworkChannels>,
+    mut economy: ResMut<PlayerEconomy>,
+    mut turrets: Query<(
+        Entity,
+        &NetEntity,
+        &Faction,
+        &Transform,
+        &mut GunTurret,
+        &Building,
+    )>,
+    mut targets: Query<(
+        Entity,
+        &NetEntity,
+        &Faction,
+        &Transform,
+        &mut Health,
+        Option<&Unit>,
+    )>,
+) {
+    let dt = time.delta_secs();
+
+    for (_t_entity, turret_net, turret_faction, turret_tf, mut turret, building) in &mut turrets {
+        if !building.is_constructed {
+            continue;
+        }
+        turret.attack_timer += dt;
+        let turret_pos = turret_tf.translation.truncate();
+
+        // 1. Scan for nearest hostile target if current target is invalid or dead
+        let mut target_valid = false;
+        if let Some(target_e) = turret.target {
+            if let Ok((_, _, target_faction, target_tf, target_hp, _)) = targets.get(target_e) {
+                if turret_faction.is_hostile_to(target_faction)
+                    && !target_hp.is_dead()
+                    && (target_tf.translation.truncate() - turret_pos).length() <= turret.attack_range
+                {
+                    target_valid = true;
+                }
+            }
+        }
+
+        if !target_valid {
+            turret.target = None;
+            let mut closest = None;
+            let mut min_d = turret.attack_range;
+            for (t_entity, _, target_faction, target_tf, target_hp, _) in &targets {
+                if turret_faction.is_hostile_to(target_faction) && !target_hp.is_dead() {
+                    let d = (target_tf.translation.truncate() - turret_pos).length();
+                    if d <= min_d {
+                        min_d = d;
+                        closest = Some(t_entity);
+                    }
+                }
+            }
+            if let Some(target) = closest {
+                turret.target = Some(target);
+            }
+        }
+
+        // 2. Fire weapon upon cooldown
+        if let Some(target_entity) = turret.target {
+            if let Ok((_, target_net, _, target_tf, mut target_hp, unit_opt)) =
+                targets.get_mut(target_entity)
+            {
+                let target_pos = target_tf.translation.truncate();
+                let dist = (target_pos - turret_pos).length();
+
+                if dist <= turret.attack_range {
+                    let dir = (target_pos - turret_pos).normalize_or_zero();
+                    turret.barrel_angle = dir.y.atan2(dir.x);
+
+                    if turret.attack_timer >= turret.attack_cooldown {
+                        turret.attack_timer = 0.0;
+                        target_hp.take_damage(turret.attack_damage);
+
+                        let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::Broadcast {
+                            msg: ServerMessage::ProjectileFired {
+                                attacker_net_id: turret_net.net_id,
+                                target_net_id: target_net.net_id,
+                                origin: turret_pos + dir * 28.0,
+                                target_pos,
+                                damage: turret.attack_damage,
+                            },
+                        });
+
+                        let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::Broadcast {
+                            msg: ServerMessage::EntityDamaged {
+                                target_net_id: target_net.net_id,
+                                current_hp: target_hp.current,
+                                max_hp: target_hp.max,
+                            },
+                        });
+
+                        if target_hp.is_dead() {
+                            if let Some(unit) = unit_opt {
+                                economy.unregister_supply(*turret_faction, unit.supply_cost);
+                            }
+
+                            let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::Broadcast {
+                                msg: ServerMessage::EntityDied {
+                                    net_id: target_net.net_id,
+                                    faction: *turret_faction,
+                                },
+                            });
+
+                            commands.entity(target_entity).despawn_recursive();
+                            turret.target = None;
+                        }
+                    }
+                } else {
+                    turret.target = None;
+                }
+            } else {
+                turret.target = None;
+            }
+        }
+    }
+}
+
+/// Heavy armored Siege Tank combat on dedicated server
+fn server_siege_tank_combat_system(
+    mut commands: Commands,
+    time: Res<Time>,
+    net_channels: Res<ServerNetworkChannels>,
+    mut economy: ResMut<PlayerEconomy>,
+    mut tanks: Query<(
+        Entity,
+        &NetEntity,
+        &Faction,
+        &Transform,
+        &mut SiegeTank,
+    )>,
+    mut targets: Query<(
+        Entity,
+        &NetEntity,
+        &Faction,
+        &Transform,
+        &mut Health,
+        Option<&Unit>,
+    ), Without<SiegeTank>>,
+) {
+    let dt = time.delta_secs();
+
+    for (_t_entity, tank_net, tank_faction, tank_tf, mut tank) in &mut tanks {
+        tank.attack_timer += dt;
+        let tank_pos = tank_tf.translation.truncate();
+
+        // 1. Scan for nearest hostile target if current target is invalid or dead
+        let mut target_valid = false;
+        if let Some(target_e) = tank.target {
+            if let Ok((_, _, target_faction, target_tf, target_hp, _)) = targets.get(target_e) {
+                if tank_faction.is_hostile_to(target_faction)
+                    && !target_hp.is_dead()
+                    && (target_tf.translation.truncate() - tank_pos).length() <= tank.attack_range
+                {
+                    target_valid = true;
+                }
+            }
+        }
+
+        if !target_valid {
+            tank.target = None;
+            let mut closest = None;
+            let mut min_d = tank.attack_range;
+            for (t_entity, _, target_faction, target_tf, target_hp, _) in &targets {
+                if tank_faction.is_hostile_to(target_faction) && !target_hp.is_dead() {
+                    let d = (target_tf.translation.truncate() - tank_pos).length();
+                    if d <= min_d {
+                        min_d = d;
+                        closest = Some(t_entity);
+                    }
+                }
+            }
+            if let Some(target) = closest {
+                tank.target = Some(target);
+            }
+        }
+
+        // 2. Fire weapon upon cooldown
+        if let Some(target_entity) = tank.target {
+            if let Ok((_, target_net, _, target_tf, mut target_hp, unit_opt)) =
+                targets.get_mut(target_entity)
+            {
+                let target_pos = target_tf.translation.truncate();
+                let dist = (target_pos - tank_pos).length();
+
+                if dist <= tank.attack_range {
+                    let dir = (target_pos - tank_pos).normalize_or_zero();
+                    tank.turret_angle = dir.y.atan2(dir.x);
+
+                    if tank.attack_timer >= tank.attack_cooldown {
+                        tank.attack_timer = 0.0;
+                        target_hp.take_damage(tank.attack_damage);
+
+                        let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::Broadcast {
+                            msg: ServerMessage::ProjectileFired {
+                                attacker_net_id: tank_net.net_id,
+                                target_net_id: target_net.net_id,
+                                origin: tank_pos + dir * 30.0,
+                                target_pos,
+                                damage: tank.attack_damage,
+                            },
+                        });
+
+                        let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::Broadcast {
+                            msg: ServerMessage::EntityDamaged {
+                                target_net_id: target_net.net_id,
+                                current_hp: target_hp.current,
+                                max_hp: target_hp.max,
+                            },
+                        });
+
+                        if target_hp.is_dead() {
+                            if let Some(unit) = unit_opt {
+                                economy.unregister_supply(*tank_faction, unit.supply_cost);
+                            }
+
+                            let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::Broadcast {
+                                msg: ServerMessage::EntityDied {
+                                    net_id: target_net.net_id,
+                                    faction: *tank_faction,
+                                },
+                            });
+
+                            commands.entity(target_entity).despawn_recursive();
+                            tank.target = None;
+                        }
+                    }
+                } else {
+                    tank.target = None;
+                }
+            } else {
+                tank.target = None;
             }
         }
     }

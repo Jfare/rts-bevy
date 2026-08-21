@@ -82,25 +82,49 @@ All in-game text, UI, HUD elements, unit cards, and commands are strictly in **E
 
 ---
 
-## 🎯 Next Session: Session B6 (Future Polish & Systems)
+### ✅ Session B6: Minimap Radar, Fog of War, Audio SFX & New Units
+- [x] **Interactive Minimap Radar** ([`crates/client/src/minimap.rs`](file:///home/john/Godot/rts-bevy/crates/client/src/minimap.rs)):
+  - Bottom-left radar widget with real-time entity blips (units, structures, crystal nodes).
+  - Dynamic camera frustum viewport rectangle.
+  - Left-click drag to pan camera and right-click minimap order routing.
+- [x] **Fog of War** ([`crates/client/src/fog_of_war.rs`](file:///home/john/Godot/rts-bevy/crates/client/src/fog_of_war.rs)):
+  - Grid-based vision state machine (`Unexplored` $\to$ `Explored` $\to$ `Visible`).
+  - Dynamic unit and structure sight radiuses with viewport-culled rendering.
+  - Hides hostile entities under fog of war.
+- [x] **Web Audio SFX Engine** ([`crates/client/src/audio_sfx.rs`](file:///home/john/Godot/rts-bevy/crates/client/src/audio_sfx.rs)):
+  - Web Audio synth audio for gunshots, laser mining, build placement, unit training, and victory/defeat fanfares.
+- [x] **Expanded Unit Roster & Defenses**:
+  - **Gun Turret**: Automated stationary base defense with rapid fire ([`crates/client/src/combat.rs`](file:///home/john/Godot/rts-bevy/crates/client/src/combat.rs), [`crates/server/src/sim_systems.rs`](file:///home/john/Godot/rts-bevy/crates/server/src/sim_systems.rs)).
+  - **Siege Tank**: Heavy armored tracked vehicle with rotating artillery cannon.
+  - Full client and dedicated server simulation parity for all combat units.
 
-### Focus: Interactive Minimap Radar, Fog of War & Audio Effects
+---
+
+### 🛡️ Dependency & Security Audit (August 20, 2026 Incident)
+- [x] **Supply Chain Audit Verified**:
+  - `arrayref` locked to safe version `0.3.9` with SHA-256 integrity verification.
+  - Zero presence of compromised packages (`arrayref@0.3.10`, `internment@0.8.7`, `append-only-vec@0.1.9`, `proc-macro1`).
+  - Automated security audit script created: [`scripts/security_audit.sh`](file:///home/john/Godot/rts-bevy/scripts/security_audit.sh).
+
+---
+
+## 🎯 Next Session: Session B7 (Tactical Pathfinding, Stances & Tech Tree)
+
+### Focus: Grid/Flowfield Navigation, Unit Stances & Tech Upgrades
 
 ```
 +-------------------------------------------------------------------------+
-|                              SESSION B6                                 |
+|                              SESSION B7                                 |
 +-------------------------------------------------------------------------+
 |                                                                         |
-|  [Part 1: Minimap Radar]   Interactive 2D radar widget with frustum box |
-|                            and click-to-pan camera navigation           |
+|  [Part 1: A* Pathfinding]   Tile-grid obstacle navigation avoiding      |
+|                            buildings and mineral patch choke-points     |
 |                                                                         |
-|  [Part 2: Fog of War]      Grid-based vision exploration system         |
-|                            (Unexplored / Explored / Visible)            |
+|  [Part 2: Tactical Stances] Hold Position (H), Patrol (P), Stop (S),   |
+|                            Attack-Move (A) squad command states         |
 |                                                                         |
-|  [Part 3: Audio Effects]   Kira audio plugin integration for SFX        |
-|                            (Shots, clicks, mining laser, alerts)        |
-|                                                                         |
-|  [Part 4: New Units]       Siege Tank & Defensive Gun Turret            |
+|  [Part 3: Tech Tree]       Prerequisite buildings & research upgrades   |
+|                            (e.g., Siege Mode, Stimpack, Armor Upgrades) |
 |                                                                         |
 +-------------------------------------------------------------------------+
 ```
@@ -112,16 +136,19 @@ All in-game text, UI, HUD elements, unit cards, and commands are strictly in **E
 To run locally:
 
 ```bash
-# 1. Start dedicated server (port 8080):
+# 1. Run security audit check:
+./scripts/security_audit.sh
+
+# 2. Start dedicated server (port 8080):
 cargo run --bin server
 
-# 2. Run local web client (Wasm on port 8000):
+# 3. Run local web client (Wasm on port 8000):
 trunk serve --open
 
-# 3. Or run native desktop client:
+# 4. Or run native desktop client:
 cargo run --bin client
 
-# 4. Or launch entire stack in Docker:
+# 5. Or launch entire stack in Docker:
 docker compose up --build
 ```
 
