@@ -11,8 +11,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  test:
-    name: 🧪 Run Security Audit & Unit Tests
+  build-and-deploy:
+    name: 🚀 Build, Test & Deploy
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -23,10 +23,12 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
-      - name: Install Linux dependencies for Bevy
+      - name: Install Linux dependencies for Bevy & Trunk
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev pkg-config
+          # Fast install Trunk prebuilt binary
+          wget -qO- https://github.com/trunk-rs/trunk/releases/download/v0.21.5/trunk-x86_64-unknown-linux-gnu.tar.gz | sudo tar -xzf- -C /usr/local/bin
 
       - name: Security & Dependency Verification
         run: |
@@ -36,13 +38,21 @@ jobs:
       - name: Run Workspace Tests
         run: cargo test --workspace
 
-  deploy:
-    name: 🚀 Deploy to Production VPS
-    needs: test
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Build WebAssembly Client (Trunk)
+        run: trunk build --release
+
+      - name: Build Dedicated Server Binary
+        run: cargo build --release --bin server
+
+      - name: Package Lightweight Deployment Bundle
+        run: |
+          mkdir -p deploy/bin deploy/dist deploy/docker
+          cp -r dist/* deploy/dist/
+          cp target/release/server deploy/bin/server
+          cp docker-compose.yml deploy/
+          cp docker/Dockerfile.server deploy/docker/
+          cp docker/Dockerfile.client deploy/docker/
+          cp docker/Caddyfile deploy/docker/
 
       - name: Setup SSH Key & Known Hosts
         env:
@@ -54,26 +64,26 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
 
-      - name: Ensure Remote Directory Exists
+      - name: Ensure Remote Directory Exists & Clean Old Build Cache
         env:
           SSH_USER: ${{ secrets.SSH_USER }}
           SSH_HOST: ${{ secrets.SSH_HOST }}
         run: |
-          ssh -o StrictHostKeyChecking=accept-new "$SSH_USER@$SSH_HOST" "mkdir -p /opt/rts-bevy"
+          ssh -o StrictHostKeyChecking=accept-new "$SSH_USER@$SSH_HOST" "bash -c '
+            mkdir -p /opt/rts-bevy
+            # Free up disk space from previous compilation attempts on VPS
+            docker builder prune -af --filter until=1h || true
+            docker system prune -f || true
+          '"
 
-      - name: Sync Project Files via Rsync
+      - name: Sync Lightweight Deployment to VPS
         env:
           SSH_USER: ${{ secrets.SSH_USER }}
           SSH_HOST: ${{ secrets.SSH_HOST }}
         run: |
-          rsync -avz --delete \
-            --exclude 'target/' \
-            --exclude '.git/' \
-            --exclude 'dist/' \
-            --exclude '.github/' \
-            ./ "$SSH_USER@$SSH_HOST:/opt/rts-bevy"
+          rsync -avz --delete ./deploy/ "$SSH_USER@$SSH_HOST:/opt/rts-bevy/"
 
-      - name: Build & Launch Docker Containers
+      - name: Launch Docker Containers on VPS
         env:
           SSH_USER: ${{ secrets.SSH_USER }}
           SSH_HOST: ${{ secrets.SSH_HOST }}
@@ -81,7 +91,7 @@ jobs:
           ssh "$SSH_USER@$SSH_HOST" "bash -c '
             set -euo pipefail
             cd /opt/rts-bevy
-            echo \"Building and updating Docker containers...\"
+            echo \"Building lightweight containers from pre-built artifacts...\"
             docker compose build
             docker compose up -d --remove-orphans
           '"

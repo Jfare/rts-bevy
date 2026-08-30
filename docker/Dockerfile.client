@@ -1,25 +1,10 @@
 # ─────────────────────────────────────────────────────────────
-# Stage 1: Build WebAssembly Client with Trunk
-# ─────────────────────────────────────────────────────────────
-FROM rust:1-bookworm AS wasm-builder
-
-# Install wasm32 target and Trunk
-RUN rustup target add wasm32-unknown-unknown && \
-    cargo install trunk --version 0.21.5 --locked
-
-WORKDIR /usr/src/rts-bevy
-
-COPY Cargo.toml Cargo.lock Trunk.toml index.html ./
-COPY crates/ crates/
-
-RUN trunk build --release
-
-# ─────────────────────────────────────────────────────────────
-# Stage 2: Serve with Caddy
+# Lightweight Web Client Static Host & Caddy Reverse Proxy
+# (Wasm built in CI to save VPS memory and disk space)
 # ─────────────────────────────────────────────────────────────
 FROM caddy:2-alpine
 
-COPY --from=wasm-builder /usr/src/rts-bevy/dist /srv/web
+COPY dist /srv/web
 COPY docker/Caddyfile /etc/caddy/Caddyfile
 
 EXPOSE 80 443
