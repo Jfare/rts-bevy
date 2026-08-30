@@ -26,45 +26,63 @@ Hos din domänhanterare för `farell.ax`:
 
 ---
 
-## ⚡ 3. Snabbinitiering av VPS:en (Körs en gång via SSH)
+## ⚡ 3. Snabbinitiering & Säkerhetshärdning av VPS:en (Körs en gång via SSH)
 
-När servern är startad, logga in och installera Docker samt konfigurera en 2 GB swap-fil (bra säkerhetsmarginal vid byggen på en 1 GB-maskin):
+När servern är startad på UpCloud (Ubuntu 24.04 LTS):
 
 ```bash
 # 1. Logga in på servern
 ssh root@<DIN_SERVER_IP>
 
-# 2. Installera Docker & Docker Compose (officiellt snabbscript)
-curl -fsSL https://get.docker.com | sh
+# 2. Konfigurera brandväggen (UFW)
+ufw default deny incoming
+ufw default allow outgoing
+ufw allow 22/tcp
+ufw allow 80/tcp
+ufw allow 443/tcp
+ufw --force enable
 
-# 3. Skapa en 2 GB swap-fil (rekommenderas för 1 GB RAM)
-fallocate -l 2G /swapfile
+# 3. Installera Fail2ban (skydd mot SSH brute-force)
+apt update && apt install -y fail2ban
+echo -e "[DEFAULT]\nbantime = 1h\nfindtime = 10m\nmaxretry = 5\nbackend = systemd\n\n[sshd]\nenabled = true\nport = 22" > /etc/fail2ban/jail.local
+systemctl restart fail2ban
+
+# 4. Skapa 1 GB Swap-fil (sparar diskutrymme på 10 GB disk och förhindrar OOM)
+fallocate -l 1G /swapfile
 chmod 600 /swapfile
 mkswap /swapfile
 swapon /swapfile
 echo '/swapfile none swap sw 0 0' >> /etc/fstab
 
-# 4. Logga ut
+# 5. Installera officiella Docker Engine
+curl -fsSL https://get.docker.com | sh
+systemctl enable --now docker
+
+# 6. Skapa SSH-deploynyckel för GitHub Actions
+ssh-keygen -t ed25519 -C "github-actions-deploy" -f /root/.ssh/github_actions -N ""
+cat /root/.ssh/github_actions.pub >> /root/.ssh/authorized_keys
+cat /root/.ssh/github_actions   # Kopiera detta till GitHub Secrets (SSH_PRIVATE_KEY)
+
+# 7. Logga ut
 exit
 ```
 
 ---
 
-## 🚢 4. Driftsättning med ett enda kommando!
+## 🚢 4. Automatiserad Driftsättning via GitHub Actions (CI/CD)
 
-Från ditt lokala projekt (`/home/john/Godot/rts-bevy`) kör du vårt färdiga deployment-script:
-
+Varje gång du pushar till `main` från din dator:
 ```bash
-./scripts/deploy_upcloud.sh <DIN_SERVER_IP> rts.farell.ax
+git push origin main
 ```
 
-### Vad scriptet gör automatiskt:
-1. 🧪 Kör alla lokala tester (`cargo test --workspace`) och säkerhetsgranskningar.
-2. 📁 Skapar målmappen `/opt/rts-bevy` på servern.
-3. 📦 Synkar källkoden och Docker-filerna via `rsync`.
-4. 🐳 Bygger och startar containrarna med `docker compose up -d`.
-5. 🔒 **Caddy ordnar automatiskt gratis Let's Encrypt SSL/TLS** för `https://rts.farell.ax`.
-6. 🩺 Verifierar att `/health` och `/api/stats` svarar korrekt.
+### Vad som sker i molnet:
+1. 🧪 **GitHub Actions** kör säkerhetsgranskning (`./scripts/security_audit.sh`) och alla enhetstester (`cargo test --workspace`).
+2. 📦 **Bygger Wasm & Server i CI**: Trunk genererar WebAssembly-klienten och Cargo kompilerar den dedikerade Linux-servern på GitHubs snabba servrar.
+3. 🚀 **Synk & Driftsättning**: De färdiga artefakterna synkas direkt till `/opt/rts-bevy/` på servern.
+4. 🐳 **Docker Start**: Startar `rts-bevy-web` (Caddy) och `rts-bevy-server` på 3 sekunder.
+5. 🔒 **Automatisk SSL/TLS**: Caddy hämtar och förnyar gratis Let's Encrypt HTTPS-certifikat för `https://rts.farell.ax`.
+6. 🩺 **Hälsokontroll**: Verifierar att `/health` och `/api/stats` svarar korrekt.
 
 ---
 

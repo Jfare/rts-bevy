@@ -125,47 +125,80 @@ All in-game text, UI, HUD elements, unit cards, and commands are strictly in **E
 
 ---
 
-## 🎯 Next Session: Session B8 (Advanced Soundscape, Particle FX & Match Statistics)
-
-### Focus: Rich Ambient Audio, Particle Systems & Post-Game Scoreboard
-
-```
-+-------------------------------------------------------------------------+
-|                              SESSION B8                                 |
-+-------------------------------------------------------------------------+
-|                                                                         |
-|  [Part 1: Rich Audio FX]   Positional sound effects, ambient engine hums|
-|                            and voice acknowledgement bark audio lines   |
-|                                                                         |
-|  [Part 2: Particle FX]     Explosion debris, smoke trails, shell        |
-|                            casings, and damage spark emitters           |
-|                                                                         |
-|  [Part 3: Match Stats]     End-game summary screen (APM, minerals       |
-|                            harvested, units killed/lost, damage dealt)  |
-|                                                                         |
-+-------------------------------------------------------------------------+
-```
+### ✅ Session B8: Advanced Soundscape, Particle FX & Post-Game Scoreboard
+- [x] **Particle FX Emitters** ([`crates/client/src/particles.rs`](file:///home/john/Godot/rts-bevy/crates/client/src/particles.rs)):
+  - Explosions, smoke trails, bullet tracer lines, debris shrapnel, and damage spark emitters.
+  - Performance-tuned lifetime-decay physics with particle pooling.
+- [x] **Web Audio SFX Engine** ([`crates/client/src/audio_sfx.rs`](file:///home/john/Godot/rts-bevy/crates/client/src/audio_sfx.rs)):
+  - Procedural sound synthesis for gunfire, siege artillery cannon shots, stimpack injection, mining lasers, build placement, and victory/defeat stingers.
+- [x] **Match Statistics & End-Game Scoreboard** ([`crates/client/src/stats.rs`](file:///home/john/Godot/rts-bevy/crates/client/src/stats.rs), [`crates/client/src/ui.rs`](file:///home/john/Godot/rts-bevy/crates/client/src/ui.rs)):
+  - Real-time tracking of minerals mined, units trained, units killed, units lost, buildings constructed, and damage dealt.
+  - Tactical post-game victory/defeat debriefing screen with breakdown comparison graphs.
 
 ---
 
-## ⚡ Quick Run Commands
+### ✅ Session B9: DevOps, VPS Hardening & Automated GitHub Actions CI/CD
+- [x] **Production VPS Security Hardening (Ubuntu 24.04)**:
+  - UFW firewall configured (ports 22, 80, 443 allowed; default deny incoming).
+  - Fail2ban intrusion prevention with automated IP bans for SSH brute-force protection.
+  - SSH key-only authentication (`PasswordAuthentication no`).
+  - 1 GB swapfile configured to prevent Out-Of-Memory errors on 1 GB RAM instance.
+- [x] **Zero-Host-Overhead Containerization**:
+  - `docker/Dockerfile.server` (Ubuntu 24.04 minimal runtime with pre-built binary).
+  - `docker/Dockerfile.client` (Caddy 2 Alpine serving pre-built Wasm client with automatic Let's Encrypt SSL/TLS).
+  - `docker-compose.yml` with internal bridge network and localhost-isolated game server (port 8080 bound strictly to `127.0.0.1`).
+- [x] **Automated GitHub Actions CI/CD Pipeline** ([`.github/workflows/deploy.yml`](file:///home/john/Godot/rts-bevy/.github/workflows/deploy.yml)):
+  - Automated testing & security audit on every push to `main`.
+  - Fast Wasm & Server binary compilation in GitHub Actions runners (saving VPS CPU & memory).
+  - SSH deployment to UpCloud VPS with automated container restart and `/health` + `/api/stats` telemetry verification.
+- [x] **Live Production Deployment**:
+  - Live VPS running at UpCloud (Helsinki datacenter).
+  - Production subdomain: **`https://rts.farell.ax`** (with direct IP fallback).
 
-To run locally:
+---
 
+## 🎯 Next Steps & Future Roadmap
+
+### 🗺️ Planned Session B10: Custom Lobbies, Player Profiles & In-Game Chat
+- [ ] **Custom Game Lobbies**:
+  - 4-digit room codes to invite friends directly to 1v1 PvP matches.
+  - Player name customization and faction color selector (Blue, Red, Teal, Orange, Purple).
+- [ ] **In-Game Tactical Chat**:
+  - Real-time text chat box (`Enter` to toggle, `All` and `Team` channels).
+  - System broadcast messages for player connections/disconnections.
+- [ ] **Player Ping & Minimap Alert Markers**:
+  - `Alt + Click` tactical ping markers on the terrain and minimap (Defend, Attack, Caution).
+
+### 🗺️ Planned Session B11: Advanced Maps, Terrain Chokepoints & Destructibles
+- [ ] **Multi-Tile Terrain & Obstacle System**:
+  - Natural choke points, cliffs, ramps, and resource-rich valleys.
+  - Destructible debris rocks (can be destroyed to open flanking pathways).
+- [ ] **Map Selection**:
+  - Map 1: *The Crucible* (Symmetrical 1v1 tournament arena with narrow center bridge).
+  - Map 2: *Crystal Basin* (Open macro map with rich expansion mineral nodes).
+- [ ] **Replay & Spectator Mode**:
+  - Record match command streams for post-game playback analysis.
+
+---
+
+## ⚡ Quick Run & Management Commands
+
+### Local Development:
 ```bash
-# 1. Run security audit check:
+# 1. Run security audit & test suite:
 ./scripts/security_audit.sh
+cargo test --workspace
 
-# 2. Start dedicated server (port 8080):
-cargo run --bin server
-
-# 3. Run local web client (Wasm on port 8000):
+# 2. Run local web client (Wasm on port 8000):
 trunk serve --open
 
-# 4. Or run native desktop client:
-cargo run --bin client
+# 3. Start local dedicated server:
+cargo run --bin server
+```
 
-# 5. Or launch entire stack in Docker:
-docker compose up --build
+### Production Deployment:
+```bash
+# Push to main to trigger full automated CI/CD build and deploy:
+git push origin main
 ```
 
