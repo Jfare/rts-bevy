@@ -1,0 +1,105 @@
+name: Build, Test & Deploy to UpCloud VPS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: 🧪 Run Security Audit & Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Security & Dependency Verification
+        run: |
+          chmod +x ./scripts/security_audit.sh
+          ./scripts/security_audit.sh
+
+      - name: Run Workspace Tests
+        run: cargo test --workspace
+
+  deploy:
+    name: 🚀 Deploy to Production VPS
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup SSH Key & Known Hosts
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Ensure Remote Directory Exists
+        env:
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+        run: |
+          ssh -o StrictHostKeyChecking=accept-new "$SSH_USER@$SSH_HOST" "mkdir -p /opt/rts-bevy"
+
+      - name: Sync Project Files via Rsync
+        env:
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+        run: |
+          rsync -avz --delete \
+            --exclude 'target/' \
+            --exclude '.git/' \
+            --exclude 'dist/' \
+            --exclude '.github/' \
+            ./ "$SSH_USER@$SSH_HOST:/opt/rts-bevy"
+
+      - name: Build & Launch Docker Containers
+        env:
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+        run: |
+          ssh "$SSH_USER@$SSH_HOST" "bash -c '
+            set -euo pipefail
+            cd /opt/rts-bevy
+            echo \"Building and updating Docker containers...\"
+            docker compose build
+            docker compose up -d --remove-orphans
+          '"
+
+      - name: Verify Live Telemetry & Health
+        env:
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+        run: |
+          ssh "$SSH_USER@$SSH_HOST" "bash -c '
+            echo \"Checking container status...\"
+            docker compose ps
+            echo \"Checking local health endpoint...\"
+            for i in {1..10}; do
+              if curl -s --fail http://127.0.0.1:8080/health; then
+                echo \"\"
+                echo \"✅ Health check passed!\"
+                break
+              fi
+              echo \"Waiting for game server to spin up... (\$i/10)\"
+              sleep 2
+            done
+            echo \"Live match stats:\"
+            curl -s http://127.0.0.1:8080/api/stats || true
+            echo \"\"
+          '"
