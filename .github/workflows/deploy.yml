@@ -23,6 +23,11 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
+      - name: Install Linux dependencies for Bevy
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev pkg-config
+
       - name: Security & Dependency Verification
         run: |
           chmod +x ./scripts/security_audit.sh
