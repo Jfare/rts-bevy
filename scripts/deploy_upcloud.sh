@@ -8,14 +8,14 @@ set -euo pipefail
 # ─────────────────────────────────────────────────────────────
 
 VPS_HOST="${1:-${VPS_HOST:-}}"
-DOMAIN="${2:-${RTS_DOMAIN:-mini-rts.ax}}"
+DOMAIN="${2:-${RTS_DOMAIN:-rts.farell.ax}}"
 VPS_USER="${VPS_USER:-root}"
 REMOTE_DIR="/opt/rts-bevy"
 
 if [ -z "$VPS_HOST" ]; then
     echo "❌ Error: VPS IP address required."
     echo "Usage: $0 <VPS_IP> [DOMAIN]"
-    echo "Example: $0 185.20.12.34 mini-rts.ax"
+    echo "Example: $0 185.20.12.34 rts.farell.ax"
     exit 1
 fi
 

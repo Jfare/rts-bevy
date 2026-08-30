@@ -26,7 +26,7 @@ services:
       - "80:80"
       - "443:443"
     environment:
-      - RTS_DOMAIN=${RTS_DOMAIN:-mini-rts.ax}
+      - RTS_DOMAIN=${RTS_DOMAIN:-rts.farell.ax}
     depends_on:
       - game-server
     networks:

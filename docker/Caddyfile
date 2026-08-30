@@ -1,7 +1,7 @@
 # -------------------------------------------------------------
 # Mini-RTS (Bevy 0.15) Caddy Production Configuration
 # -------------------------------------------------------------
-{$RTS_DOMAIN:mini-rts.ax}, www.{$RTS_DOMAIN:mini-rts.ax}, :80 {
+{$RTS_DOMAIN:rts.farell.ax}, :80 {
     root * /srv/web
     file_server
 

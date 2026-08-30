@@ -1,6 +1,6 @@
 # 🚀 Mini-RTS (Bevy 0.15) — UpCloud Deployment Guide
 
-Denna guide sammanfattar hur vi driftsätter **Mini-RTS** till en **UpCloud VPS** med domänen `mini-rts.ax`.
+Denna guide sammanfattar hur vi driftsätter **Mini-RTS** till en **UpCloud VPS** med domänen `rts.farell.ax`.
 
 ---
 
@@ -19,9 +19,8 @@ Denna guide sammanfattar hur vi driftsätter **Mini-RTS** till en **UpCloud VPS*
 
 ## 🌐 2. DNS-konfiguration för Domänen
 
-Hos din domänhanterare för `mini-rts.ax`:
-- Skapa ett **A-record** för `@` -> `<DIN_SERVER_IP>`
-- Skapa ett **A-record** för `www` -> `<DIN_SERVER_IP>`
+Hos din domänhanterare för `farell.ax`:
+- Skapa ett **A-record** för subdomänen `rts` -> `<DIN_SERVER_IP>`
 
 *(DNS-uppdateringen brukar ta mellan 2 till 15 minuter att slå igenom).*
 
@@ -56,7 +55,7 @@ exit
 Från ditt lokala projekt (`/home/john/Godot/rts-bevy`) kör du vårt färdiga deployment-script:
 
 ```bash
-./scripts/deploy_upcloud.sh <DIN_SERVER_IP> mini-rts.ax
+./scripts/deploy_upcloud.sh <DIN_SERVER_IP> rts.farell.ax
 ```
 
 ### Vad scriptet gör automatiskt:
@@ -64,7 +63,7 @@ Från ditt lokala projekt (`/home/john/Godot/rts-bevy`) kör du vårt färdiga d
 2. 📁 Skapar målmappen `/opt/rts-bevy` på servern.
 3. 📦 Synkar källkoden och Docker-filerna via `rsync`.
 4. 🐳 Bygger och startar containrarna med `docker compose up -d`.
-5. 🔒 **Caddy ordnar automatiskt gratis Let's Encrypt SSL/TLS** för `https://mini-rts.ax`.
+5. 🔒 **Caddy ordnar automatiskt gratis Let's Encrypt SSL/TLS** för `https://rts.farell.ax`.
 6. 🩺 Verifierar att `/health` och `/api/stats` svarar korrekt.
 
 ---
@@ -72,11 +71,11 @@ Från ditt lokala projekt (`/home/john/Godot/rts-bevy`) kör du vårt färdiga d
 ## 📊 5. Verifiera & Testa i Webbläsaren
 
 Efter att scriptet är klart kan du surfa in på:
-- **`https://mini-rts.ax`** (eller `http://<DIN_SERVER_IP>`)
+- **`https://rts.farell.ax`** (eller `http://<DIN_SERVER_IP>`)
 
 ### Kontrollera API och Telemetri:
-- **Server Health**: `curl https://mini-rts.ax/health` -> `{"status":"ok"}`
-- **Live Matchstatistik**: `curl https://mini-rts.ax/api/stats`
+- **Server Health**: `curl https://rts.farell.ax/health` -> `{"status":"ok"}`
+- **Live Matchstatistik**: `curl https://rts.farell.ax/api/stats`
   ```json
   {
     "queue_1v1": 0,
