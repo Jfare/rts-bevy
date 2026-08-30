@@ -1,7 +1,7 @@
 # ─────────────────────────────────────────────────────────────
 # Stage 1: Build Server Binary
 # ─────────────────────────────────────────────────────────────
-FROM rust:1.80-bullseye AS builder
+FROM rust:1-bookworm AS builder
 
 WORKDIR /usr/src/rts-bevy
 
@@ -31,11 +31,11 @@ RUN cargo build --release --bin server
 # ─────────────────────────────────────────────────────────────
 # Stage 2: Minimal Runtime Image
 # ─────────────────────────────────────────────────────────────
-FROM debian:bullseye-slim
+FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
-    libssl1.1 \
+    libssl3 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
