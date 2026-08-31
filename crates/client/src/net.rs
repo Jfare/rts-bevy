@@ -5,10 +5,10 @@ use shared::components::*;
 use shared::economy::PlayerEconomy;
 use shared::grid::BuildingKind;
 use shared::protocol::{
-    decode_server_msg, encode_client_msg, ClientMessage, GameMode, ServerMessage, UnitKind,
+    decode_server_msg, encode_client_msg, ClientMessage, EntityKind, GameMode, ServerMessage,
+    UnitKind,
 };
 use std::collections::HashMap;
-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum NetStatus {
@@ -67,7 +67,7 @@ impl Default for NetClient {
 }
 
 impl NetClient {
-    pub fn send(&mut self, msg: &ClientMessage) {
+    pub fn send(&self, msg: &ClientMessage) {
         let _ = self.tx_outgoing_cmds.send(msg.clone());
     }
 }
@@ -183,7 +183,8 @@ fn connect_to_server_startup(
     info!("🌐 [NetClient] Connecting to RTS game server at {}...", url);
     net_client.status = NetStatus::Connecting;
 
-    match ewebsock::connect(&url, Options::default()) {
+    let options = Options::default();
+    match ewebsock::connect_with_wakeup(&url, options, move || {}) {
         Ok((sender, receiver)) => {
             ws_conn.sender = Some(sender);
             ws_conn.receiver = Some(receiver);
@@ -203,6 +204,8 @@ fn poll_network_events(
     mut net_client: ResMut<NetClient>,
     mut economy: ResMut<PlayerEconomy>,
     mut outcome_opt: Option<ResMut<MatchOutcome>>,
+    cleanup_query: Query<Entity, Or<(With<NetEntity>, With<Unit>, With<Building>, With<ResourceNode>)>>,
+    mut camera_query: Query<&mut Transform, (With<Camera2d>, Without<NetEntity>, Without<Unit>, Without<Building>)>,
     mut entity_query: Query<(
         Entity,
         &NetEntity,
@@ -249,6 +252,8 @@ fn poll_network_events(
                         &mut net_client,
                         &mut economy,
                         &mut outcome_opt,
+                        &cleanup_query,
+                        &mut camera_query,
                         &mut entity_query,
                         now_ms,
                         server_msg,
@@ -273,6 +278,8 @@ fn handle_server_message(
     net_client: &mut ResMut<NetClient>,
     economy: &mut ResMut<PlayerEconomy>,
     outcome_opt: &mut Option<ResMut<MatchOutcome>>,
+    cleanup_query: &Query<Entity, Or<(With<NetEntity>, With<Unit>, With<Building>, With<ResourceNode>)>>,
+    camera_query: &mut Query<&mut Transform, (With<Camera2d>, Without<NetEntity>, Without<Unit>, Without<Building>)>,
     entity_query: &mut Query<(
         Entity,
         &NetEntity,
@@ -283,7 +290,6 @@ fn handle_server_message(
     now_ms: u64,
     msg: ServerMessage,
 ) {
-
     match msg {
         ServerMessage::LobbyJoined {
             player_id,
@@ -308,15 +314,178 @@ fn handle_server_message(
             info!("⚔️ [NetClient] Match started!");
         }
         ServerMessage::InitialWorldState {
+            entities,
             p1_minerals,
-            p1_supply,
-            p1_max_supply,
+            p1_supply: _,
+            p1_max_supply: _,
             p2_minerals,
-            p2_supply,
-            p2_max_supply,
-            ..
+            p2_supply: _,
+            p2_max_supply: _,
         } => {
-            let _ = (p1_minerals, p1_supply, p1_max_supply, p2_minerals, p2_supply, p2_max_supply);
+            info!(
+                "🌐 [NetClient] Received InitialWorldState with {} entities. Resetting match battlefield!",
+                entities.len()
+            );
+
+            // 1. Despawn any existing battlefield entities (previous game or demo scene)
+            for e in cleanup_query.iter() {
+                commands.entity(e).despawn_recursive();
+            }
+
+            // 2. Reset match outcome to InProgress
+            if let Some(ref mut outcome) = outcome_opt {
+                **outcome = MatchOutcome::InProgress;
+            }
+
+            // 3. Center camera on local player's base
+            let my_base_pos = if net_client.my_faction == Faction::Player1 {
+                Vec2::new(-600.0, 250.0)
+            } else {
+                Vec2::new(600.0, -250.0)
+            };
+            for mut cam_tf in camera_query.iter_mut() {
+                cam_tf.translation.x = my_base_pos.x;
+                cam_tf.translation.y = my_base_pos.y;
+            }
+
+            // 4. Reset local economy
+            let starting_min = if net_client.my_faction == Faction::Player1 {
+                p1_minerals
+            } else {
+                p2_minerals
+            };
+            let cur_min = economy.get_minerals(net_client.my_faction);
+            if cur_min != starting_min {
+                if starting_min > cur_min {
+                    economy.add_minerals(net_client.my_faction, starting_min - cur_min);
+                } else {
+                    economy.spend_minerals(net_client.my_faction, cur_min - starting_min);
+                }
+            }
+
+            // 5. Authoritatively spawn all entities
+            for ent in entities {
+                match ent.kind {
+                    EntityKind::ResourceNode => {
+                        commands.spawn((
+                            ResourceNode::new(1500),
+                            Faction::Neutral,
+                            Selectable::default(),
+                            Radius(24.0),
+                            NetEntity {
+                                net_id: ent.net_id,
+                                owner_peer_id: 0,
+                            },
+                            Transform::from_xyz(ent.position.x, ent.position.y, 0.5),
+                        ));
+                    }
+                    EntityKind::Building(b_kind) => {
+                        let mut entity_cmds = commands.spawn((
+                            Building::new(
+                                b_kind.name(),
+                                b_kind.size(),
+                                b_kind.build_duration(),
+                                true,
+                            ),
+                            Health::new(ent.max_hp),
+                            ent.faction,
+                            Selectable::default(),
+                            Radius(b_kind.size().x.max(b_kind.size().y) * 0.5),
+                            NetEntity {
+                                net_id: ent.net_id,
+                                owner_peer_id: 0,
+                            },
+                            Transform::from_xyz(ent.position.x, ent.position.y, 1.0),
+                        ));
+
+                        match b_kind {
+                            BuildingKind::BaseHQ => {
+                                entity_cmds.insert((
+                                    BaseHQ {
+                                        supply_provided: 10,
+                                        dropoff_radius: 70.0,
+                                    },
+                                    ProductionBuilding {
+                                        queue: Vec::new(),
+                                        current_timer: 0.0,
+                                        max_queue_size: 5,
+                                        rally_point: ent.position + Vec2::new(0.0, -100.0),
+                                    },
+                                ));
+                            }
+                            BuildingKind::Barracks => {
+                                entity_cmds.insert((
+                                    Barracks,
+                                    ProductionBuilding {
+                                        queue: Vec::new(),
+                                        current_timer: 0.0,
+                                        max_queue_size: 5,
+                                        rally_point: ent.position + Vec2::new(0.0, -100.0),
+                                    },
+                                ));
+                            }
+                            BuildingKind::SupplyDepot => {
+                                entity_cmds.insert(SupplyDepot {
+                                    supply_provided: 8,
+                                });
+                            }
+                            BuildingKind::Turret => {
+                                entity_cmds.insert(GunTurret::default());
+                            }
+                        }
+                    }
+                    EntityKind::Unit(u_kind) => {
+                        let mut unit_cmds = commands.spawn((
+                            Unit {
+                                name: u_kind.name().to_string(),
+                                supply_cost: u_kind.supply_cost(),
+                            },
+                            Health::new(ent.max_hp),
+                            ent.faction,
+                            Selectable::default(),
+                            NetEntity {
+                                net_id: ent.net_id,
+                                owner_peer_id: 0,
+                            },
+                            Transform::from_xyz(ent.position.x, ent.position.y, 2.0),
+                        ));
+
+                        match u_kind {
+                            UnitKind::Worker => {
+                                unit_cmds.insert((
+                                    Worker::default(),
+                                    Radius(14.0),
+                                    MoveSpeed(190.0),
+                                    Velocity::default(),
+                                ));
+                            }
+                            UnitKind::Soldier => {
+                                unit_cmds.insert((
+                                    Soldier {
+                                        state: SoldierState::Idle,
+                                        attack_range: 150.0,
+                                        aggro_radius: 240.0,
+                                        attack_damage: 15.0,
+                                        attack_cooldown: 0.85,
+                                        ..default()
+                                    },
+                                    Radius(16.0),
+                                    MoveSpeed(180.0),
+                                    Velocity::default(),
+                                ));
+                            }
+                            UnitKind::Tank => {
+                                unit_cmds.insert((
+                                    SiegeTank::default(),
+                                    Radius(22.0),
+                                    MoveSpeed(140.0),
+                                    Velocity::default(),
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
         }
         ServerMessage::TickSnapshotBatch {
             snapshots,
@@ -597,4 +766,3 @@ fn net_heartbeat_system(
         net_client.send(&ClientMessage::Ping { timestamp: now });
     }
 }
-

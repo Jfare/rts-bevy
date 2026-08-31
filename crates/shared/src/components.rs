@@ -491,6 +491,9 @@ pub struct NetEntity {
     pub owner_peer_id: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Component, Reflect, Default)]
+pub struct RoomId(pub u32);
+
 #[cfg(test)]
 mod tests {
     use super::*;

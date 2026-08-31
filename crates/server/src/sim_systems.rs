@@ -39,6 +39,7 @@ impl Plugin for ServerSimulationPlugin {
                     server_boids_separation_system,
                     server_mining_system,
                     server_production_system,
+                    server_solo_wave_spawner_system,
                     server_combat_system,
                     server_turret_combat_system,
                     server_siege_tank_combat_system,
@@ -89,11 +90,13 @@ fn handle_incoming_network_events(
     mut matchmaker: ResMut<Matchmaker>,
     mut economy: ResMut<PlayerEconomy>,
     nav_grid: Res<NavGrid>,
+    room_entities: Query<(Entity, &RoomId)>,
     mut unit_query: Query<(
         Entity,
         &Transform,
         &NetEntity,
         &Faction,
+        &RoomId,
         Option<&mut MoveTarget>,
         Option<&mut Soldier>,
         Option<&mut Worker>,
@@ -102,8 +105,8 @@ fn handle_incoming_network_events(
         Option<&mut Health>,
         Option<&mut TacticalStance>,
     ), Without<ResourceNode>>,
-    node_query: Query<(Entity, &NetEntity, &Transform), With<ResourceNode>>,
-    mut prod_query: Query<(Entity, &NetEntity, &Faction, &mut ProductionBuilding)>,
+    node_query: Query<(Entity, &NetEntity, &Transform, &RoomId), With<ResourceNode>>,
+    mut prod_query: Query<(Entity, &NetEntity, &Faction, &RoomId, &mut ProductionBuilding)>,
 ) {
     while let Ok(event) = net_channels.rx_incoming.try_recv() {
         match event {
@@ -115,7 +118,41 @@ fn handle_incoming_network_events(
                 if matchmaker.waiting_1v1_peer == Some(peer_id) {
                     matchmaker.waiting_1v1_peer = None;
                 }
-                matchmaker.players.remove(&peer_id);
+                if let Some(player) = matchmaker.players.remove(&peer_id) {
+                    let room_id = player.room_id;
+                    let remaining_peers: Vec<u64> = matchmaker
+                        .get_room_peers(room_id)
+                        .into_iter()
+                        .filter(|p| *p != peer_id)
+                        .collect();
+                    let match_time = matchmaker.rooms.get(&room_id).map(|r| r.match_time).unwrap_or(0.0);
+                    if let Some(room) = matchmaker.rooms.get_mut(&room_id) {
+                        room.is_active = false;
+                    }
+                    if !remaining_peers.is_empty() {
+                        let winning_faction = if player.faction == Faction::Player1 {
+                            Faction::Player2
+                        } else {
+                            Faction::Player1
+                        };
+                        let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::BroadcastToPeers {
+                            peer_ids: remaining_peers,
+                            msg: ServerMessage::MatchEnded {
+                                winning_faction,
+                                duration_seconds: match_time,
+                            },
+                        });
+                    }
+                    // Despawn all entities belonging to this room from the ECS World
+                    for (e, r) in &room_entities {
+                        if r.0 == room_id {
+                            commands.entity(e).despawn_recursive();
+                        }
+                    }
+                    matchmaker.remove_room(room_id);
+                }
+                let (q, a1, _, aso, _, tot) = matchmaker.get_telemetry();
+                crate::net_server::update_global_telemetry(q, a1, aso, tot);
             }
             IncomingNetEvent::MessageReceived { peer_id, msg } => {
                 match msg {
@@ -154,11 +191,18 @@ fn handle_incoming_network_events(
                             .get(&peer_id)
                             .map(|p| p.faction)
                             .unwrap_or(Faction::Player1);
+                        let player_room = matchmaker
+                            .players
+                            .get(&peer_id)
+                            .map(|p| p.room_id)
+                            .unwrap_or(0);
 
-                        for (e, tf, net_entity, faction, move_target_opt, soldier_opt, worker_opt, _, _, _, stance_opt) in
+                        for (e, tf, net_entity, faction, unit_room, move_target_opt, soldier_opt, worker_opt, _, _, _, stance_opt) in
                             &mut unit_query
                         {
-                            if unit_net_ids.contains(&net_entity.net_id) && *faction == player_faction
+                            if unit_net_ids.contains(&net_entity.net_id)
+                                && *faction == player_faction
+                                && unit_room.0 == player_room
                             {
                                 if let Some(mut soldier) = soldier_opt {
                                     soldier.target = None;
@@ -203,11 +247,18 @@ fn handle_incoming_network_events(
                             .get(&peer_id)
                             .map(|p| p.faction)
                             .unwrap_or(Faction::Player1);
+                        let player_room = matchmaker
+                            .players
+                            .get(&peer_id)
+                            .map(|p| p.room_id)
+                            .unwrap_or(0);
 
-                        for (e, tf, net_entity, faction, move_target_opt, soldier_opt, _, _, _, _, stance_opt) in
+                        for (e, tf, net_entity, faction, unit_room, move_target_opt, soldier_opt, _, _, _, _, stance_opt) in
                             &mut unit_query
                         {
-                            if unit_net_ids.contains(&net_entity.net_id) && *faction == player_faction
+                            if unit_net_ids.contains(&net_entity.net_id)
+                                && *faction == player_faction
+                                && unit_room.0 == player_room
                             {
                                 let unit_pos = tf.translation.truncate();
                                 let waypoints = nav_grid.find_path(unit_pos, target_position);
@@ -255,16 +306,26 @@ fn handle_incoming_network_events(
                             .get(&peer_id)
                             .map(|p| p.faction)
                             .unwrap_or(Faction::Player1);
+                        let player_room = matchmaker
+                            .players
+                            .get(&peer_id)
+                            .map(|p| p.room_id)
+                            .unwrap_or(0);
 
                         let target_entity = unit_query
                             .iter()
-                            .find(|(_, _, net_entity, _, _, _, _, _, _, _, _)| net_entity.net_id == target_net_id)
-                            .map(|(e, _, _, _, _, _, _, _, _, _, _)| e);
+                            .find(|(_, _, net_entity, _, unit_room, _, _, _, _, _, _, _)| {
+                                net_entity.net_id == target_net_id && unit_room.0 == player_room
+                            })
+                            .map(|(e, _, _, _, _, _, _, _, _, _, _, _)| e);
 
                         if let Some(target) = target_entity {
-                            for (e, _, net_entity, faction, _, soldier_opt, _, _, tank_opt, _, _) in &mut unit_query {
+                            for (e, _, net_entity, faction, unit_room, _, soldier_opt, _, _, tank_opt, _, _) in
+                                &mut unit_query
+                            {
                                 if unit_net_ids.contains(&net_entity.net_id)
                                     && *faction == player_faction
+                                    && unit_room.0 == player_room
                                 {
                                     commands.entity(e).remove::<MoveTarget>();
                                     if let Some(mut soldier) = soldier_opt {
@@ -287,16 +348,26 @@ fn handle_incoming_network_events(
                             .get(&peer_id)
                             .map(|p| p.faction)
                             .unwrap_or(Faction::Player1);
+                        let player_room = matchmaker
+                            .players
+                            .get(&peer_id)
+                            .map(|p| p.room_id)
+                            .unwrap_or(0);
 
                         let target_node = node_query
                             .iter()
-                            .find(|(_, net_entity, _)| net_entity.net_id == resource_net_id)
-                            .map(|(e, _, _)| e);
+                            .find(|(_, net_entity, _, node_room)| {
+                                net_entity.net_id == resource_net_id && node_room.0 == player_room
+                            })
+                            .map(|(e, _, _, _)| e);
 
                         if let Some(node_e) = target_node {
-                            for (e, _, net_entity, faction, _, _, worker_opt, _, _, _, _) in &mut unit_query {
+                            for (e, _, net_entity, faction, unit_room, _, _, worker_opt, _, _, _, _) in
+                                &mut unit_query
+                            {
                                 if worker_net_ids.contains(&net_entity.net_id)
                                     && *faction == player_faction
+                                    && unit_room.0 == player_room
                                 {
                                     commands.entity(e).remove::<MoveTarget>();
                                     if let Some(mut worker) = worker_opt {
@@ -315,11 +386,18 @@ fn handle_incoming_network_events(
                             .get(&peer_id)
                             .map(|p| p.faction)
                             .unwrap_or(Faction::Player1);
+                        let player_room = matchmaker
+                            .players
+                            .get(&peer_id)
+                            .map(|p| p.room_id)
+                            .unwrap_or(0);
 
-                        for (e, _, net_entity, faction, _, soldier_opt, worker_opt, _, _, _, stance_opt) in
+                        for (e, _, net_entity, faction, unit_room, _, soldier_opt, worker_opt, _, _, _, stance_opt) in
                             &mut unit_query
                         {
-                            if unit_net_ids.contains(&net_entity.net_id) && *faction == player_faction
+                            if unit_net_ids.contains(&net_entity.net_id)
+                                && *faction == player_faction
+                                && unit_room.0 == player_room
                             {
                                 commands.entity(e).remove::<MoveTarget>();
                                 if let Some(mut soldier) = soldier_opt {
@@ -341,9 +419,18 @@ fn handle_incoming_network_events(
                             .get(&peer_id)
                             .map(|p| p.faction)
                             .unwrap_or(Faction::Player1);
+                        let player_room = matchmaker
+                            .players
+                            .get(&peer_id)
+                            .map(|p| p.room_id)
+                            .unwrap_or(0);
 
-                        for (e, _, net_entity, faction, _, soldier_opt, _, _, _, _, stance_opt) in &mut unit_query {
-                            if unit_net_ids.contains(&net_entity.net_id) && *faction == player_faction
+                        for (e, _, net_entity, faction, unit_room, _, soldier_opt, _, _, _, _, stance_opt) in
+                            &mut unit_query
+                        {
+                            if unit_net_ids.contains(&net_entity.net_id)
+                                && *faction == player_faction
+                                && unit_room.0 == player_room
                             {
                                 commands.entity(e).remove::<MoveTarget>();
                                 if let Some(mut soldier) = soldier_opt {
@@ -364,9 +451,19 @@ fn handle_incoming_network_events(
                             .get(&peer_id)
                             .map(|p| p.faction)
                             .unwrap_or(Faction::Player1);
+                        let player_room = matchmaker
+                            .players
+                            .get(&peer_id)
+                            .map(|p| p.room_id)
+                            .unwrap_or(0);
 
-                        for (e, _, net_entity, faction, _, _, _, stim_opt, _, health_opt, _) in &mut unit_query {
-                            if unit_net_ids.contains(&net_entity.net_id) && *faction == player_faction {
+                        for (e, _, net_entity, faction, unit_room, _, _, _, stim_opt, _, health_opt, _) in
+                            &mut unit_query
+                        {
+                            if unit_net_ids.contains(&net_entity.net_id)
+                                && *faction == player_faction
+                                && unit_room.0 == player_room
+                            {
                                 if let Some(mut health) = health_opt {
                                     if health.current > 20.0 {
                                         health.take_damage(15.0);
@@ -391,9 +488,19 @@ fn handle_incoming_network_events(
                             .get(&peer_id)
                             .map(|p| p.faction)
                             .unwrap_or(Faction::Player1);
+                        let player_room = matchmaker
+                            .players
+                            .get(&peer_id)
+                            .map(|p| p.room_id)
+                            .unwrap_or(0);
 
-                        for (e, _, net_entity, faction, _, _, _, _, tank_opt, _, _) in &mut unit_query {
-                            if unit_net_ids.contains(&net_entity.net_id) && *faction == player_faction {
+                        for (e, _, net_entity, faction, unit_room, _, _, _, _, tank_opt, _, _) in
+                            &mut unit_query
+                        {
+                            if unit_net_ids.contains(&net_entity.net_id)
+                                && *faction == player_faction
+                                && unit_room.0 == player_room
+                            {
                                 if let Some(mut tank) = tank_opt {
                                     match tank.mode {
                                         TankMode::Tank => {
@@ -421,6 +528,11 @@ fn handle_incoming_network_events(
                             .get(&peer_id)
                             .map(|p| p.faction)
                             .unwrap_or(Faction::Player1);
+                        let player_room = matchmaker
+                            .players
+                            .get(&peer_id)
+                            .map(|p| p.room_id)
+                            .unwrap_or(0);
 
                         if economy.has_minerals(player_faction, building_kind.mineral_cost()) {
                             economy.spend_minerals(player_faction, building_kind.mineral_cost());
@@ -436,6 +548,7 @@ fn handle_incoming_network_events(
                                 Health::new(building_kind.max_health()),
                                 player_faction,
                                 Radius(building_kind.size().x.max(building_kind.size().y) * 0.5),
+                                RoomId(player_room),
                                 NetEntity {
                                     net_id,
                                     owner_peer_id: peer_id,
@@ -477,16 +590,19 @@ fn handle_incoming_network_events(
                                 }
                             }
 
-
-                            let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::Broadcast {
-                                msg: ServerMessage::BuildingSpawned {
-                                    net_id,
-                                    faction: player_faction,
-                                    building_kind,
-                                    position,
-                                    max_hp: building_kind.max_health(),
-                                },
-                            });
+                            let peers = matchmaker.get_room_peers(player_room);
+                            if !peers.is_empty() {
+                                let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::BroadcastToPeers {
+                                    peer_ids: peers,
+                                    msg: ServerMessage::BuildingSpawned {
+                                        net_id,
+                                        faction: player_faction,
+                                        building_kind,
+                                        position,
+                                        max_hp: building_kind.max_health(),
+                                    },
+                                });
+                            }
                         }
                     }
                     shared::protocol::ClientMessage::RequestTrainUnit {
@@ -498,9 +614,17 @@ fn handle_incoming_network_events(
                             .get(&peer_id)
                             .map(|p| p.faction)
                             .unwrap_or(Faction::Player1);
+                        let player_room = matchmaker
+                            .players
+                            .get(&peer_id)
+                            .map(|p| p.room_id)
+                            .unwrap_or(0);
 
-                        for (_, net_entity, faction, mut prod) in &mut prod_query {
-                            if net_entity.net_id == building_net_id && *faction == player_faction {
+                        for (_, net_entity, faction, b_room, mut prod) in &mut prod_query {
+                            if net_entity.net_id == building_net_id
+                                && *faction == player_faction
+                                && b_room.0 == player_room
+                            {
                                 if economy.has_minerals(player_faction, unit_kind.mineral_cost())
                                     && economy.has_supply(player_faction, unit_kind.supply_cost())
                                     && prod.queue.len() < prod.max_queue_size
@@ -515,17 +639,21 @@ fn handle_incoming_network_events(
                                         build_duration: unit_kind.train_duration(),
                                     });
 
-                                    let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::Broadcast {
-                                        msg: ServerMessage::QueueUpdated {
-                                            building_net_id,
-                                            queue_count: prod.queue.len(),
-                                            current_progress: if prod.queue.is_empty() {
-                                                0.0
-                                            } else {
-                                                prod.current_timer / prod.queue[0].build_duration
+                                    let peers = matchmaker.get_room_peers(player_room);
+                                    if !peers.is_empty() {
+                                        let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::BroadcastToPeers {
+                                            peer_ids: peers,
+                                            msg: ServerMessage::QueueUpdated {
+                                                building_net_id,
+                                                queue_count: prod.queue.len(),
+                                                current_progress: if prod.queue.is_empty() {
+                                                    0.0
+                                                } else {
+                                                    prod.current_timer / prod.queue[0].build_duration
+                                                },
                                             },
-                                        },
-                                    });
+                                        });
+                                    }
                                 }
                             }
                         }
@@ -534,7 +662,7 @@ fn handle_incoming_network_events(
                         building_net_id,
                         rally_position,
                     } => {
-                        for (_, net_entity, _, mut prod) in &mut prod_query {
+                        for (_, net_entity, _, _, mut prod) in &mut prod_query {
                             if net_entity.net_id == building_net_id {
                                 prod.rally_point = rally_position;
                             }
@@ -603,12 +731,15 @@ fn handle_join_lobby(
                     p2_peer: None,
                     is_active: true,
                     match_time: 0.0,
+                    current_wave: 0,
+                    time_until_next_wave: 40.0,
                 },
             );
 
             let initial_entities = spawn_match_entities(
                 commands,
                 matchmaker,
+                room_id,
                 GameMode::SoloVsAi,
                 peer_id,
                 None,
@@ -694,12 +825,15 @@ fn handle_join_lobby(
                         p2_peer: Some(peer_id),
                         is_active: true,
                         match_time: 0.0,
+                        current_wave: 0,
+                        time_until_next_wave: 40.0,
                     },
                 );
 
                 let initial_entities = spawn_match_entities(
                     commands,
                     matchmaker,
+                    room_id,
                     GameMode::Multiplayer1v1,
                     waiting_p1,
                     Some(peer_id),
@@ -930,11 +1064,15 @@ fn server_movement_system(
 /// Unit-to-unit soft separation
 fn server_boids_separation_system(
     time: Res<Time>,
-    mut query: Query<(&mut Transform, &Radius), With<Unit>>,
+    mut query: Query<(&mut Transform, &Radius, &RoomId), With<Unit>>,
 ) {
     let dt = time.delta_secs();
     let mut combinations = query.iter_combinations_mut();
-    while let Some([(mut t1, r1), (mut t2, r2)]) = combinations.fetch_next() {
+    while let Some([(mut t1, r1, room1), (mut t2, r2, room2)]) = combinations.fetch_next() {
+        if room1.0 != room2.0 {
+            continue;
+        }
+
         let p1 = t1.translation.truncate();
         let p2 = t2.translation.truncate();
         let diff = p1 - p2;
@@ -957,12 +1095,12 @@ fn server_mining_system(
     mut commands: Commands,
     time: Res<Time>,
     mut economy: ResMut<PlayerEconomy>,
-    mut workers: Query<(Entity, &mut Transform, &MoveSpeed, &Faction, &mut Worker, Option<&MoveTarget>)>,
-    mut nodes: Query<(&Transform, &mut ResourceNode, &NetEntity), Without<Worker>>,
-    bases: Query<(&Transform, &Faction), (With<BaseHQ>, Without<Worker>, Without<ResourceNode>)>,
+    mut workers: Query<(Entity, &mut Transform, &MoveSpeed, &Faction, &RoomId, &mut Worker, Option<&MoveTarget>)>,
+    mut nodes: Query<(&Transform, &mut ResourceNode, &NetEntity, &RoomId), Without<Worker>>,
+    bases: Query<(&Transform, &Faction, &RoomId), (With<BaseHQ>, Without<Worker>, Without<ResourceNode>)>,
 ) {
     let dt = time.delta_secs();
-    for (worker_e, mut transform, speed, faction, mut worker, move_target_opt) in &mut workers {
+    for (worker_e, mut transform, speed, faction, worker_room, mut worker, move_target_opt) in &mut workers {
         if worker.state != WorkerState::Idle && move_target_opt.is_some() {
             commands.entity(worker_e).remove::<MoveTarget>();
         }
@@ -972,20 +1110,24 @@ fn server_mining_system(
             WorkerState::Idle => {}
             WorkerState::MovingToResource => {
                 if let Some(target_node_e) = worker.target_node {
-                    if let Ok((node_tf, _, _)) = nodes.get(target_node_e) {
-                        let current_pos = transform.translation.truncate();
-                        let target_pos = node_tf.translation.truncate();
-                        let diff = target_pos - current_pos;
-                        let dist = diff.length();
+                    if let Ok((node_tf, _, _, node_room)) = nodes.get(target_node_e) {
+                        if node_room.0 == worker_room.0 {
+                            let current_pos = transform.translation.truncate();
+                            let target_pos = node_tf.translation.truncate();
+                            let diff = target_pos - current_pos;
+                            let dist = diff.length();
 
-                        if dist <= worker.interact_distance {
-                            worker.state = WorkerState::Mining;
-                            worker.harvest_timer = 0.0;
+                            if dist <= worker.interact_distance {
+                                worker.state = WorkerState::Mining;
+                                worker.harvest_timer = 0.0;
+                            } else {
+                                let dir = diff / dist;
+                                transform.translation.x += dir.x * speed.0 * dt;
+                                transform.translation.y += dir.y * speed.0 * dt;
+                                transform.rotation = Quat::from_rotation_z(dir.y.atan2(dir.x));
+                            }
                         } else {
-                            let dir = diff / dist;
-                            transform.translation.x += dir.x * speed.0 * dt;
-                            transform.translation.y += dir.y * speed.0 * dt;
-                            transform.rotation = Quat::from_rotation_z(dir.y.atan2(dir.x));
+                            worker.state = WorkerState::Idle;
                         }
                     } else {
                         worker.state = WorkerState::Idle;
@@ -997,10 +1139,14 @@ fn server_mining_system(
                 if worker.harvest_timer >= worker.harvest_duration {
                     worker.harvest_timer = 0.0;
                     if let Some(target_node_e) = worker.target_node {
-                        if let Ok((_, mut node, _)) = nodes.get_mut(target_node_e) {
-                            let harvested = node.harvest(worker.harvest_capacity);
-                            worker.carried_minerals = harvested;
-                            worker.state = WorkerState::MovingToBase;
+                        if let Ok((_, mut node, _, node_room)) = nodes.get_mut(target_node_e) {
+                            if node_room.0 == worker_room.0 {
+                                let harvested = node.harvest(worker.harvest_capacity);
+                                worker.carried_minerals = harvested;
+                                worker.state = WorkerState::MovingToBase;
+                            } else {
+                                worker.state = WorkerState::Idle;
+                            }
                         } else {
                             worker.state = WorkerState::Idle;
                         }
@@ -1008,13 +1154,13 @@ fn server_mining_system(
                 }
             }
             WorkerState::MovingToBase => {
-                // Find closest friendly Base HQ
+                // Find closest friendly Base HQ within the same Room
                 let current_pos = transform.translation.truncate();
                 let mut closest_base_pos = None;
                 let mut min_dist = f32::MAX;
 
-                for (base_tf, base_faction) in &bases {
-                    if base_faction == faction {
+                for (base_tf, base_faction, base_room) in &bases {
+                    if base_faction == faction && base_room.0 == worker_room.0 {
                         let pos = base_tf.translation.truncate();
                         let d = (pos - current_pos).length();
                         if d < min_dist {
@@ -1058,6 +1204,7 @@ fn server_production_system(
         Entity,
         &NetEntity,
         &Faction,
+        &RoomId,
         &Transform,
         &mut Building,
         Option<&mut ProductionBuilding>,
@@ -1065,7 +1212,7 @@ fn server_production_system(
     )>,
 ) {
     let dt = time.delta_secs();
-    for (_entity, net_entity, faction, transform, mut building, prod_opt, supply_depot_opt) in
+    for (_entity, net_entity, faction, room_id, transform, mut building, prod_opt, supply_depot_opt) in
         &mut buildings
     {
         // 1. Progress under-construction buildings
@@ -1110,6 +1257,7 @@ fn server_production_system(
                             },
                             Health::new(unit_kind.max_health()),
                             *faction,
+                            *room_id,
                             NetEntity {
                                 net_id,
                                 owner_peer_id: net_entity.owner_peer_id,
@@ -1157,26 +1305,128 @@ fn server_production_system(
                         }
 
 
-                        let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::Broadcast {
-                            msg: ServerMessage::UnitSpawned {
-                                net_id,
-                                faction: *faction,
-                                unit_kind,
-                                position: spawn_pos,
-                                max_hp: unit_kind.max_health(),
-                            },
-                        });
+                        let peers = matchmaker.get_room_peers(room_id.0);
+                        if !peers.is_empty() {
+                            let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::BroadcastToPeers {
+                                peer_ids: peers.clone(),
+                                msg: ServerMessage::UnitSpawned {
+                                    net_id,
+                                    faction: *faction,
+                                    unit_kind,
+                                    position: spawn_pos,
+                                    max_hp: unit_kind.max_health(),
+                                },
+                            });
 
-                        let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::Broadcast {
-                            msg: ServerMessage::QueueUpdated {
-                                building_net_id: net_entity.net_id,
-                                queue_count: prod.queue.len(),
-                                current_progress: 0.0,
-                            },
-                        });
+                            let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::BroadcastToPeers {
+                                peer_ids: peers,
+                                msg: ServerMessage::QueueUpdated {
+                                    building_net_id: net_entity.net_id,
+                                    queue_count: prod.queue.len(),
+                                    current_progress: 0.0,
+                                },
+                            });
+                        }
                     }
                 }
             }
+        }
+    }
+}
+
+/// Spawns escalating squads of hostile marines for active SoloVsAi matches per room
+fn server_solo_wave_spawner_system(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut matchmaker: ResMut<Matchmaker>,
+    base_query: Query<(&Transform, &Faction, &RoomId), With<BaseHQ>>,
+) {
+    let dt = time.delta_secs();
+    let mut waves_to_spawn = Vec::new();
+
+    for (room_id, room) in matchmaker.rooms.iter_mut() {
+        if !room.is_active || room.mode != GameMode::SoloVsAi {
+            continue;
+        }
+
+        room.match_time += dt;
+
+        // Check if Hostile AI Base HQ exists in this room
+        let mut ai_base_pos = None;
+        let mut p1_base_pos = Vec2::new(-700.0, 250.0);
+
+        for (tf, faction, b_room) in &base_query {
+            if b_room.0 == *room_id {
+                if *faction == Faction::HostileAi {
+                    ai_base_pos = Some(tf.translation.truncate());
+                } else if *faction == Faction::Player1 {
+                    p1_base_pos = tf.translation.truncate();
+                }
+            }
+        }
+
+        let Some(base_spawn) = ai_base_pos else {
+            // AI HQ destroyed in this room -> no more waves
+            continue;
+        };
+
+        room.time_until_next_wave -= dt;
+        if room.time_until_next_wave <= 0.0 {
+            room.current_wave += 1;
+            room.time_until_next_wave = 45.0;
+
+            let count = match room.current_wave {
+                1 => 3,
+                2 => 6,
+                3 => 10,
+                w => 14 + (w - 4) * 3,
+            };
+
+            waves_to_spawn.push((*room_id, room.current_wave, count, base_spawn, p1_base_pos));
+        }
+    }
+
+    for (room_id, wave_num, count, base_spawn, target_pos) in waves_to_spawn {
+        info!(
+            "⚔️ [Server WaveAi] Room #{}: Wave {} Incoming! Spawning {} Hostile Marines",
+            room_id, wave_num, count
+        );
+
+        for i in 0..count {
+            let angle = (i as f32) * 2.39996;
+            let dist = 32.0 * (i as f32).sqrt();
+            let offset = Vec2::new(angle.cos(), angle.sin()) * dist;
+            let spawn_pos = base_spawn + offset;
+            let net_id = matchmaker.alloc_net_id();
+
+            commands.spawn((
+                Unit {
+                    name: "Hostile Marine".to_string(),
+                    supply_cost: 2,
+                },
+                Soldier {
+                    state: SoldierState::AttackMoving,
+                    attack_range: 150.0,
+                    aggro_radius: 240.0,
+                    attack_damage: 14.0,
+                    attack_cooldown: 0.9,
+                    ..default()
+                },
+                Stimpack::default(),
+                TacticalStance::default(),
+                Health::new(120.0),
+                Radius(16.0),
+                MoveSpeed(175.0),
+                Velocity::default(),
+                Faction::HostileAi,
+                RoomId(room_id),
+                NetEntity {
+                    net_id,
+                    owner_peer_id: 2,
+                },
+                MoveTarget::new(target_pos, true),
+                Transform::from_xyz(spawn_pos.x, spawn_pos.y, 2.0),
+            ));
         }
     }
 }
@@ -1186,11 +1436,13 @@ fn server_combat_system(
     mut commands: Commands,
     time: Res<Time>,
     net_channels: Res<ServerNetworkChannels>,
+    matchmaker: Res<Matchmaker>,
     mut economy: ResMut<PlayerEconomy>,
     mut soldiers: Query<(
         Entity,
         &NetEntity,
         &Faction,
+        &RoomId,
         &Transform,
         &mut Soldier,
         Option<&Stimpack>,
@@ -1199,6 +1451,7 @@ fn server_combat_system(
         Entity,
         &NetEntity,
         &Faction,
+        &RoomId,
         &Transform,
         &mut Health,
         Option<&Unit>,
@@ -1206,7 +1459,7 @@ fn server_combat_system(
 ) {
     let dt = time.delta_secs();
 
-    for (_s_entity, attacker_net, attacker_faction, attacker_tf, mut soldier, stim_opt) in &mut soldiers {
+    for (_s_entity, attacker_net, attacker_faction, attacker_room, attacker_tf, mut soldier, stim_opt) in &mut soldiers {
         soldier.attack_timer += dt;
         let attacker_pos = attacker_tf.translation.truncate();
 
@@ -1214,7 +1467,7 @@ fn server_combat_system(
             .map(|s| if s.is_active { 0.5 } else { 1.0 })
             .unwrap_or(1.0);
 
-        // 1. Scan for nearest hostile target if idle or attack-moving without target
+        // 1. Scan for nearest hostile target in the SAME room if idle or attack-moving without target
         if soldier.target.is_none()
             && (soldier.state == SoldierState::Idle
                 || soldier.state == SoldierState::AttackMoving
@@ -1223,8 +1476,8 @@ fn server_combat_system(
             let mut closest_target = None;
             let mut min_dist = soldier.aggro_radius;
 
-            for (t_entity, _, target_faction, target_tf, target_hp, _) in &targets {
-                if attacker_faction.is_hostile_to(target_faction) && !target_hp.is_dead() {
+            for (t_entity, _, target_faction, target_room, target_tf, target_hp, _) in &targets {
+                if target_room.0 == attacker_room.0 && attacker_faction.is_hostile_to(target_faction) && !target_hp.is_dead() {
                     let d = (target_tf.translation.truncate() - attacker_pos).length();
                     if d < min_dist {
                         min_dist = d;
@@ -1240,9 +1493,14 @@ fn server_combat_system(
 
         // 2. Fire weapon if target is in range and cooldown is ready
         if let Some(target_entity) = soldier.target {
-            if let Ok((_, target_net, _, target_tf, mut target_hp, unit_opt)) =
+            if let Ok((_, target_net, _, target_room, target_tf, mut target_hp, unit_opt)) =
                 targets.get_mut(target_entity)
             {
+                if target_room.0 != attacker_room.0 {
+                    soldier.target = None;
+                    continue;
+                }
+
                 let target_pos = target_tf.translation.truncate();
                 let dist = (target_pos - attacker_pos).length();
 
@@ -1251,48 +1509,51 @@ fn server_combat_system(
                         soldier.attack_timer = 0.0;
                         target_hp.take_damage(soldier.attack_damage);
 
-                        // Broadcast tracer projectile event
-                        let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::Broadcast {
-                            msg: ServerMessage::ProjectileFired {
-                                attacker_net_id: attacker_net.net_id,
-                                target_net_id: target_net.net_id,
-                                origin: attacker_pos,
-                                target_pos,
-                                damage: soldier.attack_damage,
-                            },
-                        });
-
-                        // Broadcast damage update
-                        let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::Broadcast {
-                            msg: ServerMessage::EntityDamaged {
-                                target_net_id: target_net.net_id,
-                                current_hp: target_hp.current,
-                                max_hp: target_hp.max,
-                            },
-                        });
-
-                        // If dead, cleanup & broadcast death
-                        if target_hp.is_dead() {
-                            if let Some(unit) = unit_opt {
-                                economy.unregister_supply(*attacker_faction, unit.supply_cost);
-                            }
-
-                            let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::Broadcast {
-                                msg: ServerMessage::EntityDied {
-                                    net_id: target_net.net_id,
-                                    faction: *attacker_faction,
+                        let peers = matchmaker.get_room_peers(attacker_room.0);
+                        if !peers.is_empty() {
+                            let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::BroadcastToPeers {
+                                peer_ids: peers.clone(),
+                                msg: ServerMessage::ProjectileFired {
+                                    attacker_net_id: attacker_net.net_id,
+                                    target_net_id: target_net.net_id,
+                                    origin: attacker_pos,
+                                    target_pos,
+                                    damage: soldier.attack_damage,
                                 },
                             });
 
-                            commands.entity(target_entity).despawn_recursive();
-                            soldier.target = None;
+                            let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::BroadcastToPeers {
+                                peer_ids: peers.clone(),
+                                msg: ServerMessage::EntityDamaged {
+                                    target_net_id: target_net.net_id,
+                                    current_hp: target_hp.current,
+                                    max_hp: target_hp.max,
+                                },
+                            });
+
+                            // If dead, cleanup & broadcast death
+                            if target_hp.is_dead() {
+                                if let Some(unit) = unit_opt {
+                                    economy.unregister_supply(*attacker_faction, unit.supply_cost);
+                                }
+
+                                let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::BroadcastToPeers {
+                                    peer_ids: peers,
+                                    msg: ServerMessage::EntityDied {
+                                        net_id: target_net.net_id,
+                                        faction: *attacker_faction,
+                                    },
+                                });
+
+                                commands.entity(target_entity).despawn_recursive();
+                                soldier.target = None;
+                            }
                         }
                     }
                 } else if soldier.state != SoldierState::HoldingPosition {
                     // Step closer to target
                     let dir = (target_pos - attacker_pos).normalize_or_zero();
                     let step = dir * 180.0 * dt;
-                    // (Transform translation handled in main movement)
                     let _ = step;
                 }
             } else {
@@ -1307,11 +1568,13 @@ fn server_turret_combat_system(
     mut commands: Commands,
     time: Res<Time>,
     net_channels: Res<ServerNetworkChannels>,
+    matchmaker: Res<Matchmaker>,
     mut economy: ResMut<PlayerEconomy>,
     mut turrets: Query<(
         Entity,
         &NetEntity,
         &Faction,
+        &RoomId,
         &Transform,
         &mut GunTurret,
         &Building,
@@ -1320,6 +1583,7 @@ fn server_turret_combat_system(
         Entity,
         &NetEntity,
         &Faction,
+        &RoomId,
         &Transform,
         &mut Health,
         Option<&Unit>,
@@ -1327,18 +1591,19 @@ fn server_turret_combat_system(
 ) {
     let dt = time.delta_secs();
 
-    for (_t_entity, turret_net, turret_faction, turret_tf, mut turret, building) in &mut turrets {
+    for (_t_entity, turret_net, turret_faction, turret_room, turret_tf, mut turret, building) in &mut turrets {
         if !building.is_constructed {
             continue;
         }
         turret.attack_timer += dt;
         let turret_pos = turret_tf.translation.truncate();
 
-        // 1. Scan for nearest hostile target if current target is invalid or dead
+        // 1. Scan for nearest hostile target in the SAME room if current target is invalid or dead
         let mut target_valid = false;
         if let Some(target_e) = turret.target {
-            if let Ok((_, _, target_faction, target_tf, target_hp, _)) = targets.get(target_e) {
-                if turret_faction.is_hostile_to(target_faction)
+            if let Ok((_, _, target_faction, target_room, target_tf, target_hp, _)) = targets.get(target_e) {
+                if target_room.0 == turret_room.0
+                    && turret_faction.is_hostile_to(target_faction)
                     && !target_hp.is_dead()
                     && (target_tf.translation.truncate() - turret_pos).length() <= turret.attack_range
                 {
@@ -1351,8 +1616,8 @@ fn server_turret_combat_system(
             turret.target = None;
             let mut closest = None;
             let mut min_d = turret.attack_range;
-            for (t_entity, _, target_faction, target_tf, target_hp, _) in &targets {
-                if turret_faction.is_hostile_to(target_faction) && !target_hp.is_dead() {
+            for (t_entity, _, target_faction, target_room, target_tf, target_hp, _) in &targets {
+                if target_room.0 == turret_room.0 && turret_faction.is_hostile_to(target_faction) && !target_hp.is_dead() {
                     let d = (target_tf.translation.truncate() - turret_pos).length();
                     if d <= min_d {
                         min_d = d;
@@ -1367,9 +1632,14 @@ fn server_turret_combat_system(
 
         // 2. Fire weapon upon cooldown
         if let Some(target_entity) = turret.target {
-            if let Ok((_, target_net, _, target_tf, mut target_hp, unit_opt)) =
+            if let Ok((_, target_net, _, target_room, target_tf, mut target_hp, unit_opt)) =
                 targets.get_mut(target_entity)
             {
+                if target_room.0 != turret_room.0 {
+                    turret.target = None;
+                    continue;
+                }
+
                 let target_pos = target_tf.translation.truncate();
                 let dist = (target_pos - turret_pos).length();
 
@@ -1381,38 +1651,44 @@ fn server_turret_combat_system(
                         turret.attack_timer = 0.0;
                         target_hp.take_damage(turret.attack_damage);
 
-                        let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::Broadcast {
-                            msg: ServerMessage::ProjectileFired {
-                                attacker_net_id: turret_net.net_id,
-                                target_net_id: target_net.net_id,
-                                origin: turret_pos + dir * 28.0,
-                                target_pos,
-                                damage: turret.attack_damage,
-                            },
-                        });
-
-                        let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::Broadcast {
-                            msg: ServerMessage::EntityDamaged {
-                                target_net_id: target_net.net_id,
-                                current_hp: target_hp.current,
-                                max_hp: target_hp.max,
-                            },
-                        });
-
-                        if target_hp.is_dead() {
-                            if let Some(unit) = unit_opt {
-                                economy.unregister_supply(*turret_faction, unit.supply_cost);
-                            }
-
-                            let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::Broadcast {
-                                msg: ServerMessage::EntityDied {
-                                    net_id: target_net.net_id,
-                                    faction: *turret_faction,
+                        let peers = matchmaker.get_room_peers(turret_room.0);
+                        if !peers.is_empty() {
+                            let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::BroadcastToPeers {
+                                peer_ids: peers.clone(),
+                                msg: ServerMessage::ProjectileFired {
+                                    attacker_net_id: turret_net.net_id,
+                                    target_net_id: target_net.net_id,
+                                    origin: turret_pos + dir * 28.0,
+                                    target_pos,
+                                    damage: turret.attack_damage,
                                 },
                             });
 
-                            commands.entity(target_entity).despawn_recursive();
-                            turret.target = None;
+                            let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::BroadcastToPeers {
+                                peer_ids: peers.clone(),
+                                msg: ServerMessage::EntityDamaged {
+                                    target_net_id: target_net.net_id,
+                                    current_hp: target_hp.current,
+                                    max_hp: target_hp.max,
+                                },
+                            });
+
+                            if target_hp.is_dead() {
+                                if let Some(unit) = unit_opt {
+                                    economy.unregister_supply(*turret_faction, unit.supply_cost);
+                                }
+
+                                let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::BroadcastToPeers {
+                                    peer_ids: peers,
+                                    msg: ServerMessage::EntityDied {
+                                        net_id: target_net.net_id,
+                                        faction: *turret_faction,
+                                    },
+                                });
+
+                                commands.entity(target_entity).despawn_recursive();
+                                turret.target = None;
+                            }
                         }
                     }
                 } else {
@@ -1430,11 +1706,13 @@ fn server_siege_tank_combat_system(
     mut commands: Commands,
     time: Res<Time>,
     net_channels: Res<ServerNetworkChannels>,
+    matchmaker: Res<Matchmaker>,
     mut economy: ResMut<PlayerEconomy>,
     mut tanks: Query<(
         Entity,
         &NetEntity,
         &Faction,
+        &RoomId,
         &Transform,
         &mut SiegeTank,
     )>,
@@ -1442,6 +1720,7 @@ fn server_siege_tank_combat_system(
         Entity,
         &NetEntity,
         &Faction,
+        &RoomId,
         &Transform,
         &mut Health,
         Option<&Unit>,
@@ -1449,15 +1728,16 @@ fn server_siege_tank_combat_system(
 ) {
     let dt = time.delta_secs();
 
-    for (_t_entity, tank_net, tank_faction, tank_tf, mut tank) in &mut tanks {
+    for (_t_entity, tank_net, tank_faction, tank_room, tank_tf, mut tank) in &mut tanks {
         tank.attack_timer += dt;
         let tank_pos = tank_tf.translation.truncate();
 
-        // 1. Scan for nearest hostile target if current target is invalid or dead
+        // 1. Scan for nearest hostile target in SAME room
         let mut target_valid = false;
         if let Some(target_e) = tank.target {
-            if let Ok((_, _, target_faction, target_tf, target_hp, _)) = targets.get(target_e) {
-                if tank_faction.is_hostile_to(target_faction)
+            if let Ok((_, _, target_faction, target_room, target_tf, target_hp, _)) = targets.get(target_e) {
+                if target_room.0 == tank_room.0
+                    && tank_faction.is_hostile_to(target_faction)
                     && !target_hp.is_dead()
                     && (target_tf.translation.truncate() - tank_pos).length() <= tank.attack_range
                 {
@@ -1470,8 +1750,8 @@ fn server_siege_tank_combat_system(
             tank.target = None;
             let mut closest = None;
             let mut min_d = tank.attack_range;
-            for (t_entity, _, target_faction, target_tf, target_hp, _) in &targets {
-                if tank_faction.is_hostile_to(target_faction) && !target_hp.is_dead() {
+            for (t_entity, _, target_faction, target_room, target_tf, target_hp, _) in &targets {
+                if target_room.0 == tank_room.0 && tank_faction.is_hostile_to(target_faction) && !target_hp.is_dead() {
                     let d = (target_tf.translation.truncate() - tank_pos).length();
                     if d <= min_d {
                         min_d = d;
@@ -1486,9 +1766,14 @@ fn server_siege_tank_combat_system(
 
         // 2. Fire weapon upon cooldown
         if let Some(target_entity) = tank.target {
-            if let Ok((_, target_net, _, target_tf, mut target_hp, unit_opt)) =
+            if let Ok((_, target_net, _, target_room, target_tf, mut target_hp, unit_opt)) =
                 targets.get_mut(target_entity)
             {
+                if target_room.0 != tank_room.0 {
+                    tank.target = None;
+                    continue;
+                }
+
                 let target_pos = target_tf.translation.truncate();
                 let dist = (target_pos - tank_pos).length();
 
@@ -1500,38 +1785,44 @@ fn server_siege_tank_combat_system(
                         tank.attack_timer = 0.0;
                         target_hp.take_damage(tank.attack_damage);
 
-                        let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::Broadcast {
-                            msg: ServerMessage::ProjectileFired {
-                                attacker_net_id: tank_net.net_id,
-                                target_net_id: target_net.net_id,
-                                origin: tank_pos + dir * 30.0,
-                                target_pos,
-                                damage: tank.attack_damage,
-                            },
-                        });
-
-                        let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::Broadcast {
-                            msg: ServerMessage::EntityDamaged {
-                                target_net_id: target_net.net_id,
-                                current_hp: target_hp.current,
-                                max_hp: target_hp.max,
-                            },
-                        });
-
-                        if target_hp.is_dead() {
-                            if let Some(unit) = unit_opt {
-                                economy.unregister_supply(*tank_faction, unit.supply_cost);
-                            }
-
-                            let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::Broadcast {
-                                msg: ServerMessage::EntityDied {
-                                    net_id: target_net.net_id,
-                                    faction: *tank_faction,
+                        let peers = matchmaker.get_room_peers(tank_room.0);
+                        if !peers.is_empty() {
+                            let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::BroadcastToPeers {
+                                peer_ids: peers.clone(),
+                                msg: ServerMessage::ProjectileFired {
+                                    attacker_net_id: tank_net.net_id,
+                                    target_net_id: target_net.net_id,
+                                    origin: tank_pos + dir * 30.0,
+                                    target_pos,
+                                    damage: tank.attack_damage,
                                 },
                             });
 
-                            commands.entity(target_entity).despawn_recursive();
-                            tank.target = None;
+                            let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::BroadcastToPeers {
+                                peer_ids: peers.clone(),
+                                msg: ServerMessage::EntityDamaged {
+                                    target_net_id: target_net.net_id,
+                                    current_hp: target_hp.current,
+                                    max_hp: target_hp.max,
+                                },
+                            });
+
+                            if target_hp.is_dead() {
+                                if let Some(unit) = unit_opt {
+                                    economy.unregister_supply(*tank_faction, unit.supply_cost);
+                                }
+
+                                let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::BroadcastToPeers {
+                                    peer_ids: peers,
+                                    msg: ServerMessage::EntityDied {
+                                        net_id: target_net.net_id,
+                                        faction: *tank_faction,
+                                    },
+                                });
+
+                                commands.entity(target_entity).despawn_recursive();
+                                tank.target = None;
+                            }
                         }
                     }
                 } else {
@@ -1544,59 +1835,79 @@ fn server_siege_tank_combat_system(
     }
 }
 
-/// Checks for Victory or Defeat when a Base HQ is destroyed
+/// Checks for Victory or Defeat per room when a Base HQ is destroyed
 fn server_match_outcome_system(
+    mut matchmaker: ResMut<Matchmaker>,
     net_channels: Res<ServerNetworkChannels>,
-    hq_query: Query<&Faction, With<BaseHQ>>,
-    mut match_ended: Local<bool>,
+    hq_query: Query<(&Faction, &RoomId), With<BaseHQ>>,
 ) {
-    if *match_ended {
-        return;
-    }
+    let mut ended_rooms = Vec::new();
 
-    let mut has_p1_hq = false;
-    let mut has_enemy_hq = false;
+    for (room_id, room) in matchmaker.rooms.iter() {
+        if !room.is_active {
+            continue;
+        }
 
-    for faction in &hq_query {
-        if *faction == Faction::Player1 {
-            has_p1_hq = true;
-        } else {
-            has_enemy_hq = true;
+        let mut has_p1_hq = false;
+        let mut has_enemy_hq = false;
+
+        for (faction, hq_room) in &hq_query {
+            if hq_room.0 == *room_id {
+                if *faction == Faction::Player1 {
+                    has_p1_hq = true;
+                } else {
+                    has_enemy_hq = true;
+                }
+            }
+        }
+
+        if !has_p1_hq && has_enemy_hq {
+            let win_fac = if room.mode == GameMode::SoloVsAi {
+                Faction::HostileAi
+            } else {
+                Faction::Player2
+            };
+            ended_rooms.push((*room_id, win_fac, room.match_time));
+        } else if has_p1_hq && !has_enemy_hq {
+            ended_rooms.push((*room_id, Faction::Player1, room.match_time));
         }
     }
 
-    if !has_p1_hq && has_enemy_hq {
-        *match_ended = true;
-        info!("💥 [GameServer] Player 1 Base HQ Destroyed! Defeat.");
-        let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::Broadcast {
-            msg: ServerMessage::MatchEnded {
-                winning_faction: Faction::Player2,
-                duration_seconds: 0.0,
-            },
-        });
-    } else if has_p1_hq && !has_enemy_hq {
-        *match_ended = true;
-        info!("🏆 [GameServer] Enemy Base HQ Destroyed! Victory.");
-        let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::Broadcast {
-            msg: ServerMessage::MatchEnded {
-                winning_faction: Faction::Player1,
-                duration_seconds: 0.0,
-            },
-        });
+    for (room_id, winning_faction, duration) in ended_rooms {
+        if let Some(room) = matchmaker.rooms.get_mut(&room_id) {
+            room.is_active = false;
+        }
+
+        info!(
+            "🏆 [GameServer] Room #{} finished! Winner: {:?} (Duration: {:.1}s)",
+            room_id, winning_faction, duration
+        );
+
+        let peers = matchmaker.get_room_peers(room_id);
+        if !peers.is_empty() {
+            let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::BroadcastToPeers {
+                peer_ids: peers,
+                msg: ServerMessage::MatchEnded {
+                    winning_faction,
+                    duration_seconds: duration,
+                },
+            });
+        }
     }
 }
 
-/// 30 Hz position, rotation, and health snapshot broadcast
+/// 30 Hz position, rotation, and health snapshot broadcast partitioned per active room
 fn server_tick_snapshot_system(
     time: Res<Time>,
     mut tick_timer: ResMut<ServerTickTimer>,
     net_channels: Res<ServerNetworkChannels>,
+    matchmaker: Res<Matchmaker>,
     economy: Res<PlayerEconomy>,
-    ai_state: Option<Res<bot_ai::WaveAiState>>,
     entities_query: Query<(
         &NetEntity,
         &Transform,
         &Health,
+        &RoomId,
         Option<&Worker>,
     )>,
     node_query: Query<(&NetEntity, &Transform), With<ResourceNode>>,
@@ -1605,58 +1916,445 @@ fn server_tick_snapshot_system(
     tick_timer.0.tick(time.delta());
     if tick_timer.0.just_finished() {
         *tick_counter += 1;
-        let mut snapshots = Vec::new();
 
-        for (net_entity, transform, health, worker_opt) in &entities_query {
-            let is_mining = worker_opt
-                .map(|w| w.state == WorkerState::Mining)
-                .unwrap_or(false);
+        for (room_id, room) in &matchmaker.rooms {
+            if !room.is_active {
+                continue;
+            }
 
-            let laser_target = if is_mining {
-                worker_opt.and_then(|w| {
-                    w.target_node.and_then(|node_e| {
-                        node_query.get(node_e).ok().map(|(_, tf)| tf.translation.truncate())
+            let peers = matchmaker.get_room_peers(*room_id);
+            if peers.is_empty() {
+                continue;
+            }
+
+            let mut room_snapshots = Vec::new();
+
+            for (net_entity, transform, health, ent_room, worker_opt) in &entities_query {
+                if ent_room.0 != *room_id {
+                    continue;
+                }
+
+                let is_mining = worker_opt
+                    .map(|w| w.state == WorkerState::Mining)
+                    .unwrap_or(false);
+
+                let laser_target = if is_mining {
+                    worker_opt.and_then(|w| {
+                        w.target_node.and_then(|node_e| {
+                            node_query.get(node_e).ok().map(|(_, tf)| tf.translation.truncate())
+                        })
                     })
-                })
+                } else {
+                    None
+                };
+
+                let rotation = transform.rotation.to_euler(EulerRot::XYZ).2;
+
+                room_snapshots.push(EntitySnapshot {
+                    net_id: net_entity.net_id,
+                    position: transform.translation.truncate(),
+                    rotation,
+                    current_hp: health.current,
+                    max_hp: health.max,
+                    is_mining,
+                    laser_target,
+                });
+            }
+
+            let (p1_cur_sup, p1_max_sup) = economy.get_supply(Faction::Player1);
+            let p2_faction = if room.mode == GameMode::SoloVsAi {
+                Faction::HostileAi
             } else {
-                None
+                Faction::Player2
             };
+            let (p2_cur_sup, p2_max_sup) = economy.get_supply(p2_faction);
 
-            let rotation = transform.rotation.to_euler(EulerRot::XYZ).2;
-
-            snapshots.push(EntitySnapshot {
-                net_id: net_entity.net_id,
-                position: transform.translation.truncate(),
-                rotation,
-                current_hp: health.current,
-                max_hp: health.max,
-                is_mining,
-                laser_target,
+            let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::BroadcastToPeers {
+                peer_ids: peers,
+                msg: ServerMessage::TickSnapshotBatch {
+                    tick: *tick_counter,
+                    snapshots: room_snapshots,
+                    p1_minerals: economy.get_minerals(Faction::Player1),
+                    p1_supply: p1_cur_sup,
+                    p1_max_supply: p1_max_sup,
+                    p2_minerals: economy.get_minerals(p2_faction),
+                    p2_supply: p2_cur_sup,
+                    p2_max_supply: p2_max_sup,
+                    next_wave_seconds: room.time_until_next_wave,
+                    current_wave: room.current_wave,
+                },
             });
         }
+    }
+}
 
-        let (next_wave, wave_num) = if let Some(ai) = ai_state {
-            (ai.time_until_next_wave, ai.current_wave)
-        } else {
-            (0.0, 0)
-        };
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-        let (p1_cur_sup, p1_max_sup) = economy.get_supply(Faction::Player1);
-        let (p2_cur_sup, p2_max_sup) = economy.get_supply(Faction::Player2);
+    #[test]
+    fn test_combat_system_strictly_isolates_rooms() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
 
-        let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::Broadcast {
-            msg: ServerMessage::TickSnapshotBatch {
-                tick: *tick_counter,
-                snapshots,
-                p1_minerals: economy.get_minerals(Faction::Player1),
-                p1_supply: p1_cur_sup,
-                p1_max_supply: p1_max_sup,
-                p2_minerals: economy.get_minerals(Faction::Player2),
-                p2_supply: p2_cur_sup,
-                p2_max_supply: p2_max_sup,
-                next_wave_seconds: next_wave,
-                current_wave: wave_num,
-            },
+        let (_tx_in, rx_in) = crossbeam_channel::unbounded();
+        let (tx_out, _rx_out) = crossbeam_channel::unbounded();
+        app.insert_resource(ServerNetworkChannels {
+            rx_incoming: rx_in,
+            tx_outgoing: tx_out,
         });
+        app.insert_resource(PlayerEconomy::new());
+        app.insert_resource(Matchmaker::new());
+        app.add_systems(Update, server_combat_system);
+
+        let world = app.world_mut();
+
+        // Room 1: P1 Marine at (0, 0) and Room 1 Enemy Marine at (50, 0)
+        let r1_p1 = world.spawn((
+            Unit { name: "P1 Marine".to_string(), supply_cost: 2 },
+            Soldier {
+                state: SoldierState::Idle,
+                attack_range: 150.0,
+                aggro_radius: 240.0,
+                attack_damage: 15.0,
+                attack_cooldown: 0.85,
+                ..default()
+            },
+            Health::new(120.0),
+            Faction::Player1,
+            RoomId(1),
+            NetEntity { net_id: 101, owner_peer_id: 1 },
+            Transform::from_xyz(0.0, 0.0, 2.0),
+        )).id();
+
+        let r1_enemy = world.spawn((
+            Unit { name: "P2 Marine".to_string(), supply_cost: 2 },
+            Soldier {
+                state: SoldierState::Idle,
+                attack_range: 150.0,
+                aggro_radius: 240.0,
+                attack_damage: 15.0,
+                attack_cooldown: 0.85,
+                ..default()
+            },
+            Health::new(120.0),
+            Faction::Player2,
+            RoomId(1),
+            NetEntity { net_id: 102, owner_peer_id: 2 },
+            Transform::from_xyz(50.0, 0.0, 2.0),
+        )).id();
+
+        // Room 2: P1 Marine at (0, 0) and Room 2 Enemy Marine at (50, 0) (Identical coords!)
+        let r2_p1 = world.spawn((
+            Unit { name: "P1 Marine".to_string(), supply_cost: 2 },
+            Soldier {
+                state: SoldierState::Idle,
+                attack_range: 150.0,
+                aggro_radius: 240.0,
+                attack_damage: 15.0,
+                attack_cooldown: 0.85,
+                ..default()
+            },
+            Health::new(120.0),
+            Faction::Player1,
+            RoomId(2),
+            NetEntity { net_id: 201, owner_peer_id: 3 },
+            Transform::from_xyz(0.0, 0.0, 2.0),
+        )).id();
+
+        let r2_enemy = world.spawn((
+            Unit { name: "Hostile Marine".to_string(), supply_cost: 2 },
+            Soldier {
+                state: SoldierState::Idle,
+                attack_range: 150.0,
+                aggro_radius: 240.0,
+                attack_damage: 15.0,
+                attack_cooldown: 0.85,
+                ..default()
+            },
+            Health::new(120.0),
+            Faction::HostileAi,
+            RoomId(2),
+            NetEntity { net_id: 202, owner_peer_id: 0 },
+            Transform::from_xyz(50.0, 0.0, 2.0),
+        )).id();
+
+        // Run simulation update
+        app.update();
+
+        // Assert that Room 1 P1 Soldier acquired Room 1 Enemy, and NOT Room 2 Enemy
+        let s_r1 = app.world().get::<Soldier>(r1_p1).unwrap();
+        assert_eq!(s_r1.target, Some(r1_enemy), "Room 1 P1 must target Room 1 Enemy");
+
+        let s_r2 = app.world().get::<Soldier>(r2_p1).unwrap();
+        assert_eq!(s_r2.target, Some(r2_enemy), "Room 2 P1 must target Room 2 Enemy");
+
+        let s_r1_e = app.world().get::<Soldier>(r1_enemy).unwrap();
+        assert_eq!(s_r1_e.target, Some(r1_p1), "Room 1 Enemy must target Room 1 P1");
+
+        let s_r2_e = app.world().get::<Soldier>(r2_enemy).unwrap();
+        assert_eq!(s_r2_e.target, Some(r2_p1), "Room 2 Enemy must target Room 2 P1");
+    }
+
+    #[test]
+    fn test_match_outcome_per_room_independence() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+
+        let (_tx_in, rx_in) = crossbeam_channel::unbounded();
+        let (tx_out, _rx_out) = crossbeam_channel::unbounded();
+        app.insert_resource(ServerNetworkChannels {
+            rx_incoming: rx_in,
+            tx_outgoing: tx_out,
+        });
+
+        let mut matchmaker = Matchmaker::new();
+        matchmaker.rooms.insert(
+            1,
+            Room {
+                room_id: 1,
+                mode: GameMode::Multiplayer1v1,
+                p1_peer: Some(101),
+                p2_peer: Some(102),
+                is_active: true,
+                match_time: 25.0,
+                current_wave: 0,
+                time_until_next_wave: 40.0,
+            },
+        );
+        matchmaker.rooms.insert(
+            2,
+            Room {
+                room_id: 2,
+                mode: GameMode::SoloVsAi,
+                p1_peer: Some(201),
+                p2_peer: None,
+                is_active: true,
+                match_time: 50.0,
+                current_wave: 2,
+                time_until_next_wave: 20.0,
+            },
+        );
+        app.insert_resource(matchmaker);
+        app.add_systems(Update, server_match_outcome_system);
+
+        let world = app.world_mut();
+
+        // Room 1: Both P1 HQ and P2 HQ exist (Match In Progress)
+        world.spawn((
+            BaseHQ::default(),
+            Faction::Player1,
+            RoomId(1),
+            Health::new(1500.0),
+        ));
+        world.spawn((
+            BaseHQ::default(),
+            Faction::Player2,
+            RoomId(1),
+            Health::new(1500.0),
+        ));
+
+        // Room 2: Only P1 HQ exists (AI HQ was destroyed -> P1 Victory in Room 2!)
+        world.spawn((
+            BaseHQ::default(),
+            Faction::Player1,
+            RoomId(2),
+            Health::new(1500.0),
+        ));
+
+        // Run match outcome evaluation
+        app.update();
+
+        let mm = app.world().resource::<Matchmaker>();
+        let r1 = mm.rooms.get(&1).unwrap();
+        let r2 = mm.rooms.get(&2).unwrap();
+
+        assert!(r1.is_active, "Room 1 should still be active (both HQs alive)");
+        assert!(!r2.is_active, "Room 2 should be marked inactive (AI HQ destroyed)");
+    }
+
+    #[test]
+    fn test_disconnect_cleans_up_room_entities_and_telemetry() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+
+        let (tx_in, rx_in) = crossbeam_channel::unbounded();
+        let (tx_out, _rx_out) = crossbeam_channel::unbounded();
+        app.insert_resource(ServerNetworkChannels {
+            rx_incoming: rx_in,
+            tx_outgoing: tx_out,
+        });
+        app.insert_resource(PlayerEconomy::new());
+        app.insert_resource(NavGrid::default());
+
+        let mut matchmaker = Matchmaker::new();
+        matchmaker.players.insert(
+            101,
+            PlayerSession {
+                peer_id: 101,
+                name: "Commander".to_string(),
+                room_id: 1,
+                faction: Faction::Player1,
+            },
+        );
+        matchmaker.rooms.insert(
+            1,
+            Room {
+                room_id: 1,
+                mode: GameMode::SoloVsAi,
+                p1_peer: Some(101),
+                p2_peer: None,
+                is_active: true,
+                match_time: 10.0,
+                current_wave: 1,
+                time_until_next_wave: 30.0,
+            },
+        );
+        app.insert_resource(matchmaker);
+        app.add_systems(Update, handle_incoming_network_events);
+
+        let world = app.world_mut();
+
+        // Spawn entities in Room 1
+        let e1 = world.spawn((RoomId(1), Unit { name: "Marine 1".to_string(), supply_cost: 2 }, NetEntity { net_id: 10, owner_peer_id: 101 }, Transform::default(), Faction::Player1)).id();
+        let e2 = world.spawn((RoomId(1), BaseHQ::default(), NetEntity { net_id: 11, owner_peer_id: 101 }, Transform::default(), Faction::Player1)).id();
+
+        // Spawn entity in Room 2 (different match)
+        let e_other = world.spawn((RoomId(2), BaseHQ::default(), NetEntity { net_id: 20, owner_peer_id: 201 }, Transform::default(), Faction::Player1)).id();
+
+        // Send disconnect event for peer 101
+        tx_in.send(IncomingNetEvent::PeerDisconnected { peer_id: 101 }).unwrap();
+
+        // Process event
+        app.update();
+
+        // Room 1 entities should be despawned
+        assert!(app.world().get_entity(e1).is_err(), "Room 1 unit must be despawned on disconnect");
+        assert!(app.world().get_entity(e2).is_err(), "Room 1 HQ must be despawned on disconnect");
+
+        // Room 2 entity must still exist untouched
+        assert!(app.world().get_entity(e_other).is_ok(), "Room 2 HQ must remain alive");
+
+        let mm = app.world().resource::<Matchmaker>();
+        assert!(!mm.rooms.contains_key(&1), "Room 1 should be removed from matchmaker");
+        assert!(!mm.players.contains_key(&101), "Player 101 should be removed");
+    }
+
+    #[test]
+    fn test_tick_snapshots_are_partitioned_per_room() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+
+        let (_tx_in, rx_in) = crossbeam_channel::unbounded();
+        let (tx_out, rx_out) = crossbeam_channel::unbounded();
+        app.insert_resource(ServerNetworkChannels {
+            rx_incoming: rx_in,
+            tx_outgoing: tx_out,
+        });
+        app.insert_resource(PlayerEconomy::new());
+
+        let mut matchmaker = Matchmaker::new();
+        matchmaker.players.insert(
+            101,
+            PlayerSession {
+                peer_id: 101,
+                name: "Player 1".to_string(),
+                room_id: 1,
+                faction: Faction::Player1,
+            },
+        );
+        matchmaker.rooms.insert(
+            1,
+            Room {
+                room_id: 1,
+                mode: GameMode::SoloVsAi,
+                p1_peer: Some(101),
+                p2_peer: None,
+                is_active: true,
+                match_time: 5.0,
+                current_wave: 1,
+                time_until_next_wave: 30.0,
+            },
+        );
+
+        matchmaker.players.insert(
+            201,
+            PlayerSession {
+                peer_id: 201,
+                name: "Player 2".to_string(),
+                room_id: 2,
+                faction: Faction::Player1,
+            },
+        );
+        matchmaker.rooms.insert(
+            2,
+            Room {
+                room_id: 2,
+                mode: GameMode::SoloVsAi,
+                p1_peer: Some(201),
+                p2_peer: None,
+                is_active: true,
+                match_time: 15.0,
+                current_wave: 3,
+                time_until_next_wave: 10.0,
+            },
+        );
+        app.insert_resource(matchmaker);
+        // Add a tick timer with 0s duration to trigger immediately
+        app.insert_resource(ServerTickTimer(Timer::from_seconds(0.0, TimerMode::Repeating)));
+        app.add_systems(Update, server_tick_snapshot_system);
+
+        let world = app.world_mut();
+
+        // Spawn entity in Room 1
+        world.spawn((
+            RoomId(1),
+            NetEntity { net_id: 1001, owner_peer_id: 101 },
+            Transform::from_xyz(100.0, 100.0, 1.0),
+            Health::new(100.0),
+        ));
+
+        // Spawn entity in Room 2
+        world.spawn((
+            RoomId(2),
+            NetEntity { net_id: 2001, owner_peer_id: 201 },
+            Transform::from_xyz(-200.0, -200.0, 1.0),
+            Health::new(200.0),
+        ));
+
+        // Tick simulation
+        app.update();
+
+        // Verify sent outgoing network events
+        let mut events = Vec::new();
+        while let Ok(ev) = rx_out.try_recv() {
+            events.push(ev);
+        }
+
+        assert_eq!(events.len(), 2, "Must send exactly one snapshot batch per active room");
+
+        for ev in events {
+            match ev {
+                OutgoingNetEvent::BroadcastToPeers { peer_ids, msg } => {
+                    match msg {
+                        ServerMessage::TickSnapshotBatch { snapshots, .. } => {
+                            if peer_ids.contains(&101) {
+                                assert_eq!(peer_ids, vec![101]);
+                                assert_eq!(snapshots.len(), 1);
+                                assert_eq!(snapshots[0].net_id, 1001, "Room 1 snapshot must contain entity 1001");
+                            } else if peer_ids.contains(&201) {
+                                assert_eq!(peer_ids, vec![201]);
+                                assert_eq!(snapshots.len(), 1);
+                                assert_eq!(snapshots[0].net_id, 2001, "Room 2 snapshot must contain entity 2001");
+                            } else {
+                                panic!("Unexpected peer recipient: {:?}", peer_ids);
+                            }
+                        }
+                        _ => panic!("Expected TickSnapshotBatch message"),
+                    }
+                }
+                _ => panic!("Expected BroadcastToPeers event"),
+            }
+        }
     }
 }

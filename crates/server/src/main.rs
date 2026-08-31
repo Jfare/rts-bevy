@@ -19,7 +19,6 @@ fn main() {
             ))),
         )
         .add_plugins(bevy::remote::RemotePlugin::default())
-        .add_plugins(bot_ai::WaveAiPlugin)
         .add_plugins(ServerNetworkPlugin::default())
         .add_plugins(ServerSimulationPlugin)
         .add_systems(Startup, setup_server)
