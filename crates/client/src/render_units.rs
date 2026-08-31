@@ -56,8 +56,12 @@ fn draw_units_system(
         let r = radius.0;
         let rot = transform.rotation.to_euler(EulerRot::ZYX).0;
 
-        let [cr, cg, cb, _] = faction.color_rgba();
-        let body_color = Color::srgb(cr, cg, cb);
+        let body_color = if *faction == net_client.my_faction {
+            net_client.my_color.to_color()
+        } else {
+            let [cr, cg, cb, _] = faction.color_rgba();
+            Color::srgb(cr, cg, cb)
+        };
         let outline_color = body_color.lighter(0.25);
 
         // 1. Stimpack Aura Glow
@@ -213,8 +217,12 @@ fn draw_buildings_system(
 
         let size = building.size;
 
-        let [cr, cg, cb, _] = faction.color_rgba();
-        let accent_col = Color::srgb(cr, cg, cb);
+        let accent_col = if *faction == net_client.my_faction {
+            net_client.my_color.to_color()
+        } else {
+            let [cr, cg, cb, _] = faction.color_rgba();
+            Color::srgb(cr, cg, cb)
+        };
         let base_col = Color::srgba(0.12, 0.16, 0.20, 0.95);
 
         // Base foundation box

@@ -176,7 +176,7 @@ fn production_queue_system(
 /// Hotkeys for training units when a production building is selected
 fn handle_production_hotkeys(
     keyboard: Res<ButtonInput<KeyCode>>,
-    mut net_client: ResMut<NetClient>,
+    net_client: Res<NetClient>,
     mut economy: ResMut<PlayerEconomy>,
     mut stats: ResMut<MatchStats>,
     mut sound_events: EventWriter<SoundEffect>,
@@ -341,7 +341,7 @@ fn handle_production_hotkeys(
 /// Allows right-clicking to change the rally point of a selected production building
 fn handle_rally_point_order(
     mouse_button: Res<ButtonInput<MouseButton>>,
-    mut net_client: ResMut<NetClient>,
+    net_client: Res<NetClient>,
     window_query: Query<&Window, With<PrimaryWindow>>,
     camera_query: Query<(&Camera, &Transform, Option<&OrthographicProjection>)>,
     mut prod_query: Query<(&mut ProductionBuilding, &Faction, &Selectable, Option<&NetEntity>), Without<Unit>>,

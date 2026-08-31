@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use shared::components::*;
 use shared::grid::BuildingKind;
-use shared::protocol::{EntityKind, EntityState, GameMode, UnitKind};
+use shared::protocol::{EntityKind, EntityState, FactionColor, GameMode, UnitKind};
 use std::collections::HashMap;
 
 
@@ -12,12 +12,14 @@ pub struct PlayerSession {
     pub name: String,
     pub room_id: u32,
     pub faction: Faction,
+    pub color: FactionColor,
 }
 
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct Room {
     pub room_id: u32,
+    pub room_code: Option<String>,
     pub mode: GameMode,
     pub p1_peer: Option<u64>,
     pub p2_peer: Option<u64>,
@@ -57,10 +59,36 @@ impl Matchmaker {
         id
     }
 
+    pub fn generate_room_code(&self) -> String {
+        let chars: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+        let mut code = String::with_capacity(4);
+        let seed = (self.next_room_id * 1103515245 + 12345) as usize;
+        for i in 0..4 {
+            let idx = (seed >> (i * 4)) % chars.len();
+            code.push(chars[idx] as char);
+        }
+        if self.rooms.values().any(|r| r.room_code.as_deref() == Some(&code)) {
+            format!("{:04X}", (self.next_room_id * 7919) % 65535)
+        } else {
+            code
+        }
+    }
+
+    pub fn find_room_by_code(&self, code: &str) -> Option<u32> {
+        let upper = code.trim().to_uppercase();
+        self.rooms.iter().find_map(|(id, r)| {
+            if r.room_code.as_deref() == Some(&upper) && r.p2_peer.is_none() && r.mode == GameMode::CustomPrivate {
+                Some(*id)
+            } else {
+                None
+            }
+        })
+    }
+
     pub fn active_1v1_count(&self) -> usize {
         self.rooms
             .values()
-            .filter(|r| r.mode == GameMode::Multiplayer1v1 && r.is_active)
+            .filter(|r| (r.mode == GameMode::Multiplayer1v1 || r.mode == GameMode::CustomPrivate) && r.is_active)
             .count()
     }
 
@@ -297,7 +325,7 @@ pub fn spawn_match_entities(
     let p2_base_pos = Vec2::new(700.0, -250.0);
     let p2_faction = match mode {
         GameMode::SoloVsAi => Faction::HostileAi,
-        GameMode::Multiplayer1v1 => Faction::Player2,
+        GameMode::Multiplayer1v1 | GameMode::CustomPrivate => Faction::Player2,
     };
     let p2_owner = p2_peer.unwrap_or(2);
 
@@ -482,6 +510,7 @@ mod tests {
                 name: "Player 1".to_string(),
                 room_id: 1,
                 faction: Faction::Player1,
+                color: FactionColor::Blue,
             },
         );
         matchmaker.players.insert(
@@ -491,12 +520,14 @@ mod tests {
                 name: "Player 2".to_string(),
                 room_id: 1,
                 faction: Faction::Player2,
+                color: FactionColor::Red,
             },
         );
         matchmaker.rooms.insert(
             1,
             Room {
                 room_id: 1,
+                room_code: None,
                 mode: GameMode::Multiplayer1v1,
                 p1_peer: Some(101),
                 p2_peer: Some(102),
@@ -515,12 +546,14 @@ mod tests {
                 name: "Solo Commander".to_string(),
                 room_id: 2,
                 faction: Faction::Player1,
+                color: FactionColor::Teal,
             },
         );
         matchmaker.rooms.insert(
             2,
             Room {
                 room_id: 2,
+                room_code: None,
                 mode: GameMode::SoloVsAi,
                 p1_peer: Some(201),
                 p2_peer: None,
@@ -557,6 +590,7 @@ mod tests {
             1,
             Room {
                 room_id: 1,
+                room_code: None,
                 mode: GameMode::Multiplayer1v1,
                 p1_peer: Some(101),
                 p2_peer: Some(102),
@@ -573,6 +607,7 @@ mod tests {
                 name: "P1".to_string(),
                 room_id: 1,
                 faction: Faction::Player1,
+                color: FactionColor::Blue,
             },
         );
         matchmaker.players.insert(
@@ -582,6 +617,7 @@ mod tests {
                 name: "P2".to_string(),
                 room_id: 1,
                 faction: Faction::Player2,
+                color: FactionColor::Red,
             },
         );
 
@@ -589,6 +625,7 @@ mod tests {
             2,
             Room {
                 room_id: 2,
+                room_code: None,
                 mode: GameMode::SoloVsAi,
                 p1_peer: Some(201),
                 p2_peer: None,
@@ -605,6 +642,7 @@ mod tests {
                 name: "Solo".to_string(),
                 room_id: 2,
                 faction: Faction::Player1,
+                color: FactionColor::Amber,
             },
         );
 

@@ -1,5 +1,6 @@
 mod audio_sfx;
 mod camera;
+mod chat;
 mod combat;
 mod command_marker;
 mod fog_of_war;
@@ -7,6 +8,7 @@ mod mining;
 mod minimap;
 mod net;
 mod particles;
+mod pings;
 mod placement;
 mod production;
 mod render_units;
@@ -20,6 +22,7 @@ use bevy::prelude::*;
 use bevy::window::WindowResolution;
 use audio_sfx::AudioSfxPlugin;
 use camera::{RtsCamera, RtsCameraPlugin};
+use chat::ChatPlugin;
 use combat::CombatPlugin;
 use command_marker::CommandMarkerPlugin;
 use fog_of_war::FogOfWarPlugin;
@@ -27,6 +30,7 @@ use mining::MiningPlugin;
 use minimap::MinimapPlugin;
 use net::NetClientPlugin;
 use particles::ParticlesPlugin;
+use pings::TacticalPingPlugin;
 use placement::PlacementPlugin;
 use production::ProductionPlugin;
 use render_units::RenderUnitsPlugin;
@@ -87,6 +91,8 @@ fn main() {
         MinimapPlugin,
         FogOfWarPlugin,
         RtsUiPlugin,
+        ChatPlugin,
+        TacticalPingPlugin,
         NetClientPlugin,
         bot_ai::WaveAiPlugin,
     ));

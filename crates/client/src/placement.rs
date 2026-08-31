@@ -39,7 +39,7 @@ fn handle_placement_input(
     mut commands: Commands,
     keyboard: Res<ButtonInput<KeyCode>>,
     mouse_button: Res<ButtonInput<MouseButton>>,
-    mut net_client: ResMut<NetClient>,
+    net_client: Res<NetClient>,
     mut economy: ResMut<PlayerEconomy>,
     mut stats: ResMut<MatchStats>,
     mut sound_events: EventWriter<SoundEffect>,

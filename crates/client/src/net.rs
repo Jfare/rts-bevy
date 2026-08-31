@@ -5,10 +5,12 @@ use shared::components::*;
 use shared::economy::PlayerEconomy;
 use shared::grid::BuildingKind;
 use shared::protocol::{
-    decode_server_msg, encode_client_msg, ClientMessage, EntityKind, GameMode, ServerMessage,
-    UnitKind,
+    decode_server_msg, encode_client_msg, ClientMessage, EntityKind, FactionColor, GameMode,
+    ServerMessage, UnitKind,
 };
 use std::collections::HashMap;
+use crate::chat::{ChatEntry, ChatLog};
+use crate::pings::TacticalPingVisual;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum NetStatus {
@@ -39,6 +41,9 @@ pub struct NetClient {
     pub status: NetStatus,
     pub my_peer_id: u64,
     pub my_faction: Faction,
+    pub my_color: FactionColor,
+    pub player_name: String,
+    pub current_room_code: Option<String>,
     pub current_mode: GameMode,
     pub server_url: String,
     pub ping_timer: Timer,
@@ -56,6 +61,9 @@ impl Default for NetClient {
             status: NetStatus::Disconnected,
             my_peer_id: 1,
             my_faction: Faction::Player1,
+            my_color: FactionColor::Blue,
+            player_name: "Commander".to_string(),
+            current_room_code: None,
             current_mode: GameMode::SoloVsAi,
             server_url,
             ping_timer: Timer::from_seconds(2.0, TimerMode::Repeating),
@@ -153,8 +161,10 @@ fn poll_web_portal_launch_requests(
                             wave_ai.is_active = false;
                         }
                         net_client.send(&ClientMessage::JoinLobby {
-                            player_name: "Commander".to_string(),
+                            player_name: net_client.player_name.clone(),
                             mode: GameMode::Multiplayer1v1,
+                            room_code: None,
+                            faction_color: Some(net_client.my_color),
                         });
                     } else if mode_str == "solo" {
                         info!("🤖 [Portal] Launching Solo vs AI match");
@@ -165,8 +175,10 @@ fn poll_web_portal_launch_requests(
                             wave_ai.current_wave = 0;
                         }
                         net_client.send(&ClientMessage::JoinLobby {
-                            player_name: "Commander".to_string(),
+                            player_name: net_client.player_name.clone(),
                             mode: GameMode::SoloVsAi,
+                            room_code: None,
+                            faction_color: Some(net_client.my_color),
                         });
                     }
                 }
@@ -204,6 +216,7 @@ fn poll_network_events(
     mut net_client: ResMut<NetClient>,
     mut economy: ResMut<PlayerEconomy>,
     mut outcome_opt: Option<ResMut<MatchOutcome>>,
+    mut chat_log_opt: Option<ResMut<ChatLog>>,
     cleanup_query: Query<Entity, Or<(With<NetEntity>, With<Unit>, With<Building>, With<ResourceNode>)>>,
     mut camera_query: Query<&mut Transform, (With<Camera2d>, Without<NetEntity>, Without<Unit>, Without<Building>)>,
     mut entity_query: Query<(
@@ -252,6 +265,7 @@ fn poll_network_events(
                         &mut net_client,
                         &mut economy,
                         &mut outcome_opt,
+                        &mut chat_log_opt,
                         &cleanup_query,
                         &mut camera_query,
                         &mut entity_query,
@@ -278,6 +292,7 @@ fn handle_server_message(
     net_client: &mut ResMut<NetClient>,
     economy: &mut ResMut<PlayerEconomy>,
     outcome_opt: &mut Option<ResMut<MatchOutcome>>,
+    chat_log_opt: &mut Option<ResMut<ChatLog>>,
     cleanup_query: &Query<Entity, Or<(With<NetEntity>, With<Unit>, With<Building>, With<ResourceNode>)>>,
     camera_query: &mut Query<&mut Transform, (With<Camera2d>, Without<NetEntity>, Without<Unit>, Without<Building>)>,
     entity_query: &mut Query<(
@@ -295,18 +310,20 @@ fn handle_server_message(
             player_id,
             assigned_faction,
             room_id,
+            room_code,
             is_game_ready,
         } => {
             net_client.my_peer_id = player_id;
             net_client.my_faction = assigned_faction;
+            net_client.current_room_code = room_code.clone();
             net_client.status = if is_game_ready {
                 NetStatus::InGame
             } else {
                 NetStatus::InLobby
             };
             info!(
-                "🎯 [NetClient] Joined Room #{} as {:?} (Ready: {})",
-                room_id, assigned_faction, is_game_ready
+                "🎯 [NetClient] Joined Room #{} (Code: {:?}) as {:?} (Ready: {})",
+                room_id, room_code, assigned_faction, is_game_ready
             );
         }
         ServerMessage::GameStarted { .. } => {
@@ -746,6 +763,47 @@ fn handle_server_message(
                 total_online,
                 last_updated_ms: now_ms,
             });
+        }
+        ServerMessage::ChatMessageReceived {
+            sender_name,
+            faction,
+            color,
+            text,
+            is_system,
+        } => {
+            info!("💬 [Chat] {}: {}", sender_name, text);
+            if let Some(ref mut chat_log) = chat_log_opt {
+                chat_log.entries.push(ChatEntry {
+                    sender_name,
+                    faction,
+                    color,
+                    text,
+                    is_system,
+                    timestamp_ms: now_ms,
+                });
+                if chat_log.entries.len() > 100 {
+                    chat_log.entries.remove(0);
+                }
+            }
+        }
+        ServerMessage::TacticalPingReceived {
+            sender_name,
+            faction: _,
+            color,
+            position,
+            ping_type,
+        } => {
+            info!("📍 [Ping] {} pinged {:?} at {:?}", sender_name, ping_type, position);
+            commands.spawn((
+                TacticalPingVisual {
+                    position,
+                    ping_type,
+                    color,
+                    lifetime: 0.0,
+                    max_lifetime: 3.5,
+                },
+                Transform::from_xyz(position.x, position.y, 4.0),
+            ));
         }
         ServerMessage::ErrorMessage { reason } => {
             warn!("🛑 [NetClient] Server message: {}", reason);

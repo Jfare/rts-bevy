@@ -41,7 +41,7 @@ fn handle_right_click_orders(
     mut commands: Commands,
     mouse_button: Res<ButtonInput<MouseButton>>,
     keyboard: Res<ButtonInput<KeyCode>>,
-    mut net_client: ResMut<NetClient>,
+    net_client: Res<NetClient>,
     nav_grid: Res<NavGrid>,
     grid_cfg: Option<Res<WorldGridConfig>>,
     fog: Res<FogOfWarGrid>,
@@ -286,7 +286,7 @@ use crate::particles::ParticleEvent;
 fn handle_stance_and_ability_hotkeys(
     mut commands: Commands,
     keyboard: Res<ButtonInput<KeyCode>>,
-    mut net_client: ResMut<NetClient>,
+    net_client: Res<NetClient>,
     mut sound_events: EventWriter<SoundEffect>,
     mut particle_events: EventWriter<ParticleEvent>,
     mut unit_query: Query<(

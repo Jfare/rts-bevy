@@ -28,7 +28,7 @@ impl Plugin for MiningPlugin {
 fn handle_mining_click_orders(
     mut commands: Commands,
     mouse_button: Res<ButtonInput<MouseButton>>,
-    mut net_client: ResMut<NetClient>,
+    net_client: Res<NetClient>,
     window_query: Query<&Window, With<PrimaryWindow>>,
 
     camera_query: Query<(&Camera, &Transform, Option<&OrthographicProjection>), With<Camera>>,

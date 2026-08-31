@@ -6,7 +6,7 @@ use shared::components::{
     SiegeTank, Soldier, Stimpack, TacticalStance, Unit, Worker,
 };
 use shared::economy::PlayerEconomy;
-use shared::protocol::{ClientMessage, GameMode};
+use shared::protocol::{ClientMessage, FactionColor, GameMode};
 use crate::net::{NetClient, NetStatus};
 use crate::placement::PlacementState;
 use crate::stats::MatchStats;
@@ -15,7 +15,8 @@ pub struct RtsUiPlugin;
 
 impl Plugin for RtsUiPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup_hud)
+        app.init_resource::<JoinCodeInputState>()
+            .add_systems(Startup, setup_hud)
             .add_systems(
                 Update,
                 (
@@ -26,20 +27,38 @@ impl Plugin for RtsUiPlugin {
                     update_command_card_text,
                     update_match_outcome_banner,
                     handle_lobby_button_interactions,
+                    handle_join_code_keyboard_input,
                     handle_play_again_button_interaction,
                     update_lobby_modal_status_text,
+                    update_color_swatches_system,
                 ),
             );
     }
+}
+
+#[derive(Resource, Default, Debug, Clone)]
+pub struct JoinCodeInputState {
+    pub code: String,
+    pub is_focused: bool,
 }
 
 #[derive(Component, Clone, Copy, PartialEq, Eq)]
 pub enum LobbyButtonAction {
     PlaySolo,
     Find1v1,
+    CreatePrivate,
+    JoinPrivate,
+    FocusJoinCode,
+    SelectColor(FactionColor),
     ToggleModal,
     CloseModal,
 }
+
+#[derive(Component)]
+pub struct ColorSwatchBorder(pub FactionColor);
+
+#[derive(Component)]
+pub struct JoinCodeFieldText;
 
 #[derive(Component)]
 pub struct LobbyModalContainer;
@@ -319,16 +338,16 @@ fn setup_hud(mut commands: Commands) {
                     left: Val::Percent(50.0),
                     top: Val::Percent(50.0),
                     margin: UiRect {
-                        left: Val::Px(-240.0),
-                        top: Val::Px(-180.0),
+                        left: Val::Px(-260.0),
+                        top: Val::Px(-220.0),
                         right: Val::Px(0.0),
                         bottom: Val::Px(0.0),
                     },
-                    width: Val::Px(480.0),
-                    padding: UiRect::all(Val::Px(24.0)),
+                    width: Val::Px(520.0),
+                    padding: UiRect::all(Val::Px(20.0)),
                     border: UiRect::all(Val::Px(2.0)),
                     flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(16.0),
+                    row_gap: Val::Px(12.0),
                     display: Display::None,
                     ..default()
                 },
@@ -339,9 +358,9 @@ fn setup_hud(mut commands: Commands) {
             ))
             .with_children(|modal| {
                 modal.spawn((
-                    Text::new("🌐 MULTIPLAYER & GAME MODES"),
+                    Text::new("🌐 COMMAND CENTER & MULTIPLAYER"),
                     TextFont {
-                        font_size: 20.0,
+                        font_size: 19.0,
                         ..default()
                     },
                     TextColor(Color::srgb(0.35, 0.85, 1.0)),
@@ -349,21 +368,94 @@ fn setup_hud(mut commands: Commands) {
                 ));
 
                 modal.spawn((
-                    Text::new("Choose your match type. 1v1 PvP pairs you live with another connected commander."),
+                    Text::new("Customize your faction colors and deploy into battle against players or AI."),
                     TextFont {
-                        font_size: 13.0,
+                        font_size: 12.5,
                         ..default()
                     },
                     TextColor(Color::srgb(0.70, 0.78, 0.85)),
                     FocusPolicy::Pass,
                 ));
 
-                // Button 1: 1v1 Online PvP Matchmaking
+                // ─────────────────────────────────────────────────────────────
+                // FACTION COLOR PICKER
+                // ─────────────────────────────────────────────────────────────
+                modal.spawn((
+                    Text::new("🎨 SELECT COMMANDER COLOR THEME:"),
+                    TextFont {
+                        font_size: 12.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.85, 0.90, 0.95)),
+                    FocusPolicy::Pass,
+                ));
+
+                modal
+                    .spawn((
+                        Node {
+                            width: Val::Percent(100.0),
+                            flex_direction: FlexDirection::Row,
+                            justify_content: JustifyContent::SpaceBetween,
+                            column_gap: Val::Px(8.0),
+                            ..default()
+                        },
+                        FocusPolicy::Pass,
+                    ))
+                    .with_children(|row| {
+                        let colors = [
+                            (FactionColor::Blue, "Blue", Color::srgb(0.23, 0.51, 0.96)),
+                            (FactionColor::Red, "Red", Color::srgb(0.94, 0.27, 0.27)),
+                            (FactionColor::Teal, "Teal", Color::srgb(0.08, 0.72, 0.65)),
+                            (FactionColor::Amber, "Amber", Color::srgb(0.96, 0.62, 0.04)),
+                            (FactionColor::Purple, "Purple", Color::srgb(0.66, 0.33, 0.97)),
+                            (FactionColor::Green, "Green", Color::srgb(0.13, 0.77, 0.37)),
+                        ];
+
+                        for (fcolor, label, bg) in colors {
+                            row.spawn((
+                                Button,
+                                Node {
+                                    flex_grow: 1.0,
+                                    padding: UiRect::axes(Val::Px(6.0), Val::Px(8.0)),
+                                    justify_content: JustifyContent::Center,
+                                    align_items: AlignItems::Center,
+                                    border: UiRect::all(Val::Px(2.0)),
+                                    ..default()
+                                },
+                                BorderRadius::all(Val::Px(4.0)),
+                                BackgroundColor(bg),
+                                BorderColor(if fcolor == FactionColor::Blue {
+                                    Color::srgb(1.0, 0.9, 0.2)
+                                } else {
+                                    Color::NONE
+                                }),
+                                LobbyButtonAction::SelectColor(fcolor),
+                                ColorSwatchBorder(fcolor),
+                            ))
+                            .with_children(|btn| {
+                                btn.spawn((
+                                    Text::new(label),
+                                    TextFont {
+                                        font_size: 12.0,
+                                        ..default()
+                                    },
+                                    TextColor(Color::WHITE),
+                                    FocusPolicy::Pass,
+                                ));
+                            });
+                        }
+                    });
+
+                // ─────────────────────────────────────────────────────────────
+                // MATCHMAKING & PRIVATE LOBBY BUTTONS
+                // ─────────────────────────────────────────────────────────────
+
+                // Button 1: Quick Match 1v1
                 modal
                     .spawn((
                         Button,
                         Node {
-                            padding: UiRect::axes(Val::Px(16.0), Val::Px(12.0)),
+                            padding: UiRect::axes(Val::Px(14.0), Val::Px(10.0)),
                             justify_content: JustifyContent::Center,
                             align_items: AlignItems::Center,
                             border: UiRect::all(Val::Px(1.5)),
@@ -376,9 +468,9 @@ fn setup_hud(mut commands: Commands) {
                     ))
                     .with_children(|btn| {
                         btn.spawn((
-                            Text::new("⚔️ FIND 1v1 MULTIPLAYER MATCH"),
+                            Text::new("⚔️ QUICK MATCH (FIND 1v1 OPPONENT)"),
                             TextFont {
-                                font_size: 15.0,
+                                font_size: 14.0,
                                 ..default()
                             },
                             TextColor(Color::srgb(0.95, 0.98, 1.0)),
@@ -386,12 +478,113 @@ fn setup_hud(mut commands: Commands) {
                         ));
                     });
 
-                // Button 2: Solo Skirmish Practice
+                // Row for Private Lobby creation and joining
+                modal
+                    .spawn((
+                        Node {
+                            width: Val::Percent(100.0),
+                            flex_direction: FlexDirection::Row,
+                            column_gap: Val::Px(10.0),
+                            ..default()
+                        },
+                        FocusPolicy::Pass,
+                    ))
+                    .with_children(|p_row| {
+                        // Create Private Room
+                        p_row
+                            .spawn((
+                                Button,
+                                Node {
+                                    flex_grow: 1.0,
+                                    padding: UiRect::axes(Val::Px(10.0), Val::Px(10.0)),
+                                    justify_content: JustifyContent::Center,
+                                    align_items: AlignItems::Center,
+                                    border: UiRect::all(Val::Px(1.5)),
+                                    ..default()
+                                },
+                                BorderRadius::all(Val::Px(6.0)),
+                                BackgroundColor(Color::srgba(0.25, 0.20, 0.40, 0.95)),
+                                BorderColor(Color::srgb(0.70, 0.50, 1.0)),
+                                LobbyButtonAction::CreatePrivate,
+                            ))
+                            .with_children(|btn| {
+                                btn.spawn((
+                                    Text::new("🔒 CREATE PRIVATE (4-DIGIT)"),
+                                    TextFont {
+                                        font_size: 13.0,
+                                        ..default()
+                                    },
+                                    TextColor(Color::srgb(0.95, 0.90, 1.0)),
+                                    FocusPolicy::Pass,
+                                ));
+                            });
+
+                        // Join with Code button
+                        p_row
+                            .spawn((
+                                Button,
+                                Node {
+                                    flex_grow: 2.0,
+                                    padding: UiRect::axes(Val::Px(8.0), Val::Px(10.0)),
+                                    justify_content: JustifyContent::Center,
+                                    align_items: AlignItems::Center,
+                                    border: UiRect::all(Val::Px(1.5)),
+                                    ..default()
+                                },
+                                BorderRadius::all(Val::Px(6.0)),
+                                BackgroundColor(Color::srgba(0.20, 0.28, 0.35, 0.95)),
+                                BorderColor(Color::srgb(0.50, 0.80, 1.0)),
+                                LobbyButtonAction::FocusJoinCode,
+                            ))
+                            .with_children(|btn| {
+                                btn.spawn((
+                                    Text::new("🔑 CODE: [ ---- ]"),
+                                    TextFont {
+                                        font_size: 13.0,
+                                        ..default()
+                                    },
+                                    TextColor(Color::srgb(0.90, 0.95, 1.0)),
+                                    JoinCodeFieldText,
+                                    FocusPolicy::Pass,
+                                ));
+                            });
+
+                        // Submit Join button
+                        p_row
+                            .spawn((
+                                Button,
+                                Node {
+                                    flex_grow: 1.0,
+                                    padding: UiRect::axes(Val::Px(8.0), Val::Px(10.0)),
+                                    justify_content: JustifyContent::Center,
+                                    align_items: AlignItems::Center,
+                                    border: UiRect::all(Val::Px(1.5)),
+                                    ..default()
+                                },
+                                BorderRadius::all(Val::Px(6.0)),
+                                BackgroundColor(Color::srgba(0.12, 0.35, 0.30, 0.95)),
+                                BorderColor(Color::srgb(0.35, 0.95, 0.70)),
+                                LobbyButtonAction::JoinPrivate,
+                            ))
+                            .with_children(|btn| {
+                                btn.spawn((
+                                    Text::new("▶ JOIN"),
+                                    TextFont {
+                                        font_size: 13.0,
+                                        ..default()
+                                    },
+                                    TextColor(Color::WHITE),
+                                    FocusPolicy::Pass,
+                                ));
+                            });
+                    });
+
+                // Button 3: Solo Skirmish Practice
                 modal
                     .spawn((
                         Button,
                         Node {
-                            padding: UiRect::axes(Val::Px(16.0), Val::Px(12.0)),
+                            padding: UiRect::axes(Val::Px(14.0), Val::Px(10.0)),
                             justify_content: JustifyContent::Center,
                             align_items: AlignItems::Center,
                             border: UiRect::all(Val::Px(1.5)),
@@ -406,7 +599,7 @@ fn setup_hud(mut commands: Commands) {
                         btn.spawn((
                             Text::new("🤖 SOLO PRACTICE (VS AI WAVES)"),
                             TextFont {
-                                font_size: 15.0,
+                                font_size: 14.0,
                                 ..default()
                             },
                             TextColor(Color::srgb(0.90, 1.0, 0.92)),
@@ -418,7 +611,7 @@ fn setup_hud(mut commands: Commands) {
                 modal.spawn((
                     Text::new("Status: Standalone Practice"),
                     TextFont {
-                        font_size: 13.0,
+                        font_size: 12.5,
                         ..default()
                     },
                     TextColor(Color::srgb(0.80, 0.85, 0.90)),
@@ -606,6 +799,7 @@ fn handle_lobby_button_interactions(
         (Changed<Interaction>, With<Button>),
     >,
     mut net_client: ResMut<NetClient>,
+    mut join_code_state: ResMut<JoinCodeInputState>,
     mut modal_query: Query<&mut Node, With<LobbyModalContainer>>,
 ) {
     if keyboard.just_pressed(KeyCode::F1) || keyboard.just_pressed(KeyCode::Tab) {
@@ -636,19 +830,52 @@ fn handle_lobby_button_interactions(
                             node.display = Display::None;
                         }
                     }
+                    LobbyButtonAction::SelectColor(color) => {
+                        net_client.my_color = *color;
+                        info!("🎨 Selected Faction Color: {:?}", color);
+                    }
                     LobbyButtonAction::Find1v1 => {
                         net_client.current_mode = GameMode::Multiplayer1v1;
                         net_client.send(&ClientMessage::JoinLobby {
-                            player_name: "Commander".to_string(),
+                            player_name: net_client.player_name.clone(),
                             mode: GameMode::Multiplayer1v1,
+                            room_code: None,
+                            faction_color: Some(net_client.my_color),
                         });
                         info!("⚔️ [Lobby] Searching for 1v1 Multiplayer match...");
+                    }
+                    LobbyButtonAction::CreatePrivate => {
+                        net_client.current_mode = GameMode::CustomPrivate;
+                        net_client.send(&ClientMessage::JoinLobby {
+                            player_name: net_client.player_name.clone(),
+                            mode: GameMode::CustomPrivate,
+                            room_code: None,
+                            faction_color: Some(net_client.my_color),
+                        });
+                        info!("🔒 [Lobby] Creating private 1v1 lobby...");
+                    }
+                    LobbyButtonAction::FocusJoinCode => {
+                        join_code_state.is_focused = true;
+                    }
+                    LobbyButtonAction::JoinPrivate => {
+                        if !join_code_state.code.is_empty() {
+                            net_client.current_mode = GameMode::CustomPrivate;
+                            net_client.send(&ClientMessage::JoinLobby {
+                                player_name: net_client.player_name.clone(),
+                                mode: GameMode::CustomPrivate,
+                                room_code: Some(join_code_state.code.trim().to_uppercase()),
+                                faction_color: Some(net_client.my_color),
+                            });
+                            info!("🔑 [Lobby] Joining private room with code: {}", join_code_state.code);
+                        }
                     }
                     LobbyButtonAction::PlaySolo => {
                         net_client.current_mode = GameMode::SoloVsAi;
                         net_client.send(&ClientMessage::JoinLobby {
-                            player_name: "Commander".to_string(),
+                            player_name: net_client.player_name.clone(),
                             mode: GameMode::SoloVsAi,
+                            room_code: None,
+                            faction_color: Some(net_client.my_color),
                         });
                         info!("🤖 [Lobby] Started Solo vs AI practice match.");
                         for mut node in &mut modal_query {
@@ -663,11 +890,82 @@ fn handle_lobby_button_interactions(
             Interaction::None => {
                 bg_color.0 = match action {
                     LobbyButtonAction::Find1v1 => Color::srgba(0.15, 0.30, 0.45, 0.95),
+                    LobbyButtonAction::CreatePrivate => Color::srgba(0.25, 0.20, 0.40, 0.95),
+                    LobbyButtonAction::FocusJoinCode | LobbyButtonAction::JoinPrivate => Color::srgba(0.20, 0.28, 0.35, 0.95),
                     LobbyButtonAction::PlaySolo => Color::srgba(0.12, 0.28, 0.22, 0.95),
                     LobbyButtonAction::ToggleModal => Color::srgba(0.12, 0.22, 0.32, 0.95),
                     LobbyButtonAction::CloseModal => Color::srgba(0.20, 0.22, 0.26, 0.95),
+                    LobbyButtonAction::SelectColor(c) => c.to_color(),
                 };
             }
+        }
+    }
+}
+
+fn handle_join_code_keyboard_input(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut join_code_state: ResMut<JoinCodeInputState>,
+    mut net_client: ResMut<NetClient>,
+    mut field_text_query: Query<&mut Text, With<JoinCodeFieldText>>,
+) {
+    if !join_code_state.is_focused {
+        return;
+    }
+
+    if keyboard.just_pressed(KeyCode::Backspace) {
+        join_code_state.code.pop();
+    }
+
+    let keys = [
+        (KeyCode::KeyA, 'A'), (KeyCode::KeyB, 'B'), (KeyCode::KeyC, 'C'), (KeyCode::KeyD, 'D'),
+        (KeyCode::KeyE, 'E'), (KeyCode::KeyF, 'F'), (KeyCode::KeyG, 'G'), (KeyCode::KeyH, 'H'),
+        (KeyCode::KeyI, 'I'), (KeyCode::KeyJ, 'J'), (KeyCode::KeyK, 'K'), (KeyCode::KeyL, 'L'),
+        (KeyCode::KeyM, 'M'), (KeyCode::KeyN, 'N'), (KeyCode::KeyO, 'O'), (KeyCode::KeyP, 'P'),
+        (KeyCode::KeyQ, 'Q'), (KeyCode::KeyR, 'R'), (KeyCode::KeyS, 'S'), (KeyCode::KeyT, 'T'),
+        (KeyCode::KeyU, 'U'), (KeyCode::KeyV, 'V'), (KeyCode::KeyW, 'W'), (KeyCode::KeyX, 'X'),
+        (KeyCode::KeyY, 'Y'), (KeyCode::KeyZ, 'Z'),
+        (KeyCode::Digit0, '0'), (KeyCode::Digit1, '1'), (KeyCode::Digit2, '2'), (KeyCode::Digit3, '3'),
+        (KeyCode::Digit4, '4'), (KeyCode::Digit5, '5'), (KeyCode::Digit6, '6'), (KeyCode::Digit7, '7'),
+        (KeyCode::Digit8, '8'), (KeyCode::Digit9, '9'),
+    ];
+
+    for (code, ch) in keys {
+        if keyboard.just_pressed(code) && join_code_state.code.len() < 4 {
+            join_code_state.code.push(ch);
+        }
+    }
+
+    if keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::NumpadEnter) {
+        if join_code_state.code.len() == 4 {
+            let code = join_code_state.code.clone();
+            net_client.current_mode = GameMode::CustomPrivate;
+            net_client.send(&ClientMessage::JoinLobby {
+                player_name: net_client.player_name.clone(),
+                mode: GameMode::CustomPrivate,
+                room_code: Some(code),
+                faction_color: Some(net_client.my_color),
+            });
+        }
+    }
+
+    for mut text in &mut field_text_query {
+        if join_code_state.code.is_empty() {
+            text.0 = "🔑 JOIN CODE: [ ---- ]".to_string();
+        } else {
+            text.0 = format!("🔑 JOIN CODE: [ {:4} ] (Enter)", join_code_state.code);
+        }
+    }
+}
+
+fn update_color_swatches_system(
+    net_client: Res<NetClient>,
+    mut swatch_query: Query<(&ColorSwatchBorder, &mut BorderColor)>,
+) {
+    for (swatch, mut border) in &mut swatch_query {
+        if swatch.0 == net_client.my_color {
+            *border = BorderColor(Color::srgb(1.0, 0.90, 0.20)); // Gold highlight for active choice
+        } else {
+            *border = BorderColor(Color::NONE);
         }
     }
 }
@@ -679,9 +977,15 @@ fn update_lobby_modal_status_text(
 ) {
     let telem_str = if let Some(t) = telemetry {
         format!(
-            " | 👥 Kö: {} | ⚔️ 1v1: {}/{} | 🤖 Solo: {}/{}",
+            " | 👥 Queue: {} | ⚔️ 1v1: {}/{} | 🤖 Solo: {}/{}",
             t.queue_1v1, t.active_1v1_matches, t.max_1v1_matches, t.active_solo_matches, t.max_solo_matches
         )
+    } else {
+        String::new()
+    };
+
+    let room_code_str = if let Some(ref code) = net_client.current_room_code {
+        format!(" | 🔑 Private Room Code: [{}]", code)
     } else {
         String::new()
     };
@@ -690,23 +994,27 @@ fn update_lobby_modal_status_text(
         match net_client.status {
             NetStatus::InGame => {
                 let role = if net_client.my_faction == Faction::Player1 {
-                    "Player 1 (Blue / West Base)"
+                    format!("Player 1 ({:?} / West Base)", net_client.my_color)
                 } else {
-                    "Player 2 (Red / East Base)"
+                    format!("Player 2 ({:?} / East Base)", net_client.my_color)
                 };
-                text.0 = format!("🟢 Match igång! Du är: {}{}", role, telem_str);
+                text.0 = format!("🟢 Match in Progress! Assigned: {}{}{}", role, room_code_str, telem_str);
             }
             NetStatus::InLobby => {
-                text.0 = format!("🟡 I Matchmaking-kö... Väntar på motståndare (1/2){}", telem_str);
+                if let Some(ref code) = net_client.current_room_code {
+                    text.0 = format!("🟡 Private Lobby [{}] created! Waiting for opponent to join...{}", code, telem_str);
+                } else {
+                    text.0 = format!("🟡 In Matchmaking Queue... Waiting for opponent (1/2){}", telem_str);
+                }
             }
             NetStatus::Connected => {
-                text.0 = format!("🟢 Ansluten till server{}", telem_str);
+                text.0 = format!("🟢 Connected to Battle Server{}", telem_str);
             }
             NetStatus::Connecting => {
-                text.0 = "🟡 Ansluter till server...".to_string();
+                text.0 = "🟡 Connecting to Server...".to_string();
             }
             NetStatus::Disconnected => {
-                text.0 = "⚪ Offline (Solo-läge aktivt)".to_string();
+                text.0 = "⚪ Offline (Solo Skirmish Active)".to_string();
             }
         }
     }

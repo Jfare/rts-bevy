@@ -52,12 +52,73 @@ impl UnitKind {
     }
 }
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Reflect, Default)]
 pub enum GameMode {
     #[default]
     SoloVsAi,
     Multiplayer1v1,
+    CustomPrivate,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Reflect, Default)]
+pub enum FactionColor {
+    #[default]
+    Blue,
+    Red,
+    Teal,
+    Amber,
+    Purple,
+    Green,
+}
+
+impl FactionColor {
+    pub fn to_color(&self) -> Color {
+        match self {
+            FactionColor::Blue => Color::srgb(0.23, 0.51, 0.96),   // #3b82f6
+            FactionColor::Red => Color::srgb(0.94, 0.27, 0.27),    // #ef4444
+            FactionColor::Teal => Color::srgb(0.08, 0.72, 0.65),   // #14b8a6
+            FactionColor::Amber => Color::srgb(0.96, 0.62, 0.04),  // #f59e0b
+            FactionColor::Purple => Color::srgb(0.66, 0.33, 0.97), // #a855f7
+            FactionColor::Green => Color::srgb(0.13, 0.77, 0.37),  // #22c55e
+        }
+    }
+
+    pub fn name(&self) -> &'static str {
+        match self {
+            FactionColor::Blue => "Cobalt Blue",
+            FactionColor::Red => "Crimson Red",
+            FactionColor::Teal => "Cyber Teal",
+            FactionColor::Amber => "Solar Amber",
+            FactionColor::Purple => "Void Purple",
+            FactionColor::Green => "Emerald Green",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Reflect, Default)]
+pub enum PingType {
+    #[default]
+    Attention,
+    Attack,
+    Defend,
+}
+
+impl PingType {
+    pub fn name(&self) -> &'static str {
+        match self {
+            PingType::Attention => "ATTENTION",
+            PingType::Attack => "ATTACK HERE",
+            PingType::Defend => "DEFEND HERE",
+        }
+    }
+
+    pub fn to_color(&self) -> Color {
+        match self {
+            PingType::Attention => Color::srgb(0.25, 0.85, 1.0),
+            PingType::Attack => Color::srgb(1.0, 0.25, 0.25),
+            PingType::Defend => Color::srgb(0.25, 1.0, 0.45),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Reflect)]
@@ -73,6 +134,8 @@ pub enum ClientMessage {
     JoinLobby {
         player_name: String,
         mode: GameMode,
+        room_code: Option<String>,
+        faction_color: Option<FactionColor>,
     },
     RequestBuild {
         building_kind: BuildingKind,
@@ -115,6 +178,13 @@ pub enum ClientMessage {
     RequestToggleSiegeMode {
         unit_net_ids: Vec<u32>,
     },
+    SendChatMessage {
+        text: String,
+    },
+    SendTacticalPing {
+        position: Vec2,
+        ping_type: PingType,
+    },
     Ping {
         timestamp: u64,
     },
@@ -152,6 +222,7 @@ pub enum ServerMessage {
         player_id: u64,
         assigned_faction: Faction,
         room_id: u32,
+        room_code: Option<String>,
         is_game_ready: bool,
     },
     LobbyStats {
@@ -222,6 +293,20 @@ pub enum ServerMessage {
     EntityDied {
         net_id: u32,
         faction: Faction,
+    },
+    ChatMessageReceived {
+        sender_name: String,
+        faction: Faction,
+        color: FactionColor,
+        text: String,
+        is_system: bool,
+    },
+    TacticalPingReceived {
+        sender_name: String,
+        faction: Faction,
+        color: FactionColor,
+        position: Vec2,
+        ping_type: PingType,
     },
     MatchEnded {
         winning_faction: Faction,

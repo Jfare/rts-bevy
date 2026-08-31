@@ -165,7 +165,7 @@ fn draw_minimap_system(
         let sc = world_to_minimap_screen(b_pos, config, &mm_rect);
         let wp = to_world(sc);
         let b_color = if *faction == net_client.my_faction {
-            Color::srgb(0.25, 0.75, 1.0)
+            net_client.my_color.to_color()
         } else if *faction == Faction::Neutral {
             Color::srgb(0.60, 0.65, 0.70)
         } else {
@@ -189,7 +189,7 @@ fn draw_minimap_system(
         let sc = world_to_minimap_screen(u_pos, config, &mm_rect);
         let wp = to_world(sc);
         let u_color = if *faction == net_client.my_faction {
-            Color::srgb(0.35, 0.90, 1.0)
+            net_client.my_color.to_color().lighter(0.15)
         } else {
             Color::srgb(0.95, 0.25, 0.25)
         };
@@ -253,7 +253,7 @@ fn handle_minimap_input(
     mut camera_query: Query<&mut Transform, With<RtsCamera>>,
     mut minimap_state: ResMut<MinimapState>,
     grid_cfg: Option<Res<WorldGridConfig>>,
-    mut net_client: ResMut<NetClient>,
+    net_client: Res<NetClient>,
     mut unit_query: Query<(Entity, &Faction, &Selectable, &mut MoveTarget, Option<&NetEntity>), (With<Unit>, Without<Building>)>,
 ) {
     let Ok(window) = window_query.get_single() else {

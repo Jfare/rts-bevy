@@ -5,8 +5,10 @@ use shared::components::*;
 use shared::economy::PlayerEconomy;
 use shared::grid::{BuildingKind, NavGrid};
 use shared::protocol::{
-    EntitySnapshot, GameMode, ServerMessage, UnitKind,
+    ClientMessage, EntitySnapshot, FactionColor, GameMode, ServerMessage, UnitKind,
 };
+#[cfg(test)]
+use shared::protocol::PingType;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct ServerSimulationPlugin;
@@ -156,7 +158,12 @@ fn handle_incoming_network_events(
             }
             IncomingNetEvent::MessageReceived { peer_id, msg } => {
                 match msg {
-                    shared::protocol::ClientMessage::JoinLobby { player_name, mode } => {
+                    shared::protocol::ClientMessage::JoinLobby {
+                        player_name,
+                        mode,
+                        room_code,
+                        faction_color,
+                    } => {
                         handle_join_lobby(
                             &mut commands,
                             &net_channels,
@@ -165,6 +172,8 @@ fn handle_incoming_network_events(
                             peer_id,
                             player_name,
                             mode,
+                            room_code,
+                            faction_color,
                         );
                     }
                     shared::protocol::ClientMessage::RequestLobbyStats => {
@@ -668,6 +677,40 @@ fn handle_incoming_network_events(
                             }
                         }
                     }
+                    shared::protocol::ClientMessage::SendChatMessage { text } => {
+                        if let Some(player) = matchmaker.players.get(&peer_id) {
+                            let peers = matchmaker.get_room_peers(player.room_id);
+                            if !peers.is_empty() {
+                                let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::BroadcastToPeers {
+                                    peer_ids: peers,
+                                    msg: ServerMessage::ChatMessageReceived {
+                                        sender_name: player.name.clone(),
+                                        faction: player.faction,
+                                        color: player.color,
+                                        text,
+                                        is_system: false,
+                                    },
+                                });
+                            }
+                        }
+                    }
+                    shared::protocol::ClientMessage::SendTacticalPing { position, ping_type } => {
+                        if let Some(player) = matchmaker.players.get(&peer_id) {
+                            let peers = matchmaker.get_room_peers(player.room_id);
+                            if !peers.is_empty() {
+                                let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::BroadcastToPeers {
+                                    peer_ids: peers,
+                                    msg: ServerMessage::TacticalPingReceived {
+                                        sender_name: player.name.clone(),
+                                        faction: player.faction,
+                                        color: player.color,
+                                        position,
+                                        ping_type,
+                                    },
+                                });
+                            }
+                        }
+                    }
                     shared::protocol::ClientMessage::Ping { timestamp } => {
                         let server_time = SystemTime::now()
                             .duration_since(UNIX_EPOCH)
@@ -696,14 +739,18 @@ fn handle_join_lobby(
     peer_id: u64,
     player_name: String,
     mode: GameMode,
+    room_code: Option<String>,
+    faction_color: Option<FactionColor>,
 ) {
+    let color = faction_color.unwrap_or(FactionColor::Blue);
+
     match mode {
         GameMode::SoloVsAi => {
             if !matchmaker.can_start_solo() {
                 let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::SendToPeer {
                     peer_id,
                     msg: ServerMessage::ErrorMessage {
-                        reason: "Server Solo-kapacitet full (10/10 matcher). Försök igen om en stund.".to_string(),
+                        reason: "Server Solo capacity full (10/10 matches). Please try again shortly.".to_string(),
                     },
                 });
                 return;
@@ -716,9 +763,10 @@ fn handle_join_lobby(
                 peer_id,
                 PlayerSession {
                     peer_id,
-                    name: player_name,
+                    name: player_name.clone(),
                     room_id,
                     faction: Faction::Player1,
+                    color,
                 },
             );
 
@@ -726,6 +774,7 @@ fn handle_join_lobby(
                 room_id,
                 Room {
                     room_id,
+                    room_code: None,
                     mode,
                     p1_peer: Some(peer_id),
                     p2_peer: None,
@@ -754,6 +803,7 @@ fn handle_join_lobby(
                     player_id: peer_id,
                     assigned_faction: Faction::Player1,
                     room_id,
+                    room_code: None,
                     is_game_ready: true,
                 },
             });
@@ -779,6 +829,18 @@ fn handle_join_lobby(
                     p2_max_supply: ai_max_sup,
                 },
             });
+
+            // Send welcome system notice
+            let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::SendToPeer {
+                peer_id,
+                msg: ServerMessage::ChatMessageReceived {
+                    sender_name: "SYSTEM".to_string(),
+                    faction: Faction::Neutral,
+                    color: FactionColor::Amber,
+                    text: format!("Commander {} deployed to Sector 4. Defend your Base HQ against hostile assault waves!", player_name),
+                    is_system: true,
+                },
+            });
         }
         GameMode::Multiplayer1v1 => {
             if let Some(waiting_p1) = matchmaker.waiting_1v1_peer {
@@ -786,7 +848,7 @@ fn handle_join_lobby(
                     let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::SendToPeer {
                         peer_id,
                         msg: ServerMessage::ErrorMessage {
-                            reason: "Server PvP-kapacitet full (10/10 matcher). Väntar på ledig plats...".to_string(),
+                            reason: "Server PvP capacity full (10/10 matches). Waiting for a match slot...".to_string(),
                         },
                     });
                     return;
@@ -796,13 +858,26 @@ fn handle_join_lobby(
                 let room_id = matchmaker.next_room_id;
                 matchmaker.next_room_id += 1;
 
+                let p1_name = matchmaker
+                    .players
+                    .get(&waiting_p1)
+                    .map(|p| p.name.clone())
+                    .unwrap_or_else(|| "Commander 1".to_string());
+
+                let p1_color = matchmaker
+                    .players
+                    .get(&waiting_p1)
+                    .map(|p| p.color)
+                    .unwrap_or(FactionColor::Blue);
+
                 matchmaker.players.insert(
                     waiting_p1,
                     PlayerSession {
                         peer_id: waiting_p1,
-                        name: "Player 1".to_string(),
+                        name: p1_name.clone(),
                         room_id,
                         faction: Faction::Player1,
+                        color: p1_color,
                     },
                 );
 
@@ -810,9 +885,10 @@ fn handle_join_lobby(
                     peer_id,
                     PlayerSession {
                         peer_id,
-                        name: player_name,
+                        name: player_name.clone(),
                         room_id,
                         faction: Faction::Player2,
+                        color: if color == p1_color { FactionColor::Red } else { color },
                     },
                 );
 
@@ -820,6 +896,7 @@ fn handle_join_lobby(
                     room_id,
                     Room {
                         room_id,
+                        room_code: None,
                         mode,
                         p1_peer: Some(waiting_p1),
                         p2_peer: Some(peer_id),
@@ -849,6 +926,7 @@ fn handle_join_lobby(
                             player_id: p_id,
                             assigned_faction: faction,
                             room_id,
+                            room_code: None,
                             is_game_ready: true,
                         },
                     });
@@ -875,16 +953,194 @@ fn handle_join_lobby(
                         },
                     });
                 }
+
+                // Announce match start in room chat
+                let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::BroadcastToPeers {
+                    peer_ids: vec![waiting_p1, peer_id],
+                    msg: ServerMessage::ChatMessageReceived {
+                        sender_name: "SYSTEM".to_string(),
+                        faction: Faction::Neutral,
+                        color: FactionColor::Amber,
+                        text: format!("1v1 Match started! [{}] vs [{}]", p1_name, player_name),
+                        is_system: true,
+                    },
+                });
             } else {
                 // First player in 1v1 queue -> wait for opponent
                 matchmaker.waiting_1v1_peer = Some(peer_id);
+                matchmaker.players.insert(
+                    peer_id,
+                    PlayerSession {
+                        peer_id,
+                        name: player_name,
+                        room_id: 0,
+                        faction: Faction::Player1,
+                        color,
+                    },
+                );
+
                 let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::SendToPeer {
                     peer_id,
                     msg: ServerMessage::LobbyJoined {
                         player_id: peer_id,
                         assigned_faction: Faction::Player1,
                         room_id: 0,
+                        room_code: None,
                         is_game_ready: false,
+                    },
+                });
+            }
+        }
+        GameMode::CustomPrivate => {
+            if let Some(code) = room_code {
+                // Player is attempting to join an existing private room with a 4-digit code
+                if let Some(target_room_id) = matchmaker.find_room_by_code(&code) {
+                    let waiting_p1 = matchmaker.rooms.get(&target_room_id).and_then(|r| r.p1_peer).unwrap_or(0);
+                    if let Some(room) = matchmaker.rooms.get_mut(&target_room_id) {
+                        room.p2_peer = Some(peer_id);
+                        room.is_active = true;
+                    }
+
+                    let p1_name = matchmaker
+                        .players
+                        .get(&waiting_p1)
+                        .map(|p| p.name.clone())
+                        .unwrap_or_else(|| "Commander 1".to_string());
+
+                    let p1_color = matchmaker
+                        .players
+                        .get(&waiting_p1)
+                        .map(|p| p.color)
+                        .unwrap_or(FactionColor::Blue);
+
+                    matchmaker.players.insert(
+                        peer_id,
+                        PlayerSession {
+                            peer_id,
+                            name: player_name.clone(),
+                            room_id: target_room_id,
+                            faction: Faction::Player2,
+                            color: if color == p1_color { FactionColor::Red } else { color },
+                        },
+                    );
+
+                    let initial_entities = spawn_match_entities(
+                        commands,
+                        matchmaker,
+                        target_room_id,
+                        GameMode::Multiplayer1v1,
+                        waiting_p1,
+                        Some(peer_id),
+                    );
+
+                    let (p1_cur_sup, p1_max_sup) = economy.get_supply(Faction::Player1);
+                    let (p2_cur_sup, p2_max_sup) = economy.get_supply(Faction::Player2);
+
+                    for (p_id, faction) in [(waiting_p1, Faction::Player1), (peer_id, Faction::Player2)] {
+                        let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::SendToPeer {
+                            peer_id: p_id,
+                            msg: ServerMessage::LobbyJoined {
+                                player_id: p_id,
+                                assigned_faction: faction,
+                                room_id: target_room_id,
+                                room_code: Some(code.clone()),
+                                is_game_ready: true,
+                            },
+                        });
+
+                        let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::SendToPeer {
+                            peer_id: p_id,
+                            msg: ServerMessage::GameStarted {
+                                p1_pos: Vec2::new(-700.0, 250.0),
+                                p2_pos: Vec2::new(700.0, -250.0),
+                                wave_initial_delay: 0.0,
+                            },
+                        });
+
+                        let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::SendToPeer {
+                            peer_id: p_id,
+                            msg: ServerMessage::InitialWorldState {
+                                entities: initial_entities.clone(),
+                                p1_minerals: economy.get_minerals(Faction::Player1),
+                                p1_supply: p1_cur_sup,
+                                p1_max_supply: p1_max_sup,
+                                p2_minerals: economy.get_minerals(Faction::Player2),
+                                p2_supply: p2_cur_sup,
+                                p2_max_supply: p2_max_sup,
+                            },
+                        });
+                    }
+
+                    // System chat notice
+                    let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::BroadcastToPeers {
+                        peer_ids: vec![waiting_p1, peer_id],
+                        msg: ServerMessage::ChatMessageReceived {
+                            sender_name: "SYSTEM".to_string(),
+                            faction: Faction::Neutral,
+                            color: FactionColor::Amber,
+                            text: format!("Private match started! [{}] vs [{}] (Room Code: {})", p1_name, player_name, code.to_uppercase()),
+                            is_system: true,
+                        },
+                    });
+                } else {
+                    let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::SendToPeer {
+                        peer_id,
+                        msg: ServerMessage::ErrorMessage {
+                            reason: format!("No active private lobby found with code '{}'.", code.to_uppercase()),
+                        },
+                    });
+                }
+            } else {
+                // Host creates a new private lobby room with generated 4-digit code
+                let room_id = matchmaker.next_room_id;
+                matchmaker.next_room_id += 1;
+                let generated_code = matchmaker.generate_room_code();
+
+                matchmaker.players.insert(
+                    peer_id,
+                    PlayerSession {
+                        peer_id,
+                        name: player_name.clone(),
+                        room_id,
+                        faction: Faction::Player1,
+                        color,
+                    },
+                );
+
+                matchmaker.rooms.insert(
+                    room_id,
+                    Room {
+                        room_id,
+                        room_code: Some(generated_code.clone()),
+                        mode: GameMode::CustomPrivate,
+                        p1_peer: Some(peer_id),
+                        p2_peer: None,
+                        is_active: false,
+                        match_time: 0.0,
+                        current_wave: 0,
+                        time_until_next_wave: 40.0,
+                    },
+                );
+
+                let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::SendToPeer {
+                    peer_id,
+                    msg: ServerMessage::LobbyJoined {
+                        player_id: peer_id,
+                        assigned_faction: Faction::Player1,
+                        room_id,
+                        room_code: Some(generated_code.clone()),
+                        is_game_ready: false,
+                    },
+                });
+
+                let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::SendToPeer {
+                    peer_id,
+                    msg: ServerMessage::ChatMessageReceived {
+                        sender_name: "SYSTEM".to_string(),
+                        faction: Faction::Neutral,
+                        color: FactionColor::Amber,
+                        text: format!("Private Room created! Share code [{}] with your opponent to join.", generated_code),
+                        is_system: true,
                     },
                 });
             }
@@ -2113,6 +2369,7 @@ mod tests {
             1,
             Room {
                 room_id: 1,
+                room_code: None,
                 mode: GameMode::Multiplayer1v1,
                 p1_peer: Some(101),
                 p2_peer: Some(102),
@@ -2126,6 +2383,7 @@ mod tests {
             2,
             Room {
                 room_id: 2,
+                room_code: None,
                 mode: GameMode::SoloVsAi,
                 p1_peer: Some(201),
                 p2_peer: None,
@@ -2195,12 +2453,14 @@ mod tests {
                 name: "Commander".to_string(),
                 room_id: 1,
                 faction: Faction::Player1,
+                color: FactionColor::Blue,
             },
         );
         matchmaker.rooms.insert(
             1,
             Room {
                 room_id: 1,
+                room_code: None,
                 mode: GameMode::SoloVsAi,
                 p1_peer: Some(101),
                 p2_peer: None,
@@ -2261,12 +2521,14 @@ mod tests {
                 name: "Player 1".to_string(),
                 room_id: 1,
                 faction: Faction::Player1,
+                color: FactionColor::Blue,
             },
         );
         matchmaker.rooms.insert(
             1,
             Room {
                 room_id: 1,
+                room_code: None,
                 mode: GameMode::SoloVsAi,
                 p1_peer: Some(101),
                 p2_peer: None,
@@ -2284,12 +2546,14 @@ mod tests {
                 name: "Player 2".to_string(),
                 room_id: 2,
                 faction: Faction::Player1,
+                color: FactionColor::Teal,
             },
         );
         matchmaker.rooms.insert(
             2,
             Room {
                 room_id: 2,
+                room_code: None,
                 mode: GameMode::SoloVsAi,
                 p1_peer: Some(201),
                 p2_peer: None,
@@ -2356,5 +2620,173 @@ mod tests {
                 _ => panic!("Expected BroadcastToPeers event"),
             }
         }
+    }
+
+    #[test]
+    fn test_custom_private_room_matching_by_code() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+
+        let (tx_in, rx_in) = crossbeam_channel::unbounded();
+        let (tx_out, rx_out) = crossbeam_channel::unbounded();
+        app.insert_resource(ServerNetworkChannels {
+            rx_incoming: rx_in,
+            tx_outgoing: tx_out,
+        });
+        app.insert_resource(PlayerEconomy::new());
+        app.insert_resource(NavGrid::default());
+        app.insert_resource(Matchmaker::new());
+        app.add_systems(Update, handle_incoming_network_events);
+
+        // 1. Peer 101 creates a private room
+        tx_in.send(IncomingNetEvent::MessageReceived {
+            peer_id: 101,
+            msg: ClientMessage::JoinLobby {
+                player_name: "Alice".to_string(),
+                mode: GameMode::CustomPrivate,
+                room_code: None,
+                faction_color: Some(FactionColor::Teal),
+            },
+        }).unwrap();
+
+        app.update();
+
+        // Extract the generated 4-digit code
+        let mut generated_code = String::new();
+        while let Ok(ev) = rx_out.try_recv() {
+            if let OutgoingNetEvent::SendToPeer { msg, .. } = ev {
+                if let ServerMessage::LobbyJoined { room_code: Some(code), is_game_ready, .. } = msg {
+                    assert!(!is_game_ready, "Room should wait for opponent");
+                    generated_code = code;
+                }
+            }
+        }
+        assert_eq!(generated_code.len(), 4, "Room code must be 4 characters");
+
+        // 2. Peer 102 joins with the generated code
+        tx_in.send(IncomingNetEvent::MessageReceived {
+            peer_id: 102,
+            msg: ClientMessage::JoinLobby {
+                player_name: "Bob".to_string(),
+                mode: GameMode::CustomPrivate,
+                room_code: Some(generated_code.clone()),
+                faction_color: Some(FactionColor::Red),
+            },
+        }).unwrap();
+
+        app.update();
+
+        // Verify match started for both peers
+        let mut started_peers = Vec::new();
+        while let Ok(ev) = rx_out.try_recv() {
+            if let OutgoingNetEvent::SendToPeer { peer_id, msg } = ev {
+                if let ServerMessage::GameStarted { .. } = msg {
+                    started_peers.push(peer_id);
+                }
+            }
+        }
+        assert_eq!(started_peers, vec![101, 102], "Both players must receive GameStarted");
+
+        let mm = app.world().resource::<Matchmaker>();
+        let room = mm.rooms.values().find(|r| r.room_code.as_deref() == Some(&generated_code)).unwrap();
+        assert!(room.is_active);
+        assert_eq!(room.p1_peer, Some(101));
+        assert_eq!(room.p2_peer, Some(102));
+    }
+
+    #[test]
+    fn test_chat_and_ping_dispatching() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+
+        let (tx_in, rx_in) = crossbeam_channel::unbounded();
+        let (tx_out, rx_out) = crossbeam_channel::unbounded();
+        app.insert_resource(ServerNetworkChannels {
+            rx_incoming: rx_in,
+            tx_outgoing: tx_out,
+        });
+        app.insert_resource(PlayerEconomy::new());
+        app.insert_resource(NavGrid::default());
+
+        let mut matchmaker = Matchmaker::new();
+        matchmaker.players.insert(
+            101,
+            PlayerSession {
+                peer_id: 101,
+                name: "Alice".to_string(),
+                room_id: 1,
+                faction: Faction::Player1,
+                color: FactionColor::Blue,
+            },
+        );
+        matchmaker.players.insert(
+            102,
+            PlayerSession {
+                peer_id: 102,
+                name: "Bob".to_string(),
+                room_id: 1,
+                faction: Faction::Player2,
+                color: FactionColor::Red,
+            },
+        );
+        matchmaker.rooms.insert(
+            1,
+            Room {
+                room_id: 1,
+                room_code: None,
+                mode: GameMode::Multiplayer1v1,
+                p1_peer: Some(101),
+                p2_peer: Some(102),
+                is_active: true,
+                match_time: 10.0,
+                current_wave: 0,
+                time_until_next_wave: 40.0,
+            },
+        );
+        app.insert_resource(matchmaker);
+        app.add_systems(Update, handle_incoming_network_events);
+
+        // Alice sends chat message
+        tx_in.send(IncomingNetEvent::MessageReceived {
+            peer_id: 101,
+            msg: ClientMessage::SendChatMessage { text: "GL HF!".to_string() },
+        }).unwrap();
+
+        // Bob sends tactical ping
+        tx_in.send(IncomingNetEvent::MessageReceived {
+            peer_id: 102,
+            msg: ClientMessage::SendTacticalPing {
+                position: Vec2::new(100.0, 200.0),
+                ping_type: PingType::Attack,
+            },
+        }).unwrap();
+
+        app.update();
+
+        let mut received_chat = false;
+        let mut received_ping = false;
+
+        while let Ok(ev) = rx_out.try_recv() {
+            if let OutgoingNetEvent::BroadcastToPeers { peer_ids, msg } = ev {
+                assert_eq!(peer_ids, vec![101, 102]);
+                match msg {
+                    ServerMessage::ChatMessageReceived { sender_name, text, .. } => {
+                        assert_eq!(sender_name, "Alice");
+                        assert_eq!(text, "GL HF!");
+                        received_chat = true;
+                    }
+                    ServerMessage::TacticalPingReceived { sender_name, position, ping_type, .. } => {
+                        assert_eq!(sender_name, "Bob");
+                        assert_eq!(position, Vec2::new(100.0, 200.0));
+                        assert_eq!(ping_type, PingType::Attack);
+                        received_ping = true;
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        assert!(received_chat, "Must broadcast ChatMessageReceived to room peers");
+        assert!(received_ping, "Must broadcast TacticalPingReceived to room peers");
     }
 }
