@@ -157,17 +157,15 @@ All in-game text, UI, HUD elements, unit cards, and commands are strictly in **E
 
 ---
 
-## 🎯 Next Steps & Future Roadmap
-
-### 🗺️ Planned Session B10: Custom Lobbies, Player Profiles & In-Game Chat
-- [ ] **Custom Game Lobbies**:
-  - 4-digit room codes to invite friends directly to 1v1 PvP matches.
-  - Player name customization and faction color selector (Blue, Red, Teal, Orange, Purple).
-- [ ] **In-Game Tactical Chat**:
-  - Real-time text chat box (`Enter` to toggle, `All` and `Team` channels).
-  - System broadcast messages for player connections/disconnections.
-- [ ] **Player Ping & Minimap Alert Markers**:
-  - `Alt + Click` tactical ping markers on the terrain and minimap (Defend, Attack, Caution).
+### ✅ Completed Session B10: Custom Lobbies, Player Profiles, In-Game Chat & Tactical Pings
+- [x] **Custom Game Lobbies**:
+  - 4-digit room codes to invite friends directly to private 1v1 PvP matches.
+  - Player name customization and faction color selector (Blue, Red, Teal, Amber, Purple, Green).
+- [x] **In-Game Tactical Chat**:
+  - Real-time text chat box (`Enter` to toggle and send, `Esc` to cancel).
+  - System broadcast messages for player connections, match starts, and disconnections.
+- [x] **Player Ping & Minimap Alert Markers**:
+  - `Alt + Left Click` tactical ping markers on the terrain and minimap (Attention, Attack, Defend).
 
 ### 🗺️ Planned Session B11: Advanced Maps, Terrain Chokepoints & Destructibles
 - [ ] **Multi-Tile Terrain & Obstacle System**:
