@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use shared::components::*;
 use shared::economy::PlayerEconomy;
 use crate::audio_sfx::SoundEffect;
+use crate::net::{NetClient, NetStatus};
 use crate::particles::ParticleEvent;
 use crate::stats::MatchStats;
 
@@ -38,6 +39,7 @@ struct TargetSnapshot {
 fn soldier_combat_system(
     mut commands: Commands,
     time: Res<Time>,
+    net_client_opt: Option<Res<NetClient>>,
     mut sound_events: EventWriter<SoundEffect>,
     mut particle_events: EventWriter<ParticleEvent>,
     mut queries: ParamSet<(
@@ -55,6 +57,9 @@ fn soldier_combat_system(
         )>,
     )>,
 ) {
+    if net_client_opt.as_ref().map(|n| n.status == NetStatus::InGame).unwrap_or(false) {
+        return;
+    }
     let dt = time.delta_secs();
 
     let targets: Vec<TargetSnapshot> = queries
@@ -194,11 +199,15 @@ fn soldier_combat_system(
 fn turret_combat_system(
     mut commands: Commands,
     time: Res<Time>,
+    net_client_opt: Option<Res<NetClient>>,
     mut sound_events: EventWriter<SoundEffect>,
     mut particle_events: EventWriter<ParticleEvent>,
     mut turret_query: Query<(Entity, &mut GunTurret, &Transform, &Faction, &Building)>,
     target_query: Query<(Entity, &Transform, &Radius, &Faction, &Health)>,
 ) {
+    if net_client_opt.as_ref().map(|n| n.status == NetStatus::InGame).unwrap_or(false) {
+        return;
+    }
     let dt = time.delta_secs();
 
     for (turret_ent, mut turret, tf, faction, building) in &mut turret_query {
@@ -285,6 +294,7 @@ fn turret_combat_system(
 fn siege_tank_combat_system(
     mut commands: Commands,
     time: Res<Time>,
+    net_client_opt: Option<Res<NetClient>>,
     mut sound_events: EventWriter<SoundEffect>,
     mut particle_events: EventWriter<ParticleEvent>,
     mut queries: ParamSet<(
@@ -301,6 +311,9 @@ fn siege_tank_combat_system(
         )>,
     )>,
 ) {
+    if net_client_opt.as_ref().map(|n| n.status == NetStatus::InGame).unwrap_or(false) {
+        return;
+    }
     let dt = time.delta_secs();
 
     let targets: Vec<TargetSnapshot> = queries
@@ -447,6 +460,7 @@ fn siege_tank_combat_system(
 fn projectile_movement_and_impact_system(
     mut commands: Commands,
     time: Res<Time>,
+    net_client_opt: Option<Res<NetClient>>,
     mut stats: ResMut<MatchStats>,
     mut sound_events: EventWriter<SoundEffect>,
     mut particle_events: EventWriter<ParticleEvent>,
@@ -454,6 +468,7 @@ fn projectile_movement_and_impact_system(
     mut health_query: Query<(Entity, &Transform, &Faction, &mut Health), Without<Projectile>>,
 ) {
     let dt = time.delta_secs();
+    let is_online = net_client_opt.as_ref().map(|n| n.status == NetStatus::InGame).unwrap_or(false);
 
     for (proj_entity, mut projectile, mut transform) in &mut projectile_query {
         projectile.lifetime += dt;
@@ -470,17 +485,19 @@ fn projectile_movement_and_impact_system(
         if dist <= step_dist || dist <= 14.0 {
             let impact_pos = target_pos;
 
-            // Direct damage to primary target
-            if let Some(target_ent) = projectile.target_entity {
-                if let Ok((_, _, _, mut health)) = health_query.get_mut(target_ent) {
-                    health.take_damage(projectile.damage);
-                    if projectile.faction == Faction::Player1 {
-                        stats.damage_dealt += projectile.damage;
+            // Apply direct damage only in offline local play (in online play, server authoritatively applies damage)
+            if !is_online {
+                if let Some(target_ent) = projectile.target_entity {
+                    if let Ok((_, _, _, mut health)) = health_query.get_mut(target_ent) {
+                        health.take_damage(projectile.damage);
+                        if projectile.faction == Faction::Player1 {
+                            stats.damage_dealt += projectile.damage;
+                        }
                     }
                 }
             }
 
-            // Splash damage to nearby hostile entities
+            // Splash damage
             if projectile.splash_radius > 0.0 {
                 let splash_r = projectile.splash_radius;
                 let proj_faction = projectile.faction;
@@ -492,15 +509,17 @@ fn projectile_movement_and_impact_system(
                 });
                 sound_events.send(SoundEffect::Explosion);
 
-                for (ent, tf, faction, mut hp) in &mut health_query {
-                    if Some(ent) != projectile.target_entity && proj_faction.is_hostile_to(faction) {
-                        let d = tf.translation.truncate().distance(impact_pos);
-                        if d <= splash_r {
-                            let falloff = 1.0 - (d / splash_r) * 0.5;
-                            let dmg = splash_dmg * falloff;
-                            hp.take_damage(dmg);
-                            if projectile.faction == Faction::Player1 {
-                                stats.damage_dealt += dmg;
+                if !is_online {
+                    for (ent, tf, faction, mut hp) in &mut health_query {
+                        if Some(ent) != projectile.target_entity && proj_faction.is_hostile_to(faction) {
+                            let d = tf.translation.truncate().distance(impact_pos);
+                            if d <= splash_r {
+                                let falloff = 1.0 - (d / splash_r) * 0.5;
+                                let dmg = splash_dmg * falloff;
+                                hp.take_damage(dmg);
+                                if projectile.faction == Faction::Player1 {
+                                    stats.damage_dealt += dmg;
+                                }
                             }
                         }
                     }
@@ -541,6 +560,7 @@ fn muzzle_flash_system(
 /// Eliminates entities when health hits 0 and evaluates Victory/Defeat
 fn death_and_elimination_system(
     mut commands: Commands,
+    net_client_opt: Option<Res<NetClient>>,
     mut outcome: ResMut<MatchOutcome>,
     mut economy: ResMut<PlayerEconomy>,
     mut stats: ResMut<MatchStats>,
@@ -555,6 +575,9 @@ fn death_and_elimination_system(
         Option<&BaseHQ>,
     )>,
 ) {
+    if net_client_opt.as_ref().map(|n| n.status == NetStatus::InGame).unwrap_or(false) {
+        return;
+    }
     for (entity, transform, health, faction, unit_opt, base_hq_opt) in &query {
         if health.is_dead() {
             let pos = transform.translation.truncate();

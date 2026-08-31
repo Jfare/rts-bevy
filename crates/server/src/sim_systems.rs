@@ -1709,6 +1709,7 @@ fn server_combat_system(
         &Faction,
         &RoomId,
         &Transform,
+        &Radius,
         &mut Health,
         Option<&Unit>,
     )>,
@@ -1732,10 +1733,11 @@ fn server_combat_system(
             let mut closest_target = None;
             let mut min_dist = soldier.aggro_radius;
 
-            for (t_entity, _, target_faction, target_room, target_tf, target_hp, _) in &targets {
+            for (t_entity, _, target_faction, target_room, target_tf, target_radius, target_hp, _) in &targets {
                 if target_room.0 == attacker_room.0 && attacker_faction.is_hostile_to(target_faction) && !target_hp.is_dead() {
                     let d = (target_tf.translation.truncate() - attacker_pos).length();
-                    if d < min_dist {
+                    let effective_aggro = soldier.aggro_radius + target_radius.0;
+                    if d <= effective_aggro && d < min_dist {
                         min_dist = d;
                         closest_target = Some(t_entity);
                     }
@@ -1749,7 +1751,7 @@ fn server_combat_system(
 
         // 2. Fire weapon if target is in range and cooldown is ready
         if let Some(target_entity) = soldier.target {
-            if let Ok((_, target_net, _, target_room, target_tf, mut target_hp, unit_opt)) =
+            if let Ok((_, target_net, _, target_room, target_tf, target_radius, mut target_hp, unit_opt)) =
                 targets.get_mut(target_entity)
             {
                 if target_room.0 != attacker_room.0 {
@@ -1759,8 +1761,9 @@ fn server_combat_system(
 
                 let target_pos = target_tf.translation.truncate();
                 let dist = (target_pos - attacker_pos).length();
+                let effective_range = soldier.attack_range + target_radius.0;
 
-                if dist <= soldier.attack_range {
+                if dist <= effective_range {
                     if soldier.attack_timer >= (soldier.attack_cooldown * cooldown_mult) {
                         soldier.attack_timer = 0.0;
                         target_hp.take_damage(soldier.attack_damage);
@@ -1841,6 +1844,7 @@ fn server_turret_combat_system(
         &Faction,
         &RoomId,
         &Transform,
+        &Radius,
         &mut Health,
         Option<&Unit>,
     )>,
@@ -1857,11 +1861,11 @@ fn server_turret_combat_system(
         // 1. Scan for nearest hostile target in the SAME room if current target is invalid or dead
         let mut target_valid = false;
         if let Some(target_e) = turret.target {
-            if let Ok((_, _, target_faction, target_room, target_tf, target_hp, _)) = targets.get(target_e) {
+            if let Ok((_, _, target_faction, target_room, target_tf, target_radius, target_hp, _)) = targets.get(target_e) {
                 if target_room.0 == turret_room.0
                     && turret_faction.is_hostile_to(target_faction)
                     && !target_hp.is_dead()
-                    && (target_tf.translation.truncate() - turret_pos).length() <= turret.attack_range
+                    && (target_tf.translation.truncate() - turret_pos).length() <= (turret.attack_range + target_radius.0)
                 {
                     target_valid = true;
                 }
@@ -1872,10 +1876,11 @@ fn server_turret_combat_system(
             turret.target = None;
             let mut closest = None;
             let mut min_d = turret.attack_range;
-            for (t_entity, _, target_faction, target_room, target_tf, target_hp, _) in &targets {
+            for (t_entity, _, target_faction, target_room, target_tf, target_radius, target_hp, _) in &targets {
                 if target_room.0 == turret_room.0 && turret_faction.is_hostile_to(target_faction) && !target_hp.is_dead() {
                     let d = (target_tf.translation.truncate() - turret_pos).length();
-                    if d <= min_d {
+                    let effective_range = turret.attack_range + target_radius.0;
+                    if d <= effective_range && d <= min_d {
                         min_d = d;
                         closest = Some(t_entity);
                     }
@@ -1888,7 +1893,7 @@ fn server_turret_combat_system(
 
         // 2. Fire weapon upon cooldown
         if let Some(target_entity) = turret.target {
-            if let Ok((_, target_net, _, target_room, target_tf, mut target_hp, unit_opt)) =
+            if let Ok((_, target_net, _, target_room, target_tf, target_radius, mut target_hp, unit_opt)) =
                 targets.get_mut(target_entity)
             {
                 if target_room.0 != turret_room.0 {
@@ -1898,8 +1903,9 @@ fn server_turret_combat_system(
 
                 let target_pos = target_tf.translation.truncate();
                 let dist = (target_pos - turret_pos).length();
+                let effective_range = turret.attack_range + target_radius.0;
 
-                if dist <= turret.attack_range {
+                if dist <= effective_range {
                     let dir = (target_pos - turret_pos).normalize_or_zero();
                     turret.barrel_angle = dir.y.atan2(dir.x);
 
@@ -1978,6 +1984,7 @@ fn server_siege_tank_combat_system(
         &Faction,
         &RoomId,
         &Transform,
+        &Radius,
         &mut Health,
         Option<&Unit>,
     ), Without<SiegeTank>>,
@@ -1991,11 +1998,11 @@ fn server_siege_tank_combat_system(
         // 1. Scan for nearest hostile target in SAME room
         let mut target_valid = false;
         if let Some(target_e) = tank.target {
-            if let Ok((_, _, target_faction, target_room, target_tf, target_hp, _)) = targets.get(target_e) {
+            if let Ok((_, _, target_faction, target_room, target_tf, target_radius, target_hp, _)) = targets.get(target_e) {
                 if target_room.0 == tank_room.0
                     && tank_faction.is_hostile_to(target_faction)
                     && !target_hp.is_dead()
-                    && (target_tf.translation.truncate() - tank_pos).length() <= tank.attack_range
+                    && (target_tf.translation.truncate() - tank_pos).length() <= (tank.attack_range + target_radius.0)
                 {
                     target_valid = true;
                 }
@@ -2006,10 +2013,11 @@ fn server_siege_tank_combat_system(
             tank.target = None;
             let mut closest = None;
             let mut min_d = tank.attack_range;
-            for (t_entity, _, target_faction, target_room, target_tf, target_hp, _) in &targets {
+            for (t_entity, _, target_faction, target_room, target_tf, target_radius, target_hp, _) in &targets {
                 if target_room.0 == tank_room.0 && tank_faction.is_hostile_to(target_faction) && !target_hp.is_dead() {
                     let d = (target_tf.translation.truncate() - tank_pos).length();
-                    if d <= min_d {
+                    let effective_range = tank.attack_range + target_radius.0;
+                    if d <= effective_range && d <= min_d {
                         min_d = d;
                         closest = Some(t_entity);
                     }
@@ -2022,7 +2030,7 @@ fn server_siege_tank_combat_system(
 
         // 2. Fire weapon upon cooldown
         if let Some(target_entity) = tank.target {
-            if let Ok((_, target_net, _, target_room, target_tf, mut target_hp, unit_opt)) =
+            if let Ok((_, target_net, _, target_room, target_tf, target_radius, mut target_hp, unit_opt)) =
                 targets.get_mut(target_entity)
             {
                 if target_room.0 != tank_room.0 {
@@ -2032,8 +2040,9 @@ fn server_siege_tank_combat_system(
 
                 let target_pos = target_tf.translation.truncate();
                 let dist = (target_pos - tank_pos).length();
+                let effective_range = tank.attack_range + target_radius.0;
 
-                if dist <= tank.attack_range {
+                if dist <= effective_range {
                     let dir = (target_pos - tank_pos).normalize_or_zero();
                     tank.turret_angle = dir.y.atan2(dir.x);
 
@@ -2277,6 +2286,7 @@ mod tests {
                 ..default()
             },
             Health::new(120.0),
+            Radius(16.0),
             Faction::Player1,
             RoomId(1),
             NetEntity { net_id: 101, owner_peer_id: 1 },
@@ -2294,6 +2304,7 @@ mod tests {
                 ..default()
             },
             Health::new(120.0),
+            Radius(16.0),
             Faction::Player2,
             RoomId(1),
             NetEntity { net_id: 102, owner_peer_id: 2 },
@@ -2312,6 +2323,7 @@ mod tests {
                 ..default()
             },
             Health::new(120.0),
+            Radius(16.0),
             Faction::Player1,
             RoomId(2),
             NetEntity { net_id: 201, owner_peer_id: 3 },
@@ -2329,6 +2341,7 @@ mod tests {
                 ..default()
             },
             Health::new(120.0),
+            Radius(16.0),
             Faction::HostileAi,
             RoomId(2),
             NetEntity { net_id: 202, owner_peer_id: 0 },

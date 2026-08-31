@@ -318,6 +318,39 @@ pub fn spawn_match_entities(
         });
     }
 
+    // P1 Starting Siege Tank
+    let p1_tank_pos = p1_base_pos + Vec2::new(-160.0, 80.0);
+    let p1_tank_id = matchmaker.alloc_net_id();
+    commands.spawn((
+        Unit {
+            name: "Siege Tank".to_string(),
+            supply_cost: 3,
+        },
+        SiegeTank::default(),
+        TacticalStance::default(),
+        Health::new(220.0),
+        Radius(22.0),
+        MoveSpeed(140.0),
+        Velocity::default(),
+        Faction::Player1,
+        RoomId(room_id),
+        NetEntity {
+            net_id: p1_tank_id,
+            owner_peer_id: p1_peer,
+        },
+        Transform::from_xyz(p1_tank_pos.x, p1_tank_pos.y, 2.0),
+    ));
+
+    initial_states.push(EntityState {
+        net_id: p1_tank_id,
+        kind: EntityKind::Unit(UnitKind::Tank),
+        faction: Faction::Player1,
+        position: p1_tank_pos,
+        rotation: 0.0,
+        current_hp: 220.0,
+        max_hp: 220.0,
+    });
+
 
     // ─────────────────────────────────────────────────────────────────────────
     // PLAYER 2 / HOSTILE AI BASE
@@ -495,7 +528,7 @@ mod tests {
         assert_eq!(total_entities, states_r1.len() + states_r2.len());
         assert_eq!(r1_count, states_r1.len());
         assert_eq!(r2_count, states_r2.len());
-        assert_eq!(r1_count, 11, "Room 1 should spawn 11 entities (HQ, Minerals, 2 SCVs, 3 Marines for P1 + HQ, 2 Marines, Minerals for P2)");
+        assert_eq!(r1_count, 12, "Room 1 should spawn 12 entities (HQ, Minerals, 2 SCVs, 3 Marines, 1 Tank for P1 + HQ, 2 Marines, Minerals for P2)");
     }
 
     #[test]

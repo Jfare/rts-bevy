@@ -65,6 +65,7 @@ fn building_construction_system(
 fn production_queue_system(
     mut commands: Commands,
     time: Res<Time>,
+    net_client: Option<Res<NetClient>>,
     nav_grid: Res<NavGrid>,
     mut prod_query: Query<(
         Entity,
@@ -75,6 +76,13 @@ fn production_queue_system(
         &Radius,
     )>,
 ) {
+    if let Some(ref net) = net_client {
+        if net.status == NetStatus::InGame {
+            // In online matches, the server simulates production queues and authoritatively spawns units
+            return;
+        }
+    }
+
     let dt = time.delta_secs();
 
     for (building_entity, mut prod, building, transform, faction, radius) in &mut prod_query {
