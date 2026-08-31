@@ -5,10 +5,10 @@ use shared::components::*;
 use shared::economy::PlayerEconomy;
 use shared::grid::{BuildingKind, NavGrid};
 use shared::protocol::{
-    ClientMessage, EntitySnapshot, FactionColor, GameMode, ServerMessage, UnitKind,
+    EntitySnapshot, FactionColor, GameMode, ServerMessage, UnitKind,
 };
 #[cfg(test)]
-use shared::protocol::PingType;
+use shared::protocol::{ClientMessage, PingType};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct ServerSimulationPlugin;

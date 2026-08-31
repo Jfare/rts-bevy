@@ -122,14 +122,17 @@ impl Matchmaker {
         }
     }
 
+    #[allow(dead_code)]
     pub fn get_peer_room(&self, peer_id: u64) -> Option<u32> {
         self.players.get(&peer_id).map(|p| p.room_id)
     }
 
+    #[allow(dead_code)]
     pub fn get_peer_faction(&self, peer_id: u64) -> Option<Faction> {
         self.players.get(&peer_id).map(|p| p.faction)
     }
 
+    #[allow(dead_code)]
     pub fn deactivate_room(&mut self, room_id: u32) {
         if let Some(room) = self.rooms.get_mut(&room_id) {
             room.is_active = false;
