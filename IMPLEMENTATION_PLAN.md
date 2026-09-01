@@ -166,6 +166,12 @@ All in-game text, UI, HUD elements, unit cards, and commands are strictly in **E
   - System broadcast messages for player connections, match starts, and disconnections.
 - [x] **Player Ping & Minimap Alert Markers**:
   - `Alt + Left Click` tactical ping markers on the terrain and minimap (Attention, Attack, Defend).
+- [x] **Mobile Device Blocking & Desktop Controls Enforcement**:
+  - Integrated mobile detection (touch devices, user agents, iPadOS heuristics) to prevent unsupported mobile/touch loading.
+  - Cyberpunk-styled Desktop Required blocker overlay with copyable desktop URL link.
+- [x] **Complete English Language Standardization**:
+  - Full English translation across all codebase docs, comments, UI text, guides, and deployment manuals.
+
 
 ### 🗺️ Planned Session B11: Advanced Maps, Terrain Chokepoints & Destructibles
 - [ ] **Multi-Tile Terrain & Obstacle System**:

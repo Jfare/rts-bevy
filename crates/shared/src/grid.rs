@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
-/// Spelkartans dimensioner och rutnätsinställningar
+/// Game world grid configuration and boundaries
 #[derive(Debug, Clone, Resource, Reflect)]
 pub struct WorldGridConfig {
     pub min_bounds: Vec2,

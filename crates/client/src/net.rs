@@ -3,13 +3,15 @@ use crossbeam_channel::{Receiver, Sender};
 use ewebsock::{Options, WsEvent, WsMessage, WsReceiver, WsSender};
 use shared::components::*;
 use shared::economy::PlayerEconomy;
-use shared::grid::BuildingKind;
+use shared::grid::{BuildingKind, NavGrid};
 use shared::protocol::{
-    decode_server_msg, encode_client_msg, ClientMessage, EntityKind, FactionColor, GameMode,
+    decode_server_msg, encode_client_msg, ClientMessage, EntityKind, EntityState, FactionColor, GameMode,
     ServerMessage, UnitKind,
 };
 use std::collections::HashMap;
+use crate::audio_sfx::SoundEffect;
 use crate::chat::{ChatEntry, ChatLog};
+use crate::particles::ParticleEvent;
 use crate::pings::TacticalPingVisual;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -212,20 +214,30 @@ fn connect_to_server_startup(
 fn poll_network_events(
     mut commands: Commands,
     time: Res<Time>,
+    nav_grid: Res<NavGrid>,
     mut ws_conn: NonSendMut<WsConnection>,
     mut net_client: ResMut<NetClient>,
     mut economy: ResMut<PlayerEconomy>,
     mut outcome_opt: Option<ResMut<MatchOutcome>>,
     mut chat_log_opt: Option<ResMut<ChatLog>>,
+    mut sound_events: EventWriter<SoundEffect>,
+    mut particle_events: EventWriter<ParticleEvent>,
     cleanup_query: Query<Entity, Or<(With<NetEntity>, With<Unit>, With<Building>, With<ResourceNode>)>>,
-    mut camera_query: Query<&mut Transform, (With<Camera2d>, Without<NetEntity>, Without<Unit>, Without<Building>)>,
+    mut camera_query: Query<&mut Transform, (With<Camera2d>, Without<NetEntity>, Without<Unit>, Without<Building>, Without<ResourceNode>)>,
+    node_query: Query<(Entity, &NetEntity, &Transform), (With<ResourceNode>, Without<Camera2d>, Without<Unit>, Without<Building>)>,
     mut entity_query: Query<(
         Entity,
         &NetEntity,
+        &Faction,
         &mut Transform,
         &mut Health,
         Option<&mut Worker>,
-    )>,
+        Option<&mut Soldier>,
+        Option<&mut SiegeTank>,
+        Option<&mut MoveTarget>,
+        Option<&mut TacticalStance>,
+        Option<&mut Stimpack>,
+    ), (Without<Camera2d>, Without<ResourceNode>)>,
 ) {
     let now_ms = time.elapsed().as_millis() as u64;
 
@@ -262,12 +274,16 @@ fn poll_network_events(
                 if let Ok(server_msg) = decode_server_msg(&bytes) {
                     handle_server_message(
                         &mut commands,
+                        &nav_grid,
                         &mut net_client,
                         &mut economy,
                         &mut outcome_opt,
                         &mut chat_log_opt,
+                        &mut sound_events,
+                        &mut particle_events,
                         &cleanup_query,
                         &mut camera_query,
+                        &node_query,
                         &mut entity_query,
                         now_ms,
                         server_msg,
@@ -289,19 +305,29 @@ fn poll_network_events(
 
 fn handle_server_message(
     commands: &mut Commands,
+    nav_grid: &NavGrid,
     net_client: &mut ResMut<NetClient>,
     economy: &mut ResMut<PlayerEconomy>,
     outcome_opt: &mut Option<ResMut<MatchOutcome>>,
     chat_log_opt: &mut Option<ResMut<ChatLog>>,
+    sound_events: &mut EventWriter<SoundEffect>,
+    particle_events: &mut EventWriter<ParticleEvent>,
     cleanup_query: &Query<Entity, Or<(With<NetEntity>, With<Unit>, With<Building>, With<ResourceNode>)>>,
-    camera_query: &mut Query<&mut Transform, (With<Camera2d>, Without<NetEntity>, Without<Unit>, Without<Building>)>,
+    camera_query: &mut Query<&mut Transform, (With<Camera2d>, Without<NetEntity>, Without<Unit>, Without<Building>, Without<ResourceNode>)>,
+    node_query: &Query<(Entity, &NetEntity, &Transform), (With<ResourceNode>, Without<Camera2d>, Without<Unit>, Without<Building>)>,
     entity_query: &mut Query<(
         Entity,
         &NetEntity,
+        &Faction,
         &mut Transform,
         &mut Health,
         Option<&mut Worker>,
-    )>,
+        Option<&mut Soldier>,
+        Option<&mut SiegeTank>,
+        Option<&mut MoveTarget>,
+        Option<&mut TacticalStance>,
+        Option<&mut Stimpack>,
+    ), (Without<Camera2d>, Without<ResourceNode>)>,
     now_ms: u64,
     msg: ServerMessage,
 ) {
@@ -322,215 +348,231 @@ fn handle_server_message(
                 NetStatus::InLobby
             };
             info!(
-                "🎯 [NetClient] Joined Room #{} (Code: {:?}) as {:?} (Ready: {})",
-                room_id, room_code, assigned_faction, is_game_ready
+                "🚪 [NetClient] Assigned Faction: {:?}, Room #{}, Code: {:?}, Status: {:?}",
+                assigned_faction, room_id, room_code, net_client.status
             );
         }
-        ServerMessage::GameStarted { .. } => {
+        ServerMessage::GameStarted {
+            p1_pos,
+            p2_pos,
+            wave_initial_delay: _,
+        } => {
+            info!("⚔️ [NetClient] Match started! Initializing battlefield cameras.");
             net_client.status = NetStatus::InGame;
-            info!("⚔️ [NetClient] Match started!");
+
+            // Center camera on player spawn base
+            let spawn_pos = if net_client.my_faction == Faction::Player1 {
+                p1_pos
+            } else {
+                p2_pos
+            };
+
+            for mut cam_tf in camera_query.iter_mut() {
+                cam_tf.translation.x = spawn_pos.x;
+                cam_tf.translation.y = spawn_pos.y;
+            }
         }
         ServerMessage::InitialWorldState {
             entities,
             p1_minerals,
-            p1_supply: _,
-            p1_max_supply: _,
+            p1_supply,
+            p1_max_supply,
             p2_minerals,
-            p2_supply: _,
-            p2_max_supply: _,
+            p2_supply,
+            p2_max_supply,
         } => {
-            info!(
-                "🌐 [NetClient] Received InitialWorldState with {} entities. Resetting match battlefield!",
-                entities.len()
-            );
+            info!("🌍 [NetClient] Initializing authoritative world state from server ({} entities).", entities.len());
 
-            // 1. Despawn any existing battlefield entities (previous game or demo scene)
-            for e in cleanup_query.iter() {
-                commands.entity(e).despawn_recursive();
+            // Clear previous match entities
+            for ent in cleanup_query.iter() {
+                commands.entity(ent).despawn_recursive();
             }
 
-            // 2. Reset match outcome to InProgress
-            if let Some(ref mut outcome) = outcome_opt {
-                **outcome = MatchOutcome::InProgress;
-            }
-
-            // 3. Center camera on local player's base
-            let my_base_pos = if net_client.my_faction == Faction::Player1 {
-                Vec2::new(-600.0, 250.0)
-            } else {
-                Vec2::new(600.0, -250.0)
-            };
-            for mut cam_tf in camera_query.iter_mut() {
-                cam_tf.translation.x = my_base_pos.x;
-                cam_tf.translation.y = my_base_pos.y;
-            }
-
-            // 4. Reset local economy
-            let starting_min = if net_client.my_faction == Faction::Player1 {
+            // Sync starting minerals and supply
+            let my_minerals = if net_client.my_faction == Faction::Player1 {
                 p1_minerals
             } else {
                 p2_minerals
             };
+            let (my_supply, my_max_supply) = if net_client.my_faction == Faction::Player1 {
+                (p1_supply, p1_max_supply)
+            } else {
+                (p2_supply, p2_max_supply)
+            };
+            economy.set_supply(net_client.my_faction, my_supply, my_max_supply);
+
             let cur_min = economy.get_minerals(net_client.my_faction);
-            if cur_min != starting_min {
-                if starting_min > cur_min {
-                    economy.add_minerals(net_client.my_faction, starting_min - cur_min);
+            if cur_min != my_minerals {
+                if my_minerals > cur_min {
+                    economy.add_minerals(net_client.my_faction, my_minerals - cur_min);
                 } else {
-                    economy.spend_minerals(net_client.my_faction, cur_min - starting_min);
+                    economy.spend_minerals(net_client.my_faction, cur_min - my_minerals);
                 }
             }
 
-            // 5. Authoritatively spawn all entities
-            for ent in entities {
-                match ent.kind {
+            // Spawn authoritative entities
+            let mut mineral_nodes: Vec<(Entity, Vec2)> = Vec::new();
+            let mut pending_units: Vec<(EntityState, UnitKind)> = Vec::new();
+            let mut pending_buildings: Vec<(EntityState, BuildingKind)> = Vec::new();
+
+            for ent_state in entities {
+                match ent_state.kind {
                     EntityKind::ResourceNode => {
-                        commands.spawn((
+                        let pos = ent_state.position;
+                        let node_e = commands.spawn((
                             ResourceNode::new(1500),
                             Faction::Neutral,
                             Selectable::default(),
                             Radius(24.0),
                             NetEntity {
-                                net_id: ent.net_id,
+                                net_id: ent_state.net_id,
                                 owner_peer_id: 0,
                             },
-                            Transform::from_xyz(ent.position.x, ent.position.y, 0.5),
+                            Transform::from_xyz(pos.x, pos.y, 0.5),
+                        )).id();
+                        mineral_nodes.push((node_e, pos));
+                    }
+                    EntityKind::Building(kind) => {
+                        pending_buildings.push((ent_state, kind));
+                    }
+                    EntityKind::Unit(kind) => {
+                        pending_units.push((ent_state, kind));
+                    }
+                }
+            }
+
+            for (ent_state, kind) in pending_buildings {
+                let pos = ent_state.position;
+                let mut b_cmds = commands.spawn((
+                    Building::new(
+                        kind.name(),
+                        kind.size(),
+                        kind.build_duration(),
+                        true,
+                    ),
+                    Health::new(ent_state.max_hp),
+                    ent_state.faction,
+                    Selectable::default(),
+                    Radius(kind.size().x.max(kind.size().y) * 0.5),
+                    NetEntity {
+                        net_id: ent_state.net_id,
+                        owner_peer_id: 0,
+                    },
+                    Transform::from_xyz(pos.x, pos.y, 1.0),
+                ));
+
+                match kind {
+                    BuildingKind::BaseHQ => {
+                        b_cmds.insert((
+                            BaseHQ {
+                                supply_provided: 10,
+                                dropoff_radius: 70.0,
+                            },
+                            ProductionBuilding {
+                                queue: Vec::new(),
+                                current_timer: 0.0,
+                                max_queue_size: 5,
+                                rally_point: pos + Vec2::new(0.0, -100.0),
+                            },
                         ));
                     }
-                    EntityKind::Building(b_kind) => {
-                        let mut entity_cmds = commands.spawn((
-                            Building::new(
-                                b_kind.name(),
-                                b_kind.size(),
-                                b_kind.build_duration(),
-                                true,
-                            ),
-                            Health::new(ent.max_hp),
-                            ent.faction,
-                            Selectable::default(),
-                            Radius(b_kind.size().x.max(b_kind.size().y) * 0.5),
-                            NetEntity {
-                                net_id: ent.net_id,
-                                owner_peer_id: 0,
+                    BuildingKind::Barracks => {
+                        b_cmds.insert((
+                            Barracks,
+                            ProductionBuilding {
+                                queue: Vec::new(),
+                                current_timer: 0.0,
+                                max_queue_size: 5,
+                                rally_point: pos + Vec2::new(0.0, -100.0),
                             },
-                            Transform::from_xyz(ent.position.x, ent.position.y, 1.0),
                         ));
-
-                        match b_kind {
-                            BuildingKind::BaseHQ => {
-                                entity_cmds.insert((
-                                    BaseHQ {
-                                        supply_provided: 10,
-                                        dropoff_radius: 70.0,
-                                    },
-                                    ProductionBuilding {
-                                        queue: Vec::new(),
-                                        current_timer: 0.0,
-                                        max_queue_size: 5,
-                                        rally_point: ent.position + Vec2::new(0.0, -100.0),
-                                    },
-                                ));
-                            }
-                            BuildingKind::Barracks => {
-                                entity_cmds.insert((
-                                    Barracks,
-                                    ProductionBuilding {
-                                        queue: Vec::new(),
-                                        current_timer: 0.0,
-                                        max_queue_size: 5,
-                                        rally_point: ent.position + Vec2::new(0.0, -100.0),
-                                    },
-                                ));
-                            }
-                            BuildingKind::SupplyDepot => {
-                                entity_cmds.insert(SupplyDepot {
-                                    supply_provided: 8,
-                                });
-                            }
-                            BuildingKind::Turret => {
-                                entity_cmds.insert(GunTurret::default());
-                            }
-                        }
                     }
-                    EntityKind::Unit(u_kind) => {
-                        let mut unit_cmds = commands.spawn((
-                            Unit {
-                                name: u_kind.name().to_string(),
-                                supply_cost: u_kind.supply_cost(),
-                            },
-                            Health::new(ent.max_hp),
-                            ent.faction,
-                            Selectable::default(),
-                            NetEntity {
-                                net_id: ent.net_id,
-                                owner_peer_id: 0,
-                            },
-                            Transform::from_xyz(ent.position.x, ent.position.y, 2.0),
-                        ));
+                    BuildingKind::SupplyDepot => {
+                        b_cmds.insert(SupplyDepot { supply_provided: 8 });
+                    }
+                    BuildingKind::Turret => {
+                        b_cmds.insert(GunTurret::default());
+                    }
+                }
+            }
 
-                        match u_kind {
-                            UnitKind::Worker => {
-                                unit_cmds.insert((
-                                    Worker::default(),
-                                    Radius(14.0),
-                                    MoveSpeed(190.0),
-                                    Velocity::default(),
-                                ));
-                            }
-                            UnitKind::Soldier => {
-                                unit_cmds.insert((
-                                    Soldier {
-                                        state: SoldierState::Idle,
-                                        attack_range: 150.0,
-                                        aggro_radius: 240.0,
-                                        attack_damage: 15.0,
-                                        attack_cooldown: 0.85,
-                                        ..default()
-                                    },
-                                    Radius(16.0),
-                                    MoveSpeed(180.0),
-                                    Velocity::default(),
-                                ));
-                            }
-                            UnitKind::Tank => {
-                                unit_cmds.insert((
-                                    SiegeTank::default(),
-                                    Radius(22.0),
-                                    MoveSpeed(140.0),
-                                    Velocity::default(),
-                                ));
-                            }
-                        }
+            for (ent_state, kind) in pending_units {
+                let pos = ent_state.position;
+                let mut u_cmds = commands.spawn((
+                    Unit {
+                        name: kind.name().to_string(),
+                        supply_cost: kind.supply_cost(),
+                    },
+                    Health::new(ent_state.max_hp),
+                    ent_state.faction,
+                    Selectable::default(),
+                    NetEntity {
+                        net_id: ent_state.net_id,
+                        owner_peer_id: 0,
+                    },
+                    Transform::from_xyz(pos.x, pos.y, 2.0),
+                ));
+
+                match kind {
+                    UnitKind::Worker => {
+                        let closest_node = mineral_nodes.iter().min_by(|(_, a), (_, b)| {
+                            let da = pos.distance(*a);
+                            let db = pos.distance(*b);
+                            da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+                        }).map(|(e, _)| *e);
+
+                        u_cmds.insert((
+                            Worker {
+                                state: WorkerState::MovingToResource,
+                                target_node: closest_node,
+                                ..default()
+                            },
+                            Radius(14.0),
+                            MoveSpeed(190.0),
+                            Velocity::default(),
+                        ));
+                    }
+                    UnitKind::Soldier => {
+                        u_cmds.insert((
+                            Soldier {
+                                state: SoldierState::Idle,
+                                attack_range: 150.0,
+                                aggro_radius: 240.0,
+                                attack_damage: 15.0,
+                                attack_cooldown: 0.85,
+                                ..default()
+                            },
+                            Radius(16.0),
+                            MoveSpeed(180.0),
+                            Velocity::default(),
+                        ));
+                    }
+                    UnitKind::Tank => {
+                        u_cmds.insert((
+                            SiegeTank::default(),
+                            Radius(22.0),
+                            MoveSpeed(140.0),
+                            Velocity::default(),
+                        ));
                     }
                 }
             }
         }
         ServerMessage::TickSnapshotBatch {
             snapshots,
-            p1_minerals,
-            p1_supply: _,
-            p1_max_supply: _,
-            p2_minerals: _,
-            p2_supply: _,
-            p2_max_supply: _,
             ..
         } => {
-            // Index existing entities by Net ID
-            let mut entity_map: HashMap<u32, (Entity, Mut<Transform>, Mut<Health>, Option<Mut<Worker>>)> =
-                HashMap::new();
+            // Index existing entities by Net ID for Health / Mining state updates
+            let mut entity_map: HashMap<u32, (Mut<Health>, Option<Mut<Worker>>)> = HashMap::new();
 
-            for (entity, net_entity, transform, health, worker_opt) in entity_query.iter_mut() {
-                entity_map.insert(net_entity.net_id, (entity, transform, health, worker_opt));
+            for (_entity, net_entity, _faction, _transform, health, worker_opt, _, _, _, _, _) in entity_query.iter_mut() {
+                entity_map.insert(net_entity.net_id, (health, worker_opt));
             }
 
-            // Sync positions, health, and state from server snapshot only during active online matches
+            // Sync health and worker mining state from server snapshot
             if net_client.status == NetStatus::InGame {
                 for snap in snapshots {
-                    if let Some((_e, mut tf, mut hp, mut worker_opt)) = entity_map.remove(&snap.net_id) {
-                        // Smooth lerp towards authoritative position
-                        let target_pos = Vec3::new(snap.position.x, snap.position.y, tf.translation.z);
-                        tf.translation = tf.translation.lerp(target_pos, 0.45);
-                        tf.rotation = Quat::from_rotation_z(snap.rotation);
-
+                    if let Some((mut hp, mut worker_opt)) = entity_map.remove(&snap.net_id) {
                         hp.current = snap.current_hp;
                         hp.max = snap.max_hp;
 
@@ -541,16 +583,223 @@ fn handle_server_message(
                         }
                     }
                 }
+            }
+        }
 
-                // Sync local player economy minerals
-                if net_client.my_faction == Faction::Player1 {
-                    let current = economy.get_minerals(Faction::Player1);
-                    if current != p1_minerals {
-                        let diff = p1_minerals as i64 - current as i64;
-                        if diff > 0 {
-                            economy.add_minerals(Faction::Player1, diff as u32);
-                        } else if diff < 0 {
-                            economy.spend_minerals(Faction::Player1, (-diff) as u32);
+        ServerMessage::UnitsOrderedMove {
+            unit_net_ids,
+            destinations,
+            is_attack_move,
+        } => {
+            for (net_id, dest) in unit_net_ids.into_iter().zip(destinations.into_iter()) {
+                for (entity, net_entity, _fac, tf, _hp, _worker, soldier_opt, tank_opt, move_target_opt, stance_opt, _) in entity_query.iter_mut() {
+                    if net_entity.net_id == net_id {
+                        if let Some(mut soldier) = soldier_opt {
+                            soldier.target = None;
+                            soldier.state = if is_attack_move {
+                                SoldierState::AttackMoving
+                            } else {
+                                SoldierState::MovingToGround
+                            };
+                        }
+                        if let Some(mut tank) = tank_opt {
+                            tank.target = None;
+                        }
+                        if let Some(mut stance) = stance_opt {
+                            *stance = TacticalStance::Aggressive;
+                        }
+
+                        let unit_pos = tf.translation.truncate();
+                        let waypoints = nav_grid.find_path(unit_pos, dest);
+
+                        if let Some(mut mt) = move_target_opt {
+                            mt.destination = dest;
+                            mt.is_attack_move = is_attack_move;
+                            mt.waypoints = waypoints;
+                            mt.current_waypoint_idx = 0;
+                        } else {
+                            commands.entity(entity).insert(MoveTarget::with_waypoints(dest, is_attack_move, waypoints));
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+
+        ServerMessage::UnitsOrderedAttackTarget {
+            unit_net_ids,
+            target_net_id,
+        } => {
+            let target_entity = entity_query
+                .iter()
+                .find(|(_, net_entity, _, _, _, _, _, _, _, _, _)| net_entity.net_id == target_net_id)
+                .map(|(e, _, _, _, _, _, _, _, _, _, _)| e);
+
+            if let Some(target_e) = target_entity {
+                for (entity, net_entity, _fac, _tf, _hp, _worker, soldier_opt, tank_opt, _, _, _) in entity_query.iter_mut() {
+                    if unit_net_ids.contains(&net_entity.net_id) {
+                        commands.entity(entity).remove::<MoveTarget>();
+                        if let Some(mut soldier) = soldier_opt {
+                            soldier.target = Some(target_e);
+                            soldier.state = SoldierState::ChasingTarget;
+                        }
+                        if let Some(mut tank) = tank_opt {
+                            tank.target = Some(target_e);
+                        }
+                    }
+                }
+            }
+        }
+
+        ServerMessage::WorkersOrderedHarvest {
+            worker_net_ids,
+            resource_net_id,
+        } => {
+            let target_node = node_query
+                .iter()
+                .find(|(_, net_entity, _)| net_entity.net_id == resource_net_id)
+                .map(|(e, _, _)| e);
+
+            if let Some(node_e) = target_node {
+                for (entity, net_entity, _fac, _tf, _hp, worker_opt, _, _, _, _, _) in entity_query.iter_mut() {
+                    if worker_net_ids.contains(&net_entity.net_id) {
+                        commands.entity(entity).remove::<MoveTarget>();
+                        if let Some(mut worker) = worker_opt {
+                            worker.target_node = Some(node_e);
+                            worker.state = WorkerState::MovingToResource;
+                            worker.harvest_timer = 0.0;
+                        }
+                    }
+                }
+            }
+        }
+
+        ServerMessage::UnitsOrderedStop { unit_net_ids } => {
+            for (entity, net_entity, _fac, _tf, _hp, worker_opt, soldier_opt, _, _, stance_opt, _) in entity_query.iter_mut() {
+                if unit_net_ids.contains(&net_entity.net_id) {
+                    commands.entity(entity).remove::<MoveTarget>();
+                    if let Some(mut soldier) = soldier_opt {
+                        soldier.target = None;
+                        soldier.state = SoldierState::Idle;
+                    }
+                    if let Some(mut worker) = worker_opt {
+                        worker.state = WorkerState::Idle;
+                    }
+                    if let Some(mut stance) = stance_opt {
+                        *stance = TacticalStance::Aggressive;
+                    }
+                }
+            }
+        }
+
+        ServerMessage::UnitsOrderedHoldPosition { unit_net_ids } => {
+            for (entity, net_entity, _fac, _tf, _hp, _worker, soldier_opt, _, _, stance_opt, _) in entity_query.iter_mut() {
+                if unit_net_ids.contains(&net_entity.net_id) {
+                    commands.entity(entity).remove::<MoveTarget>();
+                    if let Some(mut soldier) = soldier_opt {
+                        soldier.target = None;
+                        soldier.state = SoldierState::HoldingPosition;
+                    }
+                    if let Some(mut stance) = stance_opt {
+                        *stance = TacticalStance::HoldPosition;
+                    } else {
+                        commands.entity(entity).insert(TacticalStance::HoldPosition);
+                    }
+                }
+            }
+        }
+
+        ServerMessage::UnitsOrderedPatrol {
+            unit_net_ids,
+            destinations,
+        } => {
+            for (net_id, dest) in unit_net_ids.into_iter().zip(destinations.into_iter()) {
+                for (entity, net_entity, _fac, tf, _hp, _worker, soldier_opt, _tank, move_target_opt, stance_opt, _) in entity_query.iter_mut() {
+                    if net_entity.net_id == net_id {
+                        let unit_pos = tf.translation.truncate();
+                        let waypoints = nav_grid.find_path(unit_pos, dest);
+
+                        if let Some(mut stance) = stance_opt {
+                            *stance = TacticalStance::Patrol {
+                                origin: unit_pos,
+                                target: dest,
+                                heading_to_target: true,
+                            };
+                        } else {
+                            commands.entity(entity).insert(TacticalStance::Patrol {
+                                origin: unit_pos,
+                                target: dest,
+                                heading_to_target: true,
+                            });
+                        }
+
+                        if let Some(mut soldier) = soldier_opt {
+                            soldier.target = None;
+                            soldier.state = SoldierState::AttackMoving;
+                        }
+
+                        if let Some(mut mt) = move_target_opt {
+                            mt.destination = dest;
+                            mt.is_attack_move = true;
+                            mt.waypoints = waypoints;
+                            mt.current_waypoint_idx = 0;
+                        } else {
+                            commands.entity(entity).insert(MoveTarget::with_waypoints(dest, true, waypoints));
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+
+        ServerMessage::UnitsActivatedStimpack { unit_net_ids } => {
+            for (entity, net_entity, _fac, tf, mut hp, _worker, _soldier, _tank, _mt, _stance, stim_opt) in entity_query.iter_mut() {
+                if unit_net_ids.contains(&net_entity.net_id) {
+                    if hp.current > 20.0 {
+                        hp.take_damage(15.0);
+                        let pos = tf.translation.truncate();
+                        particle_events.send(ParticleEvent::StimpackVapor { pos });
+                        if let Some(mut stim) = stim_opt {
+                            stim.is_active = true;
+                            stim.timer = 6.0;
+                        } else {
+                            commands.entity(entity).insert(Stimpack {
+                                is_active: true,
+                                timer: 6.0,
+                                duration: 6.0,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        ServerMessage::UnitsToggledSiegeMode { unit_net_ids } => {
+            for (entity, net_entity, _fac, tf, _hp, _worker, _soldier, tank_opt, _mt, _stance, _stim) in entity_query.iter_mut() {
+                if unit_net_ids.contains(&net_entity.net_id) {
+                    if let Some(mut tank) = tank_opt {
+                        let pos = tf.translation.truncate();
+                        match tank.mode {
+                            TankMode::Tank => {
+                                tank.mode = TankMode::TransformingToSiege;
+                                tank.transform_timer = 1.0;
+                                commands.entity(entity).remove::<MoveTarget>();
+                                particle_events.send(ParticleEvent::Shockwave {
+                                    pos,
+                                    radius: 45.0,
+                                    color: Color::srgba(1.0, 0.6, 0.2, 0.8),
+                                });
+                            }
+                            TankMode::Siege => {
+                                tank.mode = TankMode::TransformingToTank;
+                                tank.transform_timer = 1.0;
+                                particle_events.send(ParticleEvent::Shockwave {
+                                    pos,
+                                    radius: 30.0,
+                                    color: Color::srgba(0.4, 0.8, 1.0, 0.8),
+                                });
+                            }
+                            _ => {}
                         }
                     }
                 }
@@ -710,13 +959,19 @@ fn handle_server_message(
                 },
                 Transform::from_xyz(origin.x, origin.y, 3.1),
             ));
+
+            if damage >= 30.0 {
+                sound_events.send(SoundEffect::SiegeTankShot);
+            } else {
+                sound_events.send(SoundEffect::Gunshot);
+            }
         }
         ServerMessage::EntityDamaged {
             target_net_id,
             current_hp,
             max_hp,
         } => {
-            for (_, net_entity, _, mut hp, _) in entity_query.iter_mut() {
+            for (_, net_entity, _, _, mut hp, ..) in entity_query.iter_mut() {
                 if net_entity.net_id == target_net_id {
                     hp.current = current_hp;
                     hp.max = max_hp;
@@ -724,9 +979,11 @@ fn handle_server_message(
             }
         }
         ServerMessage::EntityDied { net_id, .. } => {
-            for (entity, net_entity, _, _, _) in entity_query.iter_mut() {
+            for (entity, net_entity, ..) in entity_query.iter_mut() {
                 if net_entity.net_id == net_id {
                     commands.entity(entity).despawn_recursive();
+                    sound_events.send(SoundEffect::Explosion);
+                    break;
                 }
             }
         }
@@ -734,8 +991,10 @@ fn handle_server_message(
             if let Some(ref mut outcome) = outcome_opt {
                 if winning_faction == net_client.my_faction {
                     **outcome = MatchOutcome::Victory;
+                    sound_events.send(SoundEffect::Victory);
                 } else {
                     **outcome = MatchOutcome::Defeat;
+                    sound_events.send(SoundEffect::Defeat);
                 }
             }
         }

@@ -278,6 +278,35 @@ pub enum ServerMessage {
         queue_count: usize,
         current_progress: f32,
     },
+    UnitsOrderedMove {
+        unit_net_ids: Vec<u32>,
+        destinations: Vec<Vec2>,
+        is_attack_move: bool,
+    },
+    UnitsOrderedAttackTarget {
+        unit_net_ids: Vec<u32>,
+        target_net_id: u32,
+    },
+    WorkersOrderedHarvest {
+        worker_net_ids: Vec<u32>,
+        resource_net_id: u32,
+    },
+    UnitsOrderedStop {
+        unit_net_ids: Vec<u32>,
+    },
+    UnitsOrderedHoldPosition {
+        unit_net_ids: Vec<u32>,
+    },
+    UnitsOrderedPatrol {
+        unit_net_ids: Vec<u32>,
+        destinations: Vec<Vec2>,
+    },
+    UnitsActivatedStimpack {
+        unit_net_ids: Vec<u32>,
+    },
+    UnitsToggledSiegeMode {
+        unit_net_ids: Vec<u32>,
+    },
     ProjectileFired {
         attacker_net_id: u32,
         target_net_id: u32,

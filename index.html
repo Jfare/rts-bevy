@@ -8,12 +8,13 @@
     <style>
         :root {
             --bg-dark: #070a0e;
-            --panel-bg: rgba(13, 20, 30, 0.88);
+            --panel-bg: rgba(13, 20, 30, 0.92);
             --panel-border: rgba(56, 189, 248, 0.35);
             --primary: #38bdf8;
             --primary-glow: rgba(56, 189, 248, 0.4);
             --accent-orange: #fb923c;
             --accent-green: #4ade80;
+            --accent-red: #f87171;
             --text-main: #f1f5f9;
             --text-dim: #94a3b8;
         }
@@ -73,6 +74,7 @@
             opacity: 0;
             pointer-events: none;
             transform: scale(1.02);
+            display: none !important;
         }
 
         .portal-card {
@@ -281,33 +283,171 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+
+        /* ── Mobile Unsupported Blocker Overlay ── */
+        #mobile-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 100;
+            background: radial-gradient(circle at center, rgba(17, 24, 39, 0.98) 0%, rgba(3, 7, 18, 1.0) 100%);
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        .mobile-card {
+            width: 100%;
+            max-width: 520px;
+            background: rgba(15, 23, 42, 0.95);
+            border: 1px solid rgba(248, 113, 113, 0.4);
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.9), 0 0 35px rgba(248, 113, 113, 0.2);
+            padding: 28px 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+            text-align: center;
+            user-select: text;
+            -webkit-user-select: text;
+        }
+
+        .mobile-badge {
+            align-self: center;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid rgba(239, 68, 68, 0.5);
+            color: #fca5a5;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+
+        .mobile-icon-banner {
+            font-size: 3rem;
+            line-height: 1;
+            margin: 4px 0;
+        }
+
+        .mobile-title {
+            font-size: 1.6rem;
+            font-weight: 800;
+            color: #ffffff;
+            letter-spacing: 0.04em;
+        }
+
+        .mobile-description {
+            font-size: 0.95rem;
+            line-height: 1.55;
+            color: #cbd5e1;
+        }
+
+        .requirements-box {
+            background: rgba(8, 14, 26, 0.8);
+            border: 1px solid rgba(56, 189, 248, 0.2);
+            border-radius: 10px;
+            padding: 14px 16px;
+            text-align: left;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            font-size: 0.85rem;
+        }
+
+        .requirements-header {
+            font-weight: 700;
+            color: var(--primary);
+            font-size: 0.82rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .requirement-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            color: #94a3b8;
+            line-height: 1.4;
+        }
+
+        .requirement-item strong {
+            color: #e2e8f0;
+        }
+
+        .copy-box {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-top: 4px;
+        }
+
+        .copy-btn {
+            background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+            color: #ffffff;
+            border: 1px solid rgba(56, 189, 248, 0.6);
+            padding: 12px 18px;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            font-weight: 700;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            transition: all 0.2s ease;
+        }
+
+        .copy-btn:hover, .copy-btn:active {
+            background: linear-gradient(135deg, #38bdf8 0%, #0284c7 100%);
+            transform: scale(0.98);
+        }
+
+        .url-display {
+            font-family: monospace;
+            font-size: 0.8rem;
+            color: #64748b;
+            word-break: break-all;
+        }
     </style>
 </head>
 <body>
     <canvas id="bevy-canvas" tabindex="0"></canvas>
 
+    <!-- Desktop Portal Overlay -->
     <div id="portal-overlay">
         <div class="portal-card">
             <div class="portal-header">
                 <div class="portal-title">⚡ MINI-RTS // TACTICAL COMMAND</div>
-                <div class="portal-subtitle">Real-Time Strategy i Webbläsaren (Rust & Bevy 0.15 Wasm)</div>
+                <div class="portal-subtitle">Real-Time Strategy in Browser (Rust & Bevy 0.15 Wasm)</div>
             </div>
 
             <!-- Live Server Telemetry -->
             <div class="telemetry-grid">
                 <div class="telemetry-item">
-                    <div class="telemetry-label">Matchmaking Kö (1v1)</div>
+                    <div class="telemetry-label">Matchmaking Queue (1v1)</div>
                     <div class="telemetry-val" style="color: #38bdf8;">
                         <span class="pulse-dot"></span>
                         <span id="stat-queue">0</span>
                     </div>
                 </div>
                 <div class="telemetry-item">
-                    <div class="telemetry-label">1v1 PvP Matcher</div>
+                    <div class="telemetry-label">1v1 PvP Matches</div>
                     <div class="telemetry-val" style="color: #fb923c;" id="stat-pvp">0 / 10</div>
                 </div>
                 <div class="telemetry-item">
-                    <div class="telemetry-label">Solo vs AI Matcher</div>
+                    <div class="telemetry-label">Solo vs AI Matches</div>
                     <div class="telemetry-val" style="color: #4ade80;" id="stat-solo">0 / 10</div>
                 </div>
             </div>
@@ -315,33 +455,72 @@
             <!-- Action Buttons -->
             <div class="btn-group">
                 <button class="portal-btn btn-primary" id="btn-play-1v1">
-                    ⚔️ Hitta 1v1 Match
+                    ⚔️ Find 1v1 Match
                 </button>
                 <button class="portal-btn btn-secondary" id="btn-play-solo">
-                    🤖 Spela Solo vs AI
+                    🤖 Play Solo vs AI
                 </button>
             </div>
 
             <!-- Tactical Field Manual -->
             <div class="controls-card">
-                <div class="controls-title">🎮 SNABB GUIDE & KONTROLLER</div>
+                <div class="controls-title">🎮 QUICK GUIDE & CONTROLS</div>
                 <div class="controls-row">
-                    <span><strong>Markera:</strong> Vänsterklick / Drag-box</span>
-                    <span><strong>Order:</strong> Högerklick (Förflytta / Attack / Bryt)</span>
+                    <span><strong>Select:</strong> Left-Click / Drag Box</span>
+                    <span><strong>Orders:</strong> Right-Click (Move / Attack / Harvest)</span>
                 </div>
                 <div class="controls-row">
-                    <span><strong>Taktik:</strong> <span class="kbd">A</span> Attack-Move | <span class="kbd">S</span> Stop | <span class="kbd">H</span> Hold | <span class="kbd">P</span> Patrol</span>
+                    <span><strong>Tactics:</strong> <span class="kbd">A</span> Attack-Move | <span class="kbd">S</span> Stop | <span class="kbd">H</span> Hold | <span class="kbd">P</span> Patrol</span>
                     <span><strong>Abilities:</strong> <span class="kbd">T</span> Stimpack | <span class="kbd">E</span> Siege Mode</span>
                 </div>
                 <div class="controls-row">
-                    <span><strong>Byggnader:</strong> <span class="kbd">B</span> Bygg-meny (HQ, Barracks, Supply Depot, Gun Turret)</span>
-                    <span><strong>Meny:</strong> <span class="kbd">Tab</span> / <span class="kbd">F1</span> för Match-Lobby</span>
+                    <span><strong>Structures:</strong> <span class="kbd">B</span> Build Menu (HQ, Barracks, Supply Depot, Gun Turret)</span>
+                    <span><strong>Menu:</strong> <span class="kbd">Tab</span> / <span class="kbd">F1</span> for Match Lobby</span>
                 </div>
             </div>
 
             <div class="server-status-bar">
-                <span id="loading-badge"><div class="mini-spinner"></div> Laddar Wasm Game Engine...</span>
+                <span id="loading-badge"><div class="mini-spinner"></div> Loading Wasm Game Engine...</span>
                 <span id="server-cloud-badge" style="display:none;">🌐 Server: <strong>Online (UpCloud FI-HEL1)</strong></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Mobile Unsupported Overlay -->
+    <div id="mobile-overlay">
+        <div class="mobile-card">
+            <div class="mobile-badge">
+                <span>🚫</span>
+                <span>Desktop Experience Required</span>
+            </div>
+            <div class="mobile-icon-banner">🖥️ ⚔️ 🖱️</div>
+            <h1 class="mobile-title">Desktop Only</h1>
+            <p class="mobile-description">
+                <strong>Mini-RTS</strong> is designed for precision real-time strategy gameplay and currently requires a <strong>desktop or laptop browser</strong> with a physical keyboard and mouse.
+            </p>
+
+            <div class="requirements-box">
+                <div class="requirements-header">Required Controls & Hardware:</div>
+                <div class="requirement-item">
+                    <span>🖱️</span>
+                    <span><strong>Mouse:</strong> Box-selection, right-click movement & context orders, radar panning.</span>
+                </div>
+                <div class="requirement-item">
+                    <span>⌨️</span>
+                    <span><strong>Keyboard:</strong> Rapid hotkeys for unit abilities (<span class="kbd">T</span> Stimpack, <span class="kbd">E</span> Siege), building (<span class="kbd">B</span>), and production (<span class="kbd">V</span>, <span class="kbd">M</span>).</span>
+                </div>
+                <div class="requirement-item">
+                    <span>💻</span>
+                    <span><strong>Platform:</strong> Chrome, Edge, Firefox, or Safari on Windows, macOS, or Linux.</span>
+                </div>
+            </div>
+
+            <div class="copy-box">
+                <button class="copy-btn" id="btn-copy-link">
+                    <span>📋</span>
+                    <span id="copy-btn-text">Copy Link to Play on Desktop</span>
+                </button>
+                <div class="url-display" id="url-display-text">https://rts.farell.ax</div>
             </div>
         </div>
     </div>
@@ -356,65 +535,147 @@
         }
 
         const portalOverlay = document.getElementById('portal-overlay');
+        const mobileOverlay = document.getElementById('mobile-overlay');
         const btnPlay1v1 = document.getElementById('btn-play-1v1');
         const btnPlaySolo = document.getElementById('btn-play-solo');
         const loadingBadge = document.getElementById('loading-badge');
         const serverCloudBadge = document.getElementById('server-cloud-badge');
+        const btnCopyLink = document.getElementById('btn-copy-link');
+        const copyBtnText = document.getElementById('copy-btn-text');
+        const urlDisplayText = document.getElementById('url-display-text');
 
-        function launchGame(mode) {
-            window.__rts_requested_mode = mode;
-            if (portalOverlay) {
-                portalOverlay.classList.add('hidden');
-                if (canvas) {
-                    canvas.focus();
+        // ─────────────────────────────────────────────────────────────
+        // Mobile & Touch Device Detection
+        // ─────────────────────────────────────────────────────────────
+        function isMobileDevice() {
+            const userAgent = navigator.userAgent || navigator.vendor || window.opera || '';
+
+            // 1. Check standard mobile user-agent patterns
+            const mobileRegex = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile|mobile|CriOS|FxiOS/i;
+            if (mobileRegex.test(userAgent)) {
+                return true;
+            }
+
+            // 2. iPadOS 13+ detection (reports as MacIntel with touch points)
+            if (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) {
+                return true;
+            }
+
+            // 3. Client Hints UserAgentData if supported
+            if (navigator.userAgentData && typeof navigator.userAgentData.mobile === 'boolean') {
+                if (navigator.userAgentData.mobile) {
+                    return true;
                 }
             }
-        }
 
-        if (btnPlay1v1) {
-            btnPlay1v1.addEventListener('click', () => launchGame('1v1'));
-        }
-        if (btnPlaySolo) {
-            btnPlaySolo.addEventListener('click', () => launchGame('solo'));
-        }
-
-        // Live Telemetry Polling via /api/stats
-        async function fetchServerTelemetry() {
-            try {
-                const res = await fetch('/api/stats');
-                if (res.ok) {
-                    const data = await res.json();
-                    const qEl = document.getElementById('stat-queue');
-                    const pvpEl = document.getElementById('stat-pvp');
-                    const soloEl = document.getElementById('stat-solo');
-
-                    if (qEl) qEl.innerText = data.queue_1v1 ?? 0;
-                    if (pvpEl) pvpEl.innerText = `${data.active_1v1_matches ?? 0} / ${data.max_1v1_matches ?? 10}`;
-                    if (soloEl) soloEl.innerText = `${data.active_solo_matches ?? 0} / ${data.max_solo_matches ?? 10}`;
-                }
-            } catch (err) {
-                // Server might be starting
+            // 4. Coarse touch pointer + small screen heuristic
+            const isTouchOnly = window.matchMedia && window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+            const isSmallScreen = window.innerWidth <= 860 || window.innerHeight <= 550;
+            if (isTouchOnly && isSmallScreen) {
+                return true;
             }
+
+            return false;
         }
 
-        setInterval(fetchServerTelemetry, 2500);
-        fetchServerTelemetry();
+        const isMobile = isMobileDevice();
 
-        // Reveal ready state when Wasm canvas initializes
-        const observer = new MutationObserver(() => {
-            if (canvas && canvas.getAttribute('data-raw-handle')) {
+        if (isMobile) {
+            // Disable game on mobile device
+            if (portalOverlay) portalOverlay.style.display = 'none';
+            if (canvas) {
+                canvas.style.display = 'none';
+                canvas.remove();
+            }
+            if (mobileOverlay) {
+                mobileOverlay.style.display = 'flex';
+            }
+
+            if (urlDisplayText) {
+                urlDisplayText.innerText = window.location.href;
+            }
+
+            if (btnCopyLink) {
+                btnCopyLink.addEventListener('click', async () => {
+                    try {
+                        const url = window.location.href;
+                        if (navigator.clipboard && navigator.clipboard.writeText) {
+                            await navigator.clipboard.writeText(url);
+                        } else {
+                            const tempInput = document.createElement('input');
+                            tempInput.value = url;
+                            document.body.appendChild(tempInput);
+                            tempInput.select();
+                            document.execCommand('copy');
+                            document.body.removeChild(tempInput);
+                        }
+                        if (copyBtnText) {
+                            copyBtnText.innerText = '✅ Link Copied to Clipboard!';
+                            setTimeout(() => {
+                                copyBtnText.innerText = 'Copy Link to Play on Desktop';
+                            }, 3000);
+                        }
+                    } catch (err) {
+                        if (copyBtnText) copyBtnText.innerText = 'URL: ' + window.location.host;
+                    }
+                });
+            }
+        } else {
+            // Desktop flow
+            function launchGame(mode) {
+                window.__rts_requested_mode = mode;
+                if (portalOverlay) {
+                    portalOverlay.classList.add('hidden');
+                    if (canvas) {
+                        canvas.focus();
+                    }
+                }
+            }
+
+            if (btnPlay1v1) {
+                btnPlay1v1.addEventListener('click', () => launchGame('1v1'));
+            }
+            if (btnPlaySolo) {
+                btnPlaySolo.addEventListener('click', () => launchGame('solo'));
+            }
+
+            // Live Telemetry Polling via /api/stats
+            async function fetchServerTelemetry() {
+                try {
+                    const res = await fetch('/api/stats');
+                    if (res.ok) {
+                        const data = await res.json();
+                        const qEl = document.getElementById('stat-queue');
+                        const pvpEl = document.getElementById('stat-pvp');
+                        const soloEl = document.getElementById('stat-solo');
+
+                        if (qEl) qEl.innerText = data.queue_1v1 ?? 0;
+                        if (pvpEl) pvpEl.innerText = `${data.active_1v1_matches ?? 0} / ${data.max_1v1_matches ?? 10}`;
+                        if (soloEl) soloEl.innerText = `${data.active_solo_matches ?? 0} / ${data.max_solo_matches ?? 10}`;
+                    }
+                } catch (err) {
+                    // Server might be starting
+                }
+            }
+
+            setInterval(fetchServerTelemetry, 2500);
+            fetchServerTelemetry();
+
+            // Reveal ready state when Wasm canvas initializes
+            const observer = new MutationObserver(() => {
+                if (canvas && canvas.getAttribute('data-raw-handle')) {
+                    if (loadingBadge) loadingBadge.style.display = 'none';
+                    if (serverCloudBadge) serverCloudBadge.style.display = 'inline';
+                    observer.disconnect();
+                }
+            });
+            observer.observe(document.body, { attributes: true, childList: true, subtree: true });
+
+            setTimeout(() => {
                 if (loadingBadge) loadingBadge.style.display = 'none';
                 if (serverCloudBadge) serverCloudBadge.style.display = 'inline';
-                observer.disconnect();
-            }
-        });
-        observer.observe(document.body, { attributes: true, childList: true, subtree: true });
-
-        setTimeout(() => {
-            if (loadingBadge) loadingBadge.style.display = 'none';
-            if (serverCloudBadge) serverCloudBadge.style.display = 'inline';
-        }, 3000);
+            }, 3000);
+        }
     </script>
 </body>
 </html>
-

@@ -115,4 +115,10 @@ impl PlayerEconomy {
         let entry = self.economies.entry(faction).or_default();
         entry.max_supply = entry.max_supply.saturating_add(amount);
     }
+
+    pub fn set_supply(&mut self, faction: Faction, current: u32, max: u32) {
+        let entry = self.economies.entry(faction).or_default();
+        entry.current_supply = current;
+        entry.max_supply = max;
+    }
 }

@@ -57,14 +57,25 @@ fn unit_movement_system(
         &MoveSpeed,
         Option<&Stimpack>,
         Option<&SiegeTank>,
+        Option<&Soldier>,
     )>,
 ) {
     let dt = time.delta_secs();
 
-    for (entity, mut transform, mut move_target, move_speed, stim_opt, tank_opt) in &mut query {
-        // Immobilize Siege Tanks when in Siege Mode or Transforming
+    for (entity, mut transform, mut move_target, move_speed, stim_opt, tank_opt, soldier_opt) in &mut query {
+        // If soldier is actively engaging or chasing a combat target, do not steer along ground waypoints!
+        if let Some(soldier) = soldier_opt {
+            if soldier.target.is_some()
+                || soldier.state == SoldierState::Attacking
+                || soldier.state == SoldierState::ChasingTarget
+            {
+                continue;
+            }
+        }
+
+        // Immobilize Siege Tanks when in Siege Mode or Transforming or attacking
         if let Some(tank) = tank_opt {
-            if tank.mode != TankMode::Tank {
+            if tank.mode != TankMode::Tank || tank.target.is_some() {
                 continue;
             }
         }

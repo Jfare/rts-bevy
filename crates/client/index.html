@@ -76,6 +76,35 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+
+        /* Mobile Blocker */
+        #mobile-blocker {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: #070a0e;
+            color: #f1f5f9;
+            z-index: 100;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            text-align: center;
+            gap: 16px;
+        }
+        .mobile-blocker-card {
+            max-width: 480px;
+            background: #0f172a;
+            border: 1px solid #f87171;
+            border-radius: 12px;
+            padding: 28px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
     </style>
 </head>
 <body>
@@ -86,27 +115,58 @@
         </div>
     </div>
 
+    <div id="mobile-blocker">
+        <div class="mobile-blocker-card">
+            <div style="font-size: 2.5rem;">🖥️ 🚫 📱</div>
+            <h2 style="color: #ffffff; font-size: 1.4rem;">Desktop Browser Required</h2>
+            <p style="color: #94a3b8; font-size: 0.95rem; line-height: 1.5;">
+                Mini-RTS is currently designed for desktop keyboard and mouse controls and is not supported on mobile devices.
+            </p>
+            <p style="color: #38bdf8; font-size: 0.85rem;">
+                Please visit this URL on a desktop or laptop computer to play.
+            </p>
+        </div>
+    </div>
+
     <script>
         // Prevent default right-click menu on window & canvas
         window.addEventListener('contextmenu', (e) => e.preventDefault());
 
-        const observer = new MutationObserver(() => {
-            const canvas = document.querySelector('canvas');
-            if (canvas) {
-                canvas.tabIndex = 0;
-                canvas.focus();
-                canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-                window.addEventListener('click', () => canvas.focus());
+        function isMobileDevice() {
+            const userAgent = navigator.userAgent || navigator.vendor || window.opera || '';
+            const mobileRegex = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile|mobile|CriOS|FxiOS/i;
+            if (mobileRegex.test(userAgent)) return true;
+            if (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) return true;
+            if (navigator.userAgentData && navigator.userAgentData.mobile) return true;
+            const isTouchOnly = window.matchMedia && window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+            const isSmallScreen = window.innerWidth <= 860 || window.innerHeight <= 550;
+            return isTouchOnly && isSmallScreen;
+        }
 
-                const overlay = document.getElementById('loading-overlay');
-                if (overlay) {
-                    overlay.style.opacity = '0';
-                    setTimeout(() => overlay.remove(), 400);
+        if (isMobileDevice()) {
+            const container = document.getElementById('bevy-container');
+            if (container) container.remove();
+            const blocker = document.getElementById('mobile-blocker');
+            if (blocker) blocker.style.display = 'flex';
+        } else {
+            const observer = new MutationObserver(() => {
+                const canvas = document.querySelector('canvas');
+                if (canvas) {
+                    canvas.tabIndex = 0;
+                    canvas.focus();
+                    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+                    window.addEventListener('click', () => canvas.focus());
+
+                    const overlay = document.getElementById('loading-overlay');
+                    if (overlay) {
+                        overlay.style.opacity = '0';
+                        setTimeout(() => overlay.remove(), 400);
+                    }
+                    observer.disconnect();
                 }
-                observer.disconnect();
-            }
-        });
-        observer.observe(document.body, { childList: true, subtree: true });
+            });
+            observer.observe(document.body, { childList: true, subtree: true });
+        }
     </script>
 </body>
 </html>

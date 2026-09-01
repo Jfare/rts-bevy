@@ -44,7 +44,7 @@ pub enum OutgoingNetEvent {
 #[derive(Resource)]
 pub struct ServerNetworkChannels {
     pub rx_incoming: Receiver<IncomingNetEvent>,
-    pub tx_outgoing: Sender<OutgoingNetEvent>,
+    pub tx_outgoing: mpsc::UnboundedSender<OutgoingNetEvent>,
 }
 
 pub struct ServerNetworkPlugin {
@@ -65,7 +65,7 @@ impl Default for ServerNetworkPlugin {
 impl Plugin for ServerNetworkPlugin {
     fn build(&self, app: &mut App) {
         let (tx_incoming, rx_incoming) = crossbeam_channel::unbounded();
-        let (tx_outgoing, rx_outgoing) = crossbeam_channel::unbounded();
+        let (tx_outgoing, rx_outgoing) = mpsc::unbounded_channel();
 
         app.insert_resource(ServerNetworkChannels {
             rx_incoming,
@@ -94,7 +94,7 @@ impl Plugin for ServerNetworkPlugin {
 async fn run_network_server(
     port: u16,
     tx_incoming: Sender<IncomingNetEvent>,
-    rx_outgoing: Receiver<OutgoingNetEvent>,
+    mut rx_outgoing: mpsc::UnboundedReceiver<OutgoingNetEvent>,
 ) {
     let addr = format!("0.0.0.0:{}", port);
     let listener = match TcpListener::bind(&addr).await {
@@ -114,7 +114,7 @@ async fn run_network_server(
     // Task to dispatch outgoing messages from ECS to WebSocket clients
     let peers_outgoing = peers.clone();
     tokio::spawn(async move {
-        while let Ok(event) = rx_outgoing.recv() {
+        while let Some(event) = rx_outgoing.recv().await {
             let peers_guard = peers_outgoing.lock().await;
             match event {
                 OutgoingNetEvent::SendToPeer { peer_id, msg } => {

@@ -45,6 +45,7 @@ fn handle_right_click_orders(
     nav_grid: Res<NavGrid>,
     grid_cfg: Option<Res<WorldGridConfig>>,
     fog: Res<FogOfWarGrid>,
+    mut sound_events: EventWriter<SoundEffect>,
     window_query: Query<&Window, With<PrimaryWindow>>,
     camera_query: Query<(&Camera, &Transform, Option<&OrthographicProjection>)>,
     node_query: Query<(&Transform, &Radius, &ResourceNode), With<ResourceNode>>,
@@ -178,8 +179,11 @@ fn handle_right_click_orders(
                 }
             }
         }
+        sound_events.send(SoundEffect::OrderIssued);
         return;
     }
+
+    sound_events.send(SoundEffect::OrderIssued);
 
     // Send networked command if online
     if net_client.status != NetStatus::Disconnected && !selected_net_ids.is_empty() {

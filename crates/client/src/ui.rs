@@ -802,6 +802,12 @@ fn handle_lobby_button_interactions(
     mut join_code_state: ResMut<JoinCodeInputState>,
     mut modal_query: Query<&mut Node, With<LobbyModalContainer>>,
 ) {
+    if net_client.is_changed() && net_client.status == NetStatus::InGame {
+        for mut node in &mut modal_query {
+            node.display = Display::None;
+        }
+    }
+
     if keyboard.just_pressed(KeyCode::F1) || keyboard.just_pressed(KeyCode::Tab) {
         for mut node in &mut modal_query {
             node.display = if node.display == Display::None {

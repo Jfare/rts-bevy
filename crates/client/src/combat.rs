@@ -118,6 +118,10 @@ fn soldier_combat_system(
 
             if let Some(enemy_ent) = nearest_enemy {
                 soldier.target = Some(enemy_ent);
+                soldier.state = SoldierState::ChasingTarget;
+                if move_target_opt.is_some() {
+                    commands.entity(soldier_entity).remove::<MoveTarget>();
+                }
             }
         }
 
