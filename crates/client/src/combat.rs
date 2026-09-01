@@ -57,10 +57,8 @@ fn soldier_combat_system(
         )>,
     )>,
 ) {
-    if net_client_opt.as_ref().map(|n| n.status == NetStatus::InGame).unwrap_or(false) {
-        return;
-    }
     let dt = time.delta_secs();
+    let is_online = net_client_opt.as_ref().map(|n| n.status == NetStatus::InGame).unwrap_or(false);
 
     let targets: Vec<TargetSnapshot> = queries
         .p0()
@@ -147,41 +145,43 @@ fn soldier_combat_system(
                         commands.entity(soldier_entity).remove::<MoveTarget>();
                     }
 
-                    if soldier.attack_timer >= (soldier.attack_cooldown * cooldown_mult) {
-                        soldier.attack_timer = 0.0;
-                        sound_events.send(SoundEffect::Gunshot);
+                    if !is_online {
+                        if soldier.attack_timer >= (soldier.attack_cooldown * cooldown_mult) {
+                            soldier.attack_timer = 0.0;
+                            sound_events.send(SoundEffect::Gunshot);
 
-                        let muzzle_offset = dir * (radius.0 + 8.0);
-                        let projectile_start = soldier_pos + muzzle_offset;
+                            let muzzle_offset = dir * (radius.0 + 8.0);
+                            let projectile_start = soldier_pos + muzzle_offset;
 
-                        particle_events.send(ParticleEvent::MuzzleSmoke {
-                            pos: projectile_start,
-                            dir,
-                        });
+                            particle_events.send(ParticleEvent::MuzzleSmoke {
+                                pos: projectile_start,
+                                dir,
+                            });
 
-                        commands.spawn((
-                            Projectile {
-                                origin: projectile_start,
-                                target_entity: Some(target_ent),
-                                target_pos,
-                                speed: 780.0,
-                                damage: soldier.attack_damage,
-                                splash_radius: 0.0,
-                                faction: *faction,
-                                lifetime: 0.0,
-                                max_lifetime: 0.7,
-                            },
-                            Transform::from_xyz(projectile_start.x, projectile_start.y, 3.0),
-                        ));
+                            commands.spawn((
+                                Projectile {
+                                    origin: projectile_start,
+                                    target_entity: Some(target_ent),
+                                    target_pos,
+                                    speed: 780.0,
+                                    damage: soldier.attack_damage,
+                                    splash_radius: 0.0,
+                                    faction: *faction,
+                                    lifetime: 0.0,
+                                    max_lifetime: 0.7,
+                                },
+                                Transform::from_xyz(projectile_start.x, projectile_start.y, 3.0),
+                            ));
 
-                        commands.spawn((
-                            MuzzleFlash {
-                                lifetime: 0.0,
-                                max_lifetime: 0.08,
-                                color: Color::srgb(1.0, 0.9, 0.3),
-                            },
-                            Transform::from_xyz(projectile_start.x, projectile_start.y, 3.5),
-                        ));
+                            commands.spawn((
+                                MuzzleFlash {
+                                    lifetime: 0.0,
+                                    max_lifetime: 0.08,
+                                    color: Color::srgb(1.0, 0.9, 0.3),
+                                },
+                                Transform::from_xyz(projectile_start.x, projectile_start.y, 3.5),
+                            ));
+                        }
                     }
                 } else if !is_hold_pos {
                     soldier.state = SoldierState::ChasingTarget;
@@ -209,10 +209,8 @@ fn turret_combat_system(
     mut turret_query: Query<(Entity, &mut GunTurret, &Transform, &Faction, &Building)>,
     target_query: Query<(Entity, &Transform, &Radius, &Faction, &Health)>,
 ) {
-    if net_client_opt.as_ref().map(|n| n.status == NetStatus::InGame).unwrap_or(false) {
-        return;
-    }
     let dt = time.delta_secs();
+    let is_online = net_client_opt.as_ref().map(|n| n.status == NetStatus::InGame).unwrap_or(false);
 
     for (turret_ent, mut turret, tf, faction, building) in &mut turret_query {
         if !building.is_constructed {
@@ -256,39 +254,41 @@ fn turret_combat_system(
             let dir = (target_pos - turret_pos).normalize_or_zero();
             turret.barrel_angle = dir.y.atan2(dir.x);
 
-            if turret.attack_timer >= turret.attack_cooldown {
-                turret.attack_timer = 0.0;
-                sound_events.send(SoundEffect::Gunshot);
+            if !is_online {
+                if turret.attack_timer >= turret.attack_cooldown {
+                    turret.attack_timer = 0.0;
+                    sound_events.send(SoundEffect::Gunshot);
 
-                let muzzle_start = turret_pos + dir * 28.0;
-                particle_events.send(ParticleEvent::MuzzleSmoke {
-                    pos: muzzle_start,
-                    dir,
-                });
+                    let muzzle_start = turret_pos + dir * 28.0;
+                    particle_events.send(ParticleEvent::MuzzleSmoke {
+                        pos: muzzle_start,
+                        dir,
+                    });
 
-                commands.spawn((
-                    Projectile {
-                        origin: muzzle_start,
-                        target_entity: Some(target_ent),
-                        target_pos,
-                        speed: 850.0,
-                        damage: turret.attack_damage,
-                        splash_radius: 0.0,
-                        faction: *faction,
-                        lifetime: 0.0,
-                        max_lifetime: 0.6,
-                    },
-                    Transform::from_xyz(muzzle_start.x, muzzle_start.y, 3.0),
-                ));
+                    commands.spawn((
+                        Projectile {
+                            origin: muzzle_start,
+                            target_entity: Some(target_ent),
+                            target_pos,
+                            speed: 850.0,
+                            damage: turret.attack_damage,
+                            splash_radius: 0.0,
+                            faction: *faction,
+                            lifetime: 0.0,
+                            max_lifetime: 0.6,
+                        },
+                        Transform::from_xyz(muzzle_start.x, muzzle_start.y, 3.0),
+                    ));
 
-                commands.spawn((
-                    MuzzleFlash {
-                        lifetime: 0.0,
-                        max_lifetime: 0.09,
-                        color: Color::srgb(1.0, 0.85, 0.2),
-                    },
-                    Transform::from_xyz(muzzle_start.x, muzzle_start.y, 3.5),
-                ));
+                    commands.spawn((
+                        MuzzleFlash {
+                            lifetime: 0.0,
+                            max_lifetime: 0.09,
+                            color: Color::srgb(1.0, 0.85, 0.2),
+                        },
+                        Transform::from_xyz(muzzle_start.x, muzzle_start.y, 3.5),
+                    ));
+                }
             }
         }
     }
@@ -315,10 +315,8 @@ fn siege_tank_combat_system(
         )>,
     )>,
 ) {
-    if net_client_opt.as_ref().map(|n| n.status == NetStatus::InGame).unwrap_or(false) {
-        return;
-    }
     let dt = time.delta_secs();
+    let is_online = net_client_opt.as_ref().map(|n| n.status == NetStatus::InGame).unwrap_or(false);
 
     let targets: Vec<TargetSnapshot> = queries
         .p0()
@@ -405,49 +403,51 @@ fn siege_tank_combat_system(
                     commands.entity(tank_ent).remove::<MoveTarget>();
                 }
 
-                if tank.attack_timer >= tank.attack_cooldown {
-                    tank.attack_timer = 0.0;
-                    sound_events.send(SoundEffect::SiegeTankShot);
+                if !is_online {
+                    if tank.attack_timer >= tank.attack_cooldown {
+                        tank.attack_timer = 0.0;
+                        sound_events.send(SoundEffect::SiegeTankShot);
 
-                    let muzzle_dist = if is_siege { radius.0 * 2.2 } else { radius.0 * 1.5 };
-                    let muzzle_start = tank_pos + dir * muzzle_dist;
+                        let muzzle_dist = if is_siege { radius.0 * 2.2 } else { radius.0 * 1.5 };
+                        let muzzle_start = tank_pos + dir * muzzle_dist;
 
-                    particle_events.send(ParticleEvent::MuzzleSmoke {
-                        pos: muzzle_start,
-                        dir,
-                    });
-
-                    if is_siege {
-                        particle_events.send(ParticleEvent::Shockwave {
+                        particle_events.send(ParticleEvent::MuzzleSmoke {
                             pos: muzzle_start,
-                            radius: 25.0,
-                            color: Color::srgba(1.0, 0.6, 0.2, 0.8),
+                            dir,
                         });
+
+                        if is_siege {
+                            particle_events.send(ParticleEvent::Shockwave {
+                                pos: muzzle_start,
+                                radius: 25.0,
+                                color: Color::srgba(1.0, 0.6, 0.2, 0.8),
+                            });
+                        }
+
+                        commands.spawn((
+                            Projectile {
+                                origin: muzzle_start,
+                                target_entity: Some(target_ent),
+                                target_pos,
+                                speed: if is_siege { 600.0 } else { 680.0 },
+                                damage: tank.attack_damage,
+                                splash_radius: if is_siege { 45.0 } else { 0.0 },
+                                faction: *faction,
+                                lifetime: 0.0,
+                                max_lifetime: 0.9,
+                            },
+                            Transform::from_xyz(muzzle_start.x, muzzle_start.y, 3.0),
+                        ));
+
+                        commands.spawn((
+                            MuzzleFlash {
+                                lifetime: 0.0,
+                                max_lifetime: if is_siege { 0.16 } else { 0.12 },
+                                color: if is_siege { Color::srgb(1.0, 0.4, 0.1) } else { Color::srgb(1.0, 0.7, 0.2) },
+                            },
+                            Transform::from_xyz(muzzle_start.x, muzzle_start.y, 3.5),
+                        ));
                     }
-
-                    commands.spawn((
-                        Projectile {
-                            origin: muzzle_start,
-                            target_entity: Some(target_ent),
-                            target_pos,
-                            speed: if is_siege { 600.0 } else { 680.0 },
-                            damage: tank.attack_damage,
-                            splash_radius: if is_siege { 45.0 } else { 0.0 },
-                            faction: *faction,
-                            lifetime: 0.0,
-                            max_lifetime: 0.9,
-                        },
-                        Transform::from_xyz(muzzle_start.x, muzzle_start.y, 3.0),
-                    ));
-
-                    commands.spawn((
-                        MuzzleFlash {
-                            lifetime: 0.0,
-                            max_lifetime: if is_siege { 0.16 } else { 0.12 },
-                            color: if is_siege { Color::srgb(1.0, 0.4, 0.1) } else { Color::srgb(1.0, 0.7, 0.2) },
-                        },
-                        Transform::from_xyz(muzzle_start.x, muzzle_start.y, 3.5),
-                    ));
                 }
             } else if !is_hold_pos && tank.mode == TankMode::Tank {
                 let stop_dist = (effective_range * 0.90).max(20.0);
