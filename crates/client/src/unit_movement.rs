@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use shared::components::{
-    BaseHQ, Building, Faction, MoveSpeed, MoveTarget, Radius, ResourceNode, SiegeTank,
+    BaseHQ, Building, Faction, MatchOutcome, MoveSpeed, MoveTarget, Radius, ResourceNode, SiegeTank,
     Soldier, SoldierState, Stimpack, TacticalStance, TankMode, Unit, Worker, WorkerState,
 };
 use shared::grid::NavGrid;
@@ -50,6 +50,7 @@ fn update_nav_grid_system(
 fn unit_movement_system(
     mut commands: Commands,
     time: Res<Time>,
+    outcome_opt: Option<Res<MatchOutcome>>,
     mut query: Query<(
         Entity,
         &mut Transform,
@@ -60,23 +61,34 @@ fn unit_movement_system(
         Option<&Soldier>,
     )>,
 ) {
+    if outcome_opt.as_deref() == Some(&MatchOutcome::Victory) || outcome_opt.as_deref() == Some(&MatchOutcome::Defeat) {
+        return;
+    }
+
     let dt = time.delta_secs();
 
     for (entity, mut transform, mut move_target, move_speed, stim_opt, tank_opt, soldier_opt) in &mut query {
-        // If soldier is actively engaging or chasing a combat target, do not steer along ground waypoints!
-        if let Some(soldier) = soldier_opt {
-            if soldier.target.is_some()
-                || soldier.state == SoldierState::Attacking
-                || soldier.state == SoldierState::ChasingTarget
-            {
+        // Immobilize Siege Tanks when in Siege Mode or Transforming
+        if let Some(tank) = tank_opt {
+            if tank.mode != TankMode::Tank {
                 continue;
             }
         }
 
-        // Immobilize Siege Tanks when in Siege Mode or Transforming or attacking
-        if let Some(tank) = tank_opt {
-            if tank.mode != TankMode::Tank || tank.target.is_some() {
-                continue;
+        // If an attack-moving unit is currently engaging / fighting an enemy target, pause waypoint marching
+        if move_target.is_attack_move {
+            if let Some(soldier) = soldier_opt {
+                if soldier.target.is_some()
+                    || soldier.state == SoldierState::Attacking
+                    || soldier.state == SoldierState::ChasingTarget
+                {
+                    continue;
+                }
+            }
+            if let Some(tank) = tank_opt {
+                if tank.target.is_some() {
+                    continue;
+                }
             }
         }
 
@@ -85,16 +97,36 @@ fn unit_movement_system(
         let delta = goal_pos - current_pos;
         let dist = delta.length();
 
+        // Track stall / blockage against obstacles or friendly units
+        if move_target.last_pos.x.is_nan() {
+            move_target.last_pos = current_pos;
+            move_target.stall_timer = 0.0;
+        } else {
+            let moved_dist = current_pos.distance(move_target.last_pos);
+            if moved_dist < (move_speed.0 * 0.15 * dt).max(0.2) {
+                move_target.stall_timer += dt;
+            } else {
+                move_target.stall_timer = 0.0;
+                move_target.last_pos = current_pos;
+            }
+        }
+
+        let is_final_waypoint = move_target.current_waypoint_idx >= (move_target.waypoints.len() - 1);
+
         // If close to intermediate waypoint, advance to next waypoint
-        if dist <= 14.0 && move_target.current_waypoint_idx < (move_target.waypoints.len() - 1) {
+        if !is_final_waypoint && dist <= 16.0 {
             move_target.advance_waypoint();
+            move_target.stall_timer = 0.0;
+            move_target.last_pos = current_pos;
             continue;
         }
 
-        // Final destination reached
-        if dist <= 8.0 && move_target.current_waypoint_idx >= (move_target.waypoints.len() - 1) {
-            commands.entity(entity).remove::<MoveTarget>();
-            continue;
+        // Final destination reached or cleanly settled against obstacle
+        if is_final_waypoint {
+            if dist <= 8.0 || (dist <= 26.0 && move_target.stall_timer > 0.25) || move_target.stall_timer > 0.75 {
+                commands.entity(entity).remove::<MoveTarget>();
+                continue;
+            }
         }
 
         let direction = delta.normalize_or_zero();
@@ -217,21 +249,19 @@ struct UnitPosSnapshot {
     entity: Entity,
     pos: Vec2,
     radius: f32,
+    faction: Faction,
     is_active_worker: bool,
+    is_moving: bool,
 }
 
-/// Soft elastic separation between overlapping units and obstacle collision against buildings/minerals
+/// Hard circle-circle separation between units and hard obstacle collision against buildings/minerals
 fn unit_separation_and_collision_system(
-    time: Res<Time>,
-    mut unit_query: Query<(Entity, &mut Transform, &Radius, &Faction, Option<&Worker>), With<Unit>>,
+    mut unit_query: Query<(Entity, &mut Transform, &Radius, &Faction, Option<&Worker>, Option<&MoveTarget>), With<Unit>>,
     building_query: Query<(&Transform, &Radius, &Faction, Option<&BaseHQ>), (With<Building>, Without<Unit>)>,
     resource_query: Query<(&Transform, &Radius), (With<ResourceNode>, Without<Unit>)>,
 ) {
-    let dt = time.delta_secs().min(0.05);
-
-    // 1. Snapshot all unit positions
     let mut snapshots = Vec::with_capacity(unit_query.iter().len());
-    for (entity, transform, radius, _faction, worker_opt) in &unit_query {
+    for (entity, transform, radius, faction, worker_opt, move_opt) in &unit_query {
         let is_active_worker = worker_opt
             .map(|w| w.state != WorkerState::Idle)
             .unwrap_or(false);
@@ -240,94 +270,106 @@ fn unit_separation_and_collision_system(
             entity,
             pos: transform.translation.truncate(),
             radius: radius.0,
+            faction: *faction,
             is_active_worker,
+            is_moving: move_opt.is_some(),
         });
     }
 
-    // 2. Compute separation forces between overlapping units (skipping active mining/harvesting workers)
-    let mut push_deltas: Vec<Vec2> = vec![Vec2::ZERO; snapshots.len()];
+    // 1. Hard Unit-to-Unit Circle Collision (2 solver iterations for physical solidity)
+    for _iter in 0..2 {
+        let mut deltas = vec![Vec2::ZERO; snapshots.len()];
+        for i in 0..snapshots.len() {
+            for j in (i + 1)..snapshots.len() {
+                let u1_active = snapshots[i].is_active_worker;
+                let u2_active = snapshots[j].is_active_worker;
 
-    for i in 0..snapshots.len() {
-        for j in (i + 1)..snapshots.len() {
-            let u1 = &snapshots[i];
-            let u2 = &snapshots[j];
-
-            if u1.is_active_worker && u2.is_active_worker {
-                continue;
-            }
-
-            let delta = u1.pos - u2.pos;
-            let dist = delta.length();
-            let min_dist = u1.radius + u2.radius;
-
-            if dist < min_dist {
-                let overlap = min_dist - dist;
-                let dir = if dist > 0.001 {
-                    delta / dist
-                } else {
-                    let angle = ((u1.entity.index() + u2.entity.index()) as f32) * 1.5;
-                    Vec2::new(angle.cos(), angle.sin())
-                };
-
-                let push = dir * overlap * 2.0 * dt;
-                if !u1.is_active_worker {
-                    push_deltas[i] += push;
+                // Active harvesting workers pass through each other to avoid mineral patch lockup
+                if u1_active && u2_active {
+                    continue;
                 }
-                if !u2.is_active_worker {
-                    push_deltas[j] -= push;
+
+                let p1 = snapshots[i].pos;
+                let p2 = snapshots[j].pos;
+                let delta = p1 - p2;
+                let dist = delta.length();
+                let min_dist = snapshots[i].radius + snapshots[j].radius;
+
+                if dist < min_dist {
+                    let overlap = min_dist - dist;
+                    let dir = if dist > 0.001 {
+                        delta / dist
+                    } else {
+                        let angle = ((snapshots[i].entity.index() + snapshots[j].entity.index()) as f32) * 1.5;
+                        Vec2::new(angle.cos(), angle.sin())
+                    };
+
+                    let (w1, w2) = match (snapshots[i].is_moving, snapshots[j].is_moving) {
+                        (true, false) => (0.75, 0.25),
+                        (false, true) => (0.25, 0.75),
+                        _ => (0.5, 0.5),
+                    };
+
+                    if !u1_active {
+                        deltas[i] += dir * (overlap * w1);
+                    }
+                    if !u2_active {
+                        deltas[j] -= dir * (overlap * w2);
+                    }
                 }
             }
+        }
+        for k in 0..snapshots.len() {
+            snapshots[k].pos += deltas[k];
         }
     }
 
-    // 3. Apply unit pushes and resolve collision with buildings & mineral nodes
-    for (i, (_entity, mut transform, radius, faction, worker_opt)) in unit_query.iter_mut().enumerate() {
-        let is_active_worker = worker_opt
-            .map(|w| w.state != WorkerState::Idle)
-            .unwrap_or(false);
-
-        if i < push_deltas.len() {
-            transform.translation.x += push_deltas[i].x;
-            transform.translation.y += push_deltas[i].y;
-        }
-
-        let mut unit_pos = transform.translation.truncate();
-        let u_radius = radius.0;
-
+    // 2. Hard Obstacle Collision (Buildings & Resource Nodes)
+    for snap in &mut snapshots {
         // Push away from buildings (ignoring friendly BaseHQ for active returning workers)
         for (b_trans, b_radius, b_faction, base_hq_opt) in &building_query {
-            if is_active_worker && base_hq_opt.is_some() && b_faction == faction {
+            if snap.is_active_worker && base_hq_opt.is_some() && b_faction == &snap.faction {
                 continue;
             }
 
             let b_pos = b_trans.translation.truncate();
-            let d = unit_pos.distance(b_pos);
-            let min_b_dist = u_radius + b_radius.0 + 2.0;
+            let d = snap.pos.distance(b_pos);
+            let min_b_dist = snap.radius + b_radius.0 + 2.0;
 
-            if d < min_b_dist && d > 0.001 {
-                let push_dir = (unit_pos - b_pos) / d;
-                let push_amount = min_b_dist - d;
-                unit_pos += push_dir * push_amount;
-                transform.translation.x = unit_pos.x;
-                transform.translation.y = unit_pos.y;
+            if d < min_b_dist {
+                let push_dir = if d > 0.001 {
+                    (snap.pos - b_pos) / d
+                } else {
+                    Vec2::new(0.0, 1.0)
+                };
+                snap.pos = b_pos + push_dir * min_b_dist;
             }
         }
 
         // Push away from mineral nodes (skipping active workers assigned to harvest)
-        if !is_active_worker {
+        if !snap.is_active_worker {
             for (r_trans, r_radius) in &resource_query {
                 let r_pos = r_trans.translation.truncate();
-                let d = unit_pos.distance(r_pos);
-                let min_r_dist = u_radius + r_radius.0 + 2.0;
+                let d = snap.pos.distance(r_pos);
+                let min_r_dist = snap.radius + r_radius.0 + 2.0;
 
-                if d < min_r_dist && d > 0.001 {
-                    let push_dir = (unit_pos - r_pos) / d;
-                    let push_amount = min_r_dist - d;
-                    unit_pos += push_dir * push_amount;
-                    transform.translation.x = unit_pos.x;
-                    transform.translation.y = unit_pos.y;
+                if d < min_r_dist {
+                    let push_dir = if d > 0.001 {
+                        (snap.pos - r_pos) / d
+                    } else {
+                        Vec2::new(0.0, 1.0)
+                    };
+                    snap.pos = r_pos + push_dir * min_r_dist;
                 }
             }
+        }
+    }
+
+    // 3. Write back resolved positions to entities
+    for (i, (_entity, mut transform, ..)) in unit_query.iter_mut().enumerate() {
+        if i < snapshots.len() {
+            transform.translation.x = snapshots[i].pos.x;
+            transform.translation.y = snapshots[i].pos.y;
         }
     }
 }

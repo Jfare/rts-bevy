@@ -113,6 +113,10 @@ pub struct MoveTarget {
     pub is_attack_move: bool,
     pub waypoints: Vec<Vec2>,
     pub current_waypoint_idx: usize,
+    #[serde(default)]
+    pub stall_timer: f32,
+    #[serde(default)]
+    pub last_pos: Vec2,
 }
 
 impl MoveTarget {
@@ -122,6 +126,8 @@ impl MoveTarget {
             is_attack_move,
             waypoints: vec![destination],
             current_waypoint_idx: 0,
+            stall_timer: 0.0,
+            last_pos: Vec2::splat(f32::NAN),
         }
     }
 
@@ -136,6 +142,8 @@ impl MoveTarget {
             is_attack_move,
             waypoints: wps,
             current_waypoint_idx: 0,
+            stall_timer: 0.0,
+            last_pos: Vec2::splat(f32::NAN),
         }
     }
 

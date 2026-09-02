@@ -30,6 +30,7 @@ impl Plugin for ProductionPlugin {
 /// Ticks construction progress for uncompleted buildings and activates them upon completion
 fn building_construction_system(
     time: Res<Time>,
+    outcome_opt: Option<Res<MatchOutcome>>,
     mut economy: ResMut<PlayerEconomy>,
     mut building_query: Query<(
         Entity,
@@ -39,6 +40,10 @@ fn building_construction_system(
         Option<&SupplyDepot>,
     )>,
 ) {
+    if outcome_opt.as_deref() == Some(&MatchOutcome::Victory) || outcome_opt.as_deref() == Some(&MatchOutcome::Defeat) {
+        return;
+    }
+
     let dt = time.delta_secs();
 
     for (_entity, mut building, mut health, faction, supply_depot_opt) in &mut building_query {
@@ -65,6 +70,7 @@ fn building_construction_system(
 fn production_queue_system(
     mut commands: Commands,
     time: Res<Time>,
+    outcome_opt: Option<Res<MatchOutcome>>,
     net_client: Option<Res<NetClient>>,
     nav_grid: Res<NavGrid>,
     mut prod_query: Query<(
@@ -76,6 +82,10 @@ fn production_queue_system(
         &Radius,
     )>,
 ) {
+    if outcome_opt.as_deref() == Some(&MatchOutcome::Victory) || outcome_opt.as_deref() == Some(&MatchOutcome::Defeat) {
+        return;
+    }
+
     if let Some(ref net) = net_client {
         if net.status == NetStatus::InGame {
             // In online matches, the server simulates production queues and authoritatively spawns units
@@ -185,6 +195,7 @@ fn production_queue_system(
 fn handle_production_hotkeys(
     keyboard: Res<ButtonInput<KeyCode>>,
     net_client: Res<NetClient>,
+    outcome_opt: Option<Res<MatchOutcome>>,
     mut economy: ResMut<PlayerEconomy>,
     mut stats: ResMut<MatchStats>,
     mut sound_events: EventWriter<SoundEffect>,
@@ -198,6 +209,10 @@ fn handle_production_hotkeys(
         Option<&Barracks>,
     )>,
 ) {
+    if outcome_opt.as_deref() == Some(&MatchOutcome::Victory) || outcome_opt.as_deref() == Some(&MatchOutcome::Defeat) {
+        return;
+    }
+
     let my_faction = net_client.my_faction;
 
     // Key 'V' for SCV Worker at Base HQ
@@ -350,10 +365,15 @@ fn handle_production_hotkeys(
 fn handle_rally_point_order(
     mouse_button: Res<ButtonInput<MouseButton>>,
     net_client: Res<NetClient>,
+    outcome_opt: Option<Res<MatchOutcome>>,
     window_query: Query<&Window, With<PrimaryWindow>>,
     camera_query: Query<(&Camera, &Transform, Option<&OrthographicProjection>)>,
     mut prod_query: Query<(&mut ProductionBuilding, &Faction, &Selectable, Option<&NetEntity>), Without<Unit>>,
 ) {
+    if outcome_opt.as_deref() == Some(&MatchOutcome::Victory) || outcome_opt.as_deref() == Some(&MatchOutcome::Defeat) {
+        return;
+    }
+
     if !mouse_button.just_pressed(MouseButton::Right) {
         return;
     }

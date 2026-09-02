@@ -36,19 +36,19 @@ impl Plugin for ServerSimulationPlugin {
                 (
                     handle_incoming_network_events,
                     update_server_nav_grid_system,
-                    server_movement_system,
-                    server_abilities_and_stances_system,
-                    server_boids_separation_system,
-                    server_mining_system,
-                    server_production_system,
-                    server_solo_wave_spawner_system,
                     server_combat_system,
                     server_turret_combat_system,
                     server_siege_tank_combat_system,
+                    server_movement_system,
+                    server_abilities_and_stances_system,
+                    server_unit_separation_and_collision_system,
+                    server_mining_system,
+                    server_production_system,
+                    server_solo_wave_spawner_system,
                     server_match_outcome_system,
                     server_tick_snapshot_system,
                     server_lobby_stats_broadcast_system,
-                ),
+                ).chain(),
             );
     }
 }
@@ -493,7 +493,7 @@ fn handle_incoming_network_events(
 
                         let peers = matchmaker.get_room_peers(player_room);
                         let mut valid_net_ids = Vec::new();
-                        for (e, _, net_entity, faction, unit_room, _, soldier_opt, worker_opt, _, _, _, stance_opt) in
+                        for (e, _, net_entity, faction, unit_room, _, soldier_opt, worker_opt, _, mut tank_opt, _, stance_opt) in
                             &mut unit_query
                         {
                             if unit_net_ids.contains(&net_entity.net_id)
@@ -504,6 +504,9 @@ fn handle_incoming_network_events(
                                 if let Some(mut soldier) = soldier_opt {
                                     soldier.target = None;
                                     soldier.state = SoldierState::Idle;
+                                }
+                                if let Some(ref mut tank) = tank_opt {
+                                    tank.target = None;
                                 }
                                 if let Some(mut worker) = worker_opt {
                                     worker.state = WorkerState::Idle;
@@ -538,7 +541,7 @@ fn handle_incoming_network_events(
 
                         let peers = matchmaker.get_room_peers(player_room);
                         let mut valid_net_ids = Vec::new();
-                        for (e, _, net_entity, faction, unit_room, _, soldier_opt, _, _, _, _, stance_opt) in
+                        for (e, _, net_entity, faction, unit_room, _, soldier_opt, _, _, mut tank_opt, _, stance_opt) in
                             &mut unit_query
                         {
                             if unit_net_ids.contains(&net_entity.net_id)
@@ -549,6 +552,9 @@ fn handle_incoming_network_events(
                                 if let Some(mut soldier) = soldier_opt {
                                     soldier.target = None;
                                     soldier.state = SoldierState::HoldingPosition;
+                                }
+                                if let Some(ref mut tank) = tank_opt {
+                                    tank.target = None;
                                 }
                                 if let Some(mut stance) = stance_opt {
                                     *stance = TacticalStance::HoldPosition;
@@ -1409,33 +1415,50 @@ fn server_abilities_and_stances_system(
 fn server_movement_system(
     mut commands: Commands,
     time: Res<Time>,
+    matchmaker: Res<Matchmaker>,
     mut query: Query<(
         Entity,
         &mut Transform,
         &MoveSpeed,
         &mut Velocity,
         &mut MoveTarget,
+        &RoomId,
         Option<&Stimpack>,
         Option<&SiegeTank>,
         Option<&Soldier>,
     )>,
 ) {
     let dt = time.delta_secs();
-    for (entity, mut transform, speed, mut velocity, mut move_target, stim_opt, tank_opt, soldier_opt) in &mut query {
-        if let Some(soldier) = soldier_opt {
-            if soldier.target.is_some()
-                || soldier.state == SoldierState::Attacking
-                || soldier.state == SoldierState::ChasingTarget
-            {
+    for (entity, mut transform, speed, mut velocity, mut move_target, room_id, stim_opt, tank_opt, soldier_opt) in &mut query {
+        let is_room_active = matchmaker.rooms.get(&room_id.0).map(|r| r.is_active).unwrap_or(true);
+        if !is_room_active {
+            velocity.0 = Vec2::ZERO;
+            continue;
+        }
+
+        if let Some(tank) = tank_opt {
+            if tank.mode != TankMode::Tank {
                 velocity.0 = Vec2::ZERO;
                 continue;
             }
         }
 
-        if let Some(tank) = tank_opt {
-            if tank.mode != TankMode::Tank || tank.target.is_some() {
-                velocity.0 = Vec2::ZERO;
-                continue;
+        // If an attack-moving unit is currently fighting/engaging an enemy, pause marching
+        if move_target.is_attack_move {
+            if let Some(soldier) = soldier_opt {
+                if soldier.target.is_some()
+                    || soldier.state == SoldierState::Attacking
+                    || soldier.state == SoldierState::ChasingTarget
+                {
+                    velocity.0 = Vec2::ZERO;
+                    continue;
+                }
+            }
+            if let Some(tank) = tank_opt {
+                if tank.target.is_some() {
+                    velocity.0 = Vec2::ZERO;
+                    continue;
+                }
             }
         }
 
@@ -1444,54 +1467,186 @@ fn server_movement_system(
         let diff = goal_pos - current_pos;
         let dist = diff.length();
 
-        if dist <= 14.0 && move_target.current_waypoint_idx < (move_target.waypoints.len() - 1) {
+        // Track stall / blockage against obstacles or friendly units
+        if move_target.last_pos.x.is_nan() {
+            move_target.last_pos = current_pos;
+            move_target.stall_timer = 0.0;
+        } else {
+            let moved_dist = current_pos.distance(move_target.last_pos);
+            if moved_dist < (speed.0 * 0.15 * dt).max(0.2) {
+                move_target.stall_timer += dt;
+            } else {
+                move_target.stall_timer = 0.0;
+                move_target.last_pos = current_pos;
+            }
+        }
+
+        let is_final_waypoint = move_target.current_waypoint_idx >= (move_target.waypoints.len() - 1);
+
+        // Advance waypoint if close to intermediate
+        if !is_final_waypoint && dist <= 16.0 {
             move_target.advance_waypoint();
+            move_target.stall_timer = 0.0;
+            move_target.last_pos = current_pos;
             continue;
         }
 
-        if dist <= 10.0 && move_target.current_waypoint_idx >= (move_target.waypoints.len() - 1) {
-            velocity.0 = Vec2::ZERO;
-            commands.entity(entity).remove::<MoveTarget>();
-        } else {
-            let dir = diff.normalize_or_zero();
-            let speed_mult = stim_opt
-                .map(|s| if s.is_active { 1.5 } else { 1.0 })
-                .unwrap_or(1.0);
-            velocity.0 = dir * speed.0 * speed_mult;
-            transform.translation.x += velocity.0.x * dt;
-            transform.translation.y += velocity.0.y * dt;
-
-            let angle = dir.y.atan2(dir.x);
-            transform.rotation = Quat::from_rotation_z(angle);
+        // Final arrival or stall clean removal
+        if is_final_waypoint {
+            if dist <= 8.0 || (dist <= 26.0 && move_target.stall_timer > 0.25) || move_target.stall_timer > 0.75 {
+                velocity.0 = Vec2::ZERO;
+                commands.entity(entity).remove::<MoveTarget>();
+                continue;
+            }
         }
+
+        let dir = diff.normalize_or_zero();
+        let speed_mult = stim_opt
+            .map(|s| if s.is_active { 1.5 } else { 1.0 })
+            .unwrap_or(1.0);
+        velocity.0 = dir * speed.0 * speed_mult;
+        transform.translation.x += velocity.0.x * dt;
+        transform.translation.y += velocity.0.y * dt;
+
+        let angle = dir.y.atan2(dir.x);
+        transform.rotation = Quat::from_rotation_z(angle);
     }
 }
 
-/// Unit-to-unit soft separation
-fn server_boids_separation_system(
-    time: Res<Time>,
-    mut query: Query<(&mut Transform, &Radius, &RoomId), With<Unit>>,
+struct ServerUnitPosSnapshot {
+    entity: Entity,
+    pos: Vec2,
+    radius: f32,
+    faction: Faction,
+    room_id: u32,
+    is_active_worker: bool,
+    is_moving: bool,
+}
+
+/// Dedicated server hard circle-circle unit collision and obstacle resolution
+fn server_unit_separation_and_collision_system(
+    mut unit_query: Query<(Entity, &mut Transform, &Radius, &Faction, &RoomId, Option<&Worker>, Option<&MoveTarget>), With<Unit>>,
+    building_query: Query<(&Transform, &Radius, &Faction, &RoomId, Option<&BaseHQ>), (With<Building>, Without<Unit>)>,
+    resource_query: Query<(&Transform, &Radius, &RoomId), (With<ResourceNode>, Without<Unit>)>,
 ) {
-    let dt = time.delta_secs();
-    let mut combinations = query.iter_combinations_mut();
-    while let Some([(mut t1, r1, room1), (mut t2, r2, room2)]) = combinations.fetch_next() {
-        if room1.0 != room2.0 {
-            continue;
+    let mut snapshots = Vec::with_capacity(unit_query.iter().len());
+    for (entity, transform, radius, faction, room_id, worker_opt, move_opt) in &unit_query {
+        let is_active_worker = worker_opt
+            .map(|w| w.state != WorkerState::Idle)
+            .unwrap_or(false);
+
+        snapshots.push(ServerUnitPosSnapshot {
+            entity,
+            pos: transform.translation.truncate(),
+            radius: radius.0,
+            faction: *faction,
+            room_id: room_id.0,
+            is_active_worker,
+            is_moving: move_opt.is_some(),
+        });
+    }
+
+    // 1. Hard Unit-to-Unit Circle Collision per Room (2 solver iterations)
+    for _iter in 0..2 {
+        let mut deltas = vec![Vec2::ZERO; snapshots.len()];
+        for i in 0..snapshots.len() {
+            for j in (i + 1)..snapshots.len() {
+                if snapshots[i].room_id != snapshots[j].room_id {
+                    continue;
+                }
+
+                let u1_active = snapshots[i].is_active_worker;
+                let u2_active = snapshots[j].is_active_worker;
+
+                if u1_active && u2_active {
+                    continue;
+                }
+
+                let p1 = snapshots[i].pos;
+                let p2 = snapshots[j].pos;
+                let delta = p1 - p2;
+                let dist = delta.length();
+                let min_dist = snapshots[i].radius + snapshots[j].radius;
+
+                if dist < min_dist {
+                    let overlap = min_dist - dist;
+                    let dir = if dist > 0.001 {
+                        delta / dist
+                    } else {
+                        let angle = ((snapshots[i].entity.index() + snapshots[j].entity.index()) as f32) * 1.5;
+                        Vec2::new(angle.cos(), angle.sin())
+                    };
+
+                    let (w1, w2) = match (snapshots[i].is_moving, snapshots[j].is_moving) {
+                        (true, false) => (0.75, 0.25),
+                        (false, true) => (0.25, 0.75),
+                        _ => (0.5, 0.5),
+                    };
+
+                    if !u1_active {
+                        deltas[i] += dir * (overlap * w1);
+                    }
+                    if !u2_active {
+                        deltas[j] -= dir * (overlap * w2);
+                    }
+                }
+            }
+        }
+        for k in 0..snapshots.len() {
+            snapshots[k].pos += deltas[k];
+        }
+    }
+
+    // 2. Hard Obstacle Collision (Buildings & Mineral Nodes per Room)
+    for snap in &mut snapshots {
+        for (b_trans, b_radius, b_faction, b_room, base_hq_opt) in &building_query {
+            if b_room.0 != snap.room_id {
+                continue;
+            }
+            if snap.is_active_worker && base_hq_opt.is_some() && b_faction == &snap.faction {
+                continue;
+            }
+
+            let b_pos = b_trans.translation.truncate();
+            let d = snap.pos.distance(b_pos);
+            let min_b_dist = snap.radius + b_radius.0 + 2.0;
+
+            if d < min_b_dist {
+                let push_dir = if d > 0.001 {
+                    (snap.pos - b_pos) / d
+                } else {
+                    Vec2::new(0.0, 1.0)
+                };
+                snap.pos = b_pos + push_dir * min_b_dist;
+            }
         }
 
-        let p1 = t1.translation.truncate();
-        let p2 = t2.translation.truncate();
-        let diff = p1 - p2;
-        let dist = diff.length();
-        let min_dist = r1.0 + r2.0;
+        if !snap.is_active_worker {
+            for (r_trans, r_radius, r_room) in &resource_query {
+                if r_room.0 != snap.room_id {
+                    continue;
+                }
+                let r_pos = r_trans.translation.truncate();
+                let d = snap.pos.distance(r_pos);
+                let min_r_dist = snap.radius + r_radius.0 + 2.0;
 
-        if dist < min_dist && dist > 0.001 {
-            let overlap = min_dist - dist;
-            let push = (diff / dist) * overlap * 6.0 * dt;
-            t1.translation.x += push.x * 0.5;
-            t1.translation.y += push.y * 0.5;
-            t2.translation.x -= push.x * 0.5;
-            t2.translation.y -= push.y * 0.5;
+                if d < min_r_dist {
+                    let push_dir = if d > 0.001 {
+                        (snap.pos - r_pos) / d
+                    } else {
+                        Vec2::new(0.0, 1.0)
+                    };
+                    snap.pos = r_pos + push_dir * min_r_dist;
+                }
+            }
+        }
+    }
+
+    // 3. Write back resolved positions
+    for (i, (_entity, mut transform, ..)) in unit_query.iter_mut().enumerate() {
+        if i < snapshots.len() {
+            transform.translation.x = snapshots[i].pos.x;
+            transform.translation.y = snapshots[i].pos.y;
         }
     }
 }
@@ -1500,6 +1655,7 @@ fn server_boids_separation_system(
 fn server_mining_system(
     mut commands: Commands,
     time: Res<Time>,
+    matchmaker: Res<Matchmaker>,
     mut economy: ResMut<PlayerEconomy>,
     mut workers: Query<(Entity, &mut Transform, &MoveSpeed, &Faction, &RoomId, &mut Worker, Option<&MoveTarget>)>,
     mut nodes: Query<(&Transform, &mut ResourceNode, &NetEntity, &RoomId), Without<Worker>>,
@@ -1507,88 +1663,106 @@ fn server_mining_system(
 ) {
     let dt = time.delta_secs();
     for (worker_e, mut transform, speed, faction, worker_room, mut worker, move_target_opt) in &mut workers {
+        let is_room_active = matchmaker.rooms.get(&worker_room.0).map(|r| r.is_active).unwrap_or(true);
+        if !is_room_active {
+            continue;
+        }
+
         if worker.state != WorkerState::Idle && move_target_opt.is_some() {
             commands.entity(worker_e).remove::<MoveTarget>();
         }
 
         match worker.state {
-
             WorkerState::Idle => {}
             WorkerState::MovingToResource => {
-                if let Some(target_node_e) = worker.target_node {
-                    if let Ok((node_tf, _, _, node_room)) = nodes.get(target_node_e) {
-                        if node_room.0 == worker_room.0 {
-                            let current_pos = transform.translation.truncate();
-                            let target_pos = node_tf.translation.truncate();
-                            let diff = target_pos - current_pos;
-                            let dist = diff.length();
+                let Some(node_e) = worker.target_node else {
+                    worker.state = WorkerState::Idle;
+                    continue;
+                };
 
-                            if dist <= worker.interact_distance {
-                                worker.state = WorkerState::Mining;
-                                worker.harvest_timer = 0.0;
-                            } else {
-                                let dir = diff / dist;
-                                transform.translation.x += dir.x * speed.0 * dt;
-                                transform.translation.y += dir.y * speed.0 * dt;
-                                transform.rotation = Quat::from_rotation_z(dir.y.atan2(dir.x));
-                            }
-                        } else {
-                            worker.state = WorkerState::Idle;
-                        }
-                    } else {
+                if let Ok((node_tf, node, _, node_room)) = nodes.get(node_e) {
+                    if node_room.0 != worker_room.0 || node.remaining_minerals == 0 {
+                        worker.target_node = None;
                         worker.state = WorkerState::Idle;
+                        continue;
                     }
+
+                    let w_pos = transform.translation.truncate();
+                    let n_pos = node_tf.translation.truncate();
+                    let dist = w_pos.distance(n_pos);
+
+                    if dist <= worker.interact_distance {
+                        worker.state = WorkerState::Mining;
+                        worker.harvest_timer = 0.0;
+                    } else {
+                        let dir = (n_pos - w_pos).normalize_or_zero();
+                        transform.translation.x += dir.x * speed.0 * dt;
+                        transform.translation.y += dir.y * speed.0 * dt;
+                        let angle = dir.y.atan2(dir.x);
+                        transform.rotation = Quat::from_rotation_z(angle);
+                    }
+                } else {
+                    worker.target_node = None;
+                    worker.state = WorkerState::Idle;
                 }
             }
             WorkerState::Mining => {
-                worker.harvest_timer += dt;
-                if worker.harvest_timer >= worker.harvest_duration {
-                    worker.harvest_timer = 0.0;
-                    if let Some(target_node_e) = worker.target_node {
-                        if let Ok((_, mut node, _, node_room)) = nodes.get_mut(target_node_e) {
-                            if node_room.0 == worker_room.0 {
-                                let harvested = node.harvest(worker.harvest_capacity);
-                                worker.carried_minerals = harvested;
-                                worker.state = WorkerState::MovingToBase;
-                            } else {
-                                worker.state = WorkerState::Idle;
-                            }
-                        } else {
-                            worker.state = WorkerState::Idle;
-                        }
+                let Some(node_e) = worker.target_node else {
+                    worker.state = WorkerState::Idle;
+                    continue;
+                };
+
+                if let Ok((_, mut node, _, node_room)) = nodes.get_mut(node_e) {
+                    if node_room.0 != worker_room.0 || node.remaining_minerals == 0 {
+                        worker.target_node = None;
+                        worker.state = WorkerState::Idle;
+                        continue;
                     }
+
+                    worker.harvest_timer += dt;
+                    if worker.harvest_timer >= worker.harvest_duration {
+                        let amount = node.remaining_minerals.min(worker.harvest_capacity);
+                        node.remaining_minerals -= amount;
+                        worker.carried_minerals = amount;
+                        worker.state = WorkerState::MovingToBase;
+                        worker.harvest_timer = 0.0;
+                    }
+                } else {
+                    worker.target_node = None;
+                    worker.state = WorkerState::Idle;
                 }
             }
             WorkerState::MovingToBase => {
-                // Find closest friendly Base HQ within the same Room
-                let current_pos = transform.translation.truncate();
-                let mut closest_base_pos = None;
+                let w_pos = transform.translation.truncate();
+                let mut best_base = None;
                 let mut min_dist = f32::MAX;
 
                 for (base_tf, base_faction, base_room) in &bases {
-                    if base_faction == faction && base_room.0 == worker_room.0 {
-                        let pos = base_tf.translation.truncate();
-                        let d = (pos - current_pos).length();
-                        if d < min_dist {
-                            min_dist = d;
-                            closest_base_pos = Some(pos);
+                    if base_room.0 == worker_room.0 && base_faction == faction {
+                        let b_pos = base_tf.translation.truncate();
+                        let dist = w_pos.distance(b_pos);
+                        if dist < min_dist {
+                            min_dist = dist;
+                            best_base = Some(b_pos);
                         }
                     }
                 }
 
-                if let Some(base_pos) = closest_base_pos {
-                    let diff = base_pos - current_pos;
-                    let dist = diff.length();
-
-                    if dist <= worker.base_interact_distance {
+                if let Some(base_pos) = best_base {
+                    if min_dist <= worker.base_interact_distance {
                         economy.add_minerals(*faction, worker.carried_minerals);
                         worker.carried_minerals = 0;
-                        worker.state = WorkerState::MovingToResource;
+                        if worker.target_node.is_some() {
+                            worker.state = WorkerState::MovingToResource;
+                        } else {
+                            worker.state = WorkerState::Idle;
+                        }
                     } else {
-                        let dir = diff / dist;
+                        let dir = (base_pos - w_pos).normalize_or_zero();
                         transform.translation.x += dir.x * speed.0 * dt;
                         transform.translation.y += dir.y * speed.0 * dt;
-                        transform.rotation = Quat::from_rotation_z(dir.y.atan2(dir.x));
+                        let angle = dir.y.atan2(dir.x);
+                        transform.rotation = Quat::from_rotation_z(angle);
                     }
                 } else {
                     worker.state = WorkerState::Idle;
@@ -1621,6 +1795,10 @@ fn server_production_system(
     for (_entity, net_entity, faction, room_id, transform, mut building, prod_opt, supply_depot_opt) in
         &mut buildings
     {
+        let is_room_active = matchmaker.rooms.get(&room_id.0).map(|r| r.is_active).unwrap_or(true);
+        if !is_room_active {
+            continue;
+        }
         // 1. Progress under-construction buildings
         if !building.is_constructed {
             building.build_timer += dt;
@@ -1921,9 +2099,23 @@ fn server_combat_system(
     for (s_entity, attacker_net, attacker_faction, attacker_room, mut attacker_tf, move_speed, mut soldier, stim_opt, move_target_opt) in
         &mut queries.p1()
     {
+        let is_room_active = matchmaker.rooms.get(&attacker_room.0).map(|r| r.is_active).unwrap_or(true);
+        if !is_room_active {
+            continue;
+        }
+
         soldier.attack_timer += dt;
         soldier.scan_timer += dt;
         let attacker_pos = attacker_tf.translation.truncate();
+
+        let is_attack_move = move_target_opt.as_ref().map(|m| m.is_attack_move).unwrap_or(false);
+
+        // If unit has an active pure ground move order, do NOT auto-acquire enemies or stop to attack:
+        if move_target_opt.is_some() && !is_attack_move {
+            soldier.target = None;
+            soldier.state = SoldierState::MovingToGround;
+            continue;
+        }
 
         let target_valid = soldier.target.and_then(|t_ent| {
             targets
@@ -1931,40 +2123,7 @@ fn server_combat_system(
                 .find(|t| t.entity == t_ent && !t.is_dead && t.room_id == attacker_room.0 && attacker_faction.is_hostile_to(&t.faction))
         });
 
-        let active_target = match target_valid {
-            Some(t) => Some(t),
-            None => {
-                soldier.target = None;
-                if soldier.state == SoldierState::Attacking || soldier.state == SoldierState::ChasingTarget {
-                    soldier.state = if move_target_opt.as_ref().map(|m| m.is_attack_move).unwrap_or(false) {
-                        SoldierState::AttackMoving
-                    } else {
-                        SoldierState::Idle
-                    };
-                }
-
-                let mut closest = None;
-                let mut min_d = soldier.aggro_radius;
-                for t in &targets {
-                    if t.entity != s_entity && t.room_id == attacker_room.0 && attacker_faction.is_hostile_to(&t.faction) && !t.is_dead {
-                        let d = t.pos.distance(attacker_pos);
-                        let effective_range = soldier.aggro_radius + t.radius;
-                        if d <= effective_range && d < min_d {
-                            min_d = d;
-                            closest = Some(t);
-                        }
-                    }
-                }
-                if let Some(t) = closest {
-                    soldier.target = Some(t.entity);
-                    soldier.state = SoldierState::ChasingTarget;
-                    commands.entity(s_entity).remove::<MoveTarget>();
-                }
-                closest
-            }
-        };
-
-        if let Some(target_snap) = active_target {
+        if let Some(target_snap) = target_valid {
             let target_pos = target_snap.pos;
             let dist = target_pos.distance(attacker_pos);
             let effective_range = soldier.attack_range + target_snap.radius;
@@ -1976,9 +2135,6 @@ fn server_combat_system(
             }
 
             if dist <= effective_range {
-                if move_target_opt.is_some() {
-                    commands.entity(s_entity).remove::<MoveTarget>();
-                }
                 soldier.state = SoldierState::Attacking;
 
                 if soldier.attack_timer >= soldier.attack_cooldown {
@@ -2017,6 +2173,83 @@ fn server_combat_system(
                 let step = dir * (move_speed.0 * speed_mult * dt).min(travel_needed);
                 attacker_tf.translation.x += step.x;
                 attacker_tf.translation.y += step.y;
+            }
+        } else {
+            // Target dead or none: scan for enemies in room
+            soldier.target = None;
+
+            let max_scan_range = if is_attack_move {
+                soldier.aggro_radius
+            } else {
+                soldier.attack_range
+            };
+
+            let mut closest = None;
+            let mut min_d = max_scan_range;
+            for t in &targets {
+                if t.entity != s_entity && t.room_id == attacker_room.0 && attacker_faction.is_hostile_to(&t.faction) && !t.is_dead {
+                    let d = t.pos.distance(attacker_pos);
+                    let effective_range = max_scan_range + t.radius;
+                    if d <= effective_range && d < min_d {
+                        min_d = d;
+                        closest = Some(t);
+                    }
+                }
+            }
+            if let Some(t) = closest {
+                soldier.target = Some(t.entity);
+                let dist = attacker_pos.distance(t.pos);
+                let effective_range = soldier.attack_range + t.radius;
+                let dir = (t.pos - attacker_pos).normalize_or_zero();
+
+                if dir.length_squared() > 0.001 {
+                    let angle = dir.y.atan2(dir.x);
+                    attacker_tf.rotation = Quat::from_rotation_z(angle);
+                }
+
+                if dist <= effective_range {
+                    soldier.state = SoldierState::Attacking;
+                    if soldier.attack_timer >= soldier.attack_cooldown {
+                        soldier.attack_timer = 0.0;
+                        damages_to_apply.push((
+                            t.entity,
+                            t.net_id,
+                            soldier.attack_damage,
+                            *attacker_faction,
+                            attacker_room.0,
+                            attacker_net.net_id,
+                            t.supply_cost,
+                        ));
+
+                        let peers = matchmaker.get_room_peers(attacker_room.0);
+                        if !peers.is_empty() {
+                            let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::BroadcastToPeers {
+                                peer_ids: peers,
+                                msg: ServerMessage::ProjectileFired {
+                                    attacker_net_id: attacker_net.net_id,
+                                    target_net_id: t.net_id,
+                                    origin: attacker_pos + dir * 18.0,
+                                    target_pos: t.pos,
+                                    damage: soldier.attack_damage,
+                                },
+                            });
+                        }
+                    }
+                } else if soldier.state != SoldierState::HoldingPosition {
+                    soldier.state = SoldierState::ChasingTarget;
+                    let speed_mult = stim_opt
+                        .map(|s| if s.is_active { 1.5 } else { 1.0 })
+                        .unwrap_or(1.0);
+                    let stop_dist = (effective_range * 0.90).max(10.0);
+                    let travel_needed = (dist - stop_dist).max(0.0);
+                    let step = dir * (move_speed.0 * speed_mult * dt).min(travel_needed);
+                    attacker_tf.translation.x += step.x;
+                    attacker_tf.translation.y += step.y;
+                }
+            } else if is_attack_move {
+                soldier.state = SoldierState::AttackMoving;
+            } else if soldier.state != SoldierState::HoldingPosition {
+                soldier.state = SoldierState::Idle;
             }
         }
     }
@@ -2063,33 +2296,14 @@ fn server_combat_system(
     }
 }
 
-/// Automated defensive gun turret combat on dedicated server
+/// Dedicated Server Defensive Gun Turret Combat System
 fn server_turret_combat_system(
-    mut commands: Commands,
     time: Res<Time>,
     net_channels: Res<ServerNetworkChannels>,
     matchmaker: Res<Matchmaker>,
-    mut economy: ResMut<PlayerEconomy>,
     mut queries: ParamSet<(
-        Query<(
-            Entity,
-            &NetEntity,
-            &Faction,
-            &RoomId,
-            &Transform,
-            &Radius,
-            &Health,
-            Option<&Unit>,
-        )>,
-        Query<(
-            Entity,
-            &NetEntity,
-            &Faction,
-            &RoomId,
-            &Transform,
-            &mut GunTurret,
-            &Building,
-        )>,
+        Query<(Entity, &NetEntity, &Faction, &RoomId, &Transform, &Radius, &Health)>,
+        Query<(Entity, &NetEntity, &Faction, &RoomId, &Transform, &Building, &mut GunTurret)>,
         Query<(Entity, &mut Health)>,
     )>,
 ) {
@@ -2098,7 +2312,7 @@ fn server_turret_combat_system(
     let targets: Vec<ServerTargetSnapshot> = queries
         .p0()
         .iter()
-        .map(|(e, net, fac, room, tf, rad, hp, unit_opt)| ServerTargetSnapshot {
+        .map(|(e, net, fac, room, tf, rad, hp)| ServerTargetSnapshot {
             entity: e,
             net_id: net.net_id,
             pos: tf.translation.truncate(),
@@ -2106,18 +2320,20 @@ fn server_turret_combat_system(
             faction: *fac,
             room_id: room.0,
             is_dead: hp.is_dead(),
-            supply_cost: unit_opt.map(|u| u.supply_cost).unwrap_or(0),
+            supply_cost: 0,
         })
         .collect();
 
     let mut damages_to_apply = Vec::new();
 
-    for (_t_entity, turret_net, turret_faction, turret_room, turret_tf, mut turret, building) in
+    for (_t_entity, turret_net, turret_faction, turret_room, turret_tf, building, mut turret) in
         &mut queries.p1()
     {
-        if !building.is_constructed {
+        let is_room_active = matchmaker.rooms.get(&turret_room.0).map(|r| r.is_active).unwrap_or(true);
+        if !is_room_active || !building.is_constructed {
             continue;
         }
+
         turret.attack_timer += dt;
         let turret_pos = turret_tf.translation.truncate();
 
@@ -2164,7 +2380,6 @@ fn server_turret_combat_system(
                     *turret_faction,
                     turret_room.0,
                     turret_net.net_id,
-                    target_snap.supply_cost,
                 ));
 
                 let peers = matchmaker.get_room_peers(turret_room.0);
@@ -2174,7 +2389,7 @@ fn server_turret_combat_system(
                         msg: ServerMessage::ProjectileFired {
                             attacker_net_id: turret_net.net_id,
                             target_net_id: target_snap.net_id,
-                            origin: turret_pos + dir * 28.0,
+                            origin: turret_pos + dir * 26.0,
                             target_pos,
                             damage: turret.attack_damage,
                         },
@@ -2185,7 +2400,7 @@ fn server_turret_combat_system(
     }
 
     let mut health_query = queries.p2();
-    for (target_e, target_net, dmg, attacker_fac, attacker_room_id, _attacker_net, supply_cost) in damages_to_apply {
+    for (target_e, target_net, dmg, attacker_fac, attacker_room_id, _attacker_net) in damages_to_apply {
         if let Ok((_, mut hp)) = health_query.get_mut(target_e) {
             hp.take_damage(dmg);
 
@@ -2201,15 +2416,6 @@ fn server_turret_combat_system(
                 });
 
                 if hp.is_dead() {
-                    if supply_cost > 0 {
-                        let victim_faction = if attacker_fac == Faction::Player1 {
-                            Faction::Player2
-                        } else {
-                            Faction::Player1
-                        };
-                        economy.unregister_supply(victim_faction, supply_cost);
-                    }
-
                     let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::BroadcastToPeers {
                         peer_ids: peers,
                         msg: ServerMessage::EntityDied {
@@ -2217,15 +2423,13 @@ fn server_turret_combat_system(
                             faction: attacker_fac,
                         },
                     });
-
-                    commands.entity(target_e).despawn_recursive();
                 }
             }
         }
     }
 }
 
-/// Heavy armored Siege Tank combat on dedicated server
+/// Dedicated Server Siege Tank Combat & Artillery System
 fn server_siege_tank_combat_system(
     mut commands: Commands,
     time: Res<Time>,
@@ -2278,40 +2482,29 @@ fn server_siege_tank_combat_system(
     for (tank_ent, tank_net, tank_faction, tank_room, mut tank_tf, move_speed, mut tank, move_target_opt) in
         &mut queries.p1()
     {
+        let is_room_active = matchmaker.rooms.get(&tank_room.0).map(|r| r.is_active).unwrap_or(true);
+        if !is_room_active {
+            continue;
+        }
+
         tank.attack_timer += dt;
         let tank_pos = tank_tf.translation.truncate();
         let is_siege = tank.mode == TankMode::Siege;
+        let is_attack_move = move_target_opt.as_ref().map(|m| m.is_attack_move).unwrap_or(false);
+
+        // If tank is in mobile mode and has a pure ground move order, ignore combat and move!
+        if move_target_opt.is_some() && !is_attack_move && tank.mode == TankMode::Tank {
+            tank.target = None;
+            continue;
+        }
 
         let target_valid = tank.target.and_then(|t_ent| {
             targets
                 .iter()
-                .find(|t| t.entity == t_ent && !t.is_dead && t.room_id == tank_room.0 && tank_faction.is_hostile_to(&t.faction) && t.pos.distance(tank_pos) <= (tank.attack_range + t.radius))
+                .find(|t| t.entity == t_ent && !t.is_dead && t.room_id == tank_room.0 && tank_faction.is_hostile_to(&t.faction))
         });
 
-        let active_target = match target_valid {
-            Some(t) => Some(t),
-            None => {
-                tank.target = None;
-                let mut closest = None;
-                let mut min_d = tank.attack_range;
-                for t in &targets {
-                    if t.entity != tank_ent && t.room_id == tank_room.0 && tank_faction.is_hostile_to(&t.faction) && !t.is_dead {
-                        let d = t.pos.distance(tank_pos);
-                        let effective_range = tank.attack_range + t.radius;
-                        if d <= effective_range && d < min_d {
-                            min_d = d;
-                            closest = Some(t);
-                        }
-                    }
-                }
-                if let Some(t) = closest {
-                    tank.target = Some(t.entity);
-                }
-                closest
-            }
-        };
-
-        if let Some(target_snap) = active_target {
+        if let Some(target_snap) = target_valid {
             let target_pos = target_snap.pos;
             let dist = target_pos.distance(tank_pos);
             let effective_range = tank.attack_range + target_snap.radius;
@@ -2319,10 +2512,6 @@ fn server_siege_tank_combat_system(
             tank.turret_angle = dir.y.atan2(dir.x);
 
             if dist <= effective_range {
-                if move_target_opt.is_some() {
-                    commands.entity(tank_ent).remove::<MoveTarget>();
-                }
-
                 if tank.attack_timer >= tank.attack_cooldown {
                     tank.attack_timer = 0.0;
                     damages_to_apply.push((
@@ -2357,6 +2546,62 @@ fn server_siege_tank_combat_system(
                 tank_tf.translation.y += step.y;
                 let angle = dir.y.atan2(dir.x);
                 tank_tf.rotation = Quat::from_rotation_z(angle);
+            } else if is_siege {
+                tank.target = None;
+            }
+        } else {
+            // Target dead or none: scan for enemies in room
+            tank.target = None;
+
+            let max_scan_range = if is_attack_move {
+                (tank.attack_range * 1.25).max(300.0)
+            } else {
+                tank.attack_range
+            };
+
+            let mut closest = None;
+            let mut min_d = max_scan_range;
+            for t in &targets {
+                if t.entity != tank_ent && t.room_id == tank_room.0 && tank_faction.is_hostile_to(&t.faction) && !t.is_dead {
+                    let d = t.pos.distance(tank_pos);
+                    let effective_range = max_scan_range + t.radius;
+                    if d <= effective_range && d < min_d {
+                        min_d = d;
+                        closest = Some(t);
+                    }
+                }
+            }
+            if let Some(t) = closest {
+                tank.target = Some(t.entity);
+                let dir = (t.pos - tank_pos).normalize_or_zero();
+                tank.turret_angle = dir.y.atan2(dir.x);
+
+                if tank.attack_timer >= tank.attack_cooldown {
+                    tank.attack_timer = 0.0;
+                    damages_to_apply.push((
+                        t.entity,
+                        t.net_id,
+                        tank.attack_damage,
+                        *tank_faction,
+                        tank_room.0,
+                        tank_net.net_id,
+                        t.supply_cost,
+                    ));
+
+                    let peers = matchmaker.get_room_peers(tank_room.0);
+                    if !peers.is_empty() {
+                        let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::BroadcastToPeers {
+                            peer_ids: peers,
+                            msg: ServerMessage::ProjectileFired {
+                                attacker_net_id: tank_net.net_id,
+                                target_net_id: t.net_id,
+                                origin: tank_pos + dir * (if is_siege { 36.0 } else { 26.0 }),
+                                target_pos: t.pos,
+                                damage: tank.attack_damage,
+                            },
+                        });
+                    }
+                }
             }
         }
     }
@@ -3107,5 +3352,343 @@ mod tests {
 
         assert!(received_chat, "Must broadcast ChatMessageReceived to room peers");
         assert!(received_ping, "Must broadcast TacticalPingReceived to room peers");
+    }
+
+    #[test]
+    fn test_ground_move_cancels_attack_and_preserves_movement() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        let (_tx_in, rx_in) = crossbeam_channel::unbounded();
+        let (tx_out, _rx_out) = tokio::sync::mpsc::unbounded_channel();
+        app.insert_resource(ServerNetworkChannels {
+            rx_incoming: rx_in,
+            tx_outgoing: tx_out,
+        });
+        let mut matchmaker = Matchmaker::new();
+        matchmaker.rooms.insert(
+            1,
+            Room {
+                room_id: 1,
+                room_code: None,
+                mode: GameMode::SoloVsAi,
+                p1_peer: Some(1),
+                p2_peer: None,
+                is_active: true,
+                match_time: 1.0,
+                current_wave: 0,
+                time_until_next_wave: 40.0,
+            },
+        );
+        app.insert_resource(matchmaker);
+        app.insert_resource(PlayerEconomy::new());
+
+        // Spawn a friendly soldier at (0, 0) with a MoveTarget to (500, 0)
+        let friendly = app.world_mut().spawn((
+            NetEntity { net_id: 1, owner_peer_id: 1 },
+            Faction::Player1,
+            RoomId(1),
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            Radius(16.0),
+            MoveSpeed(200.0),
+            Velocity::default(),
+            Health::new(100.0),
+            Unit { name: "Marine".to_string(), supply_cost: 1 },
+            Soldier {
+                attack_range: 150.0,
+                aggro_radius: 240.0,
+                attack_damage: 15.0,
+                attack_cooldown: 1.0,
+                ..default()
+            },
+            MoveTarget::new(Vec2::new(500.0, 0.0), false),
+        )).id();
+
+        // Spawn a hostile enemy unit right next to the friendly soldier at (50, 0) (within attack range)
+        let _hostile = app.world_mut().spawn((
+            NetEntity { net_id: 2, owner_peer_id: 2 },
+            Faction::HostileAi,
+            RoomId(1),
+            Transform::from_xyz(50.0, 0.0, 0.0),
+            Radius(16.0),
+            Health::new(100.0),
+            Unit { name: "Enemy".to_string(), supply_cost: 1 },
+            Soldier::default(),
+        )).id();
+
+        app.add_systems(Update, (server_combat_system, server_movement_system));
+
+        // Step simulation
+        app.update();
+
+        // 1. MoveTarget MUST NOT be removed by combat system!
+        let friendly_entity = app.world().entity(friendly);
+        assert!(friendly_entity.get::<MoveTarget>().is_some(), "MoveTarget must remain intact during ground move");
+        let soldier = friendly_entity.get::<Soldier>().unwrap();
+        assert_eq!(soldier.target, None, "Target must be None during ground move");
+        assert_eq!(soldier.state, SoldierState::MovingToGround, "Soldier state must be MovingToGround");
+    }
+
+    #[test]
+    fn test_idle_unit_auto_attacks_enemy_in_range_without_move_target() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        let (_tx_in, rx_in) = crossbeam_channel::unbounded();
+        let (tx_out, _rx_out) = tokio::sync::mpsc::unbounded_channel();
+        app.insert_resource(ServerNetworkChannels {
+            rx_incoming: rx_in,
+            tx_outgoing: tx_out,
+        });
+        let mut matchmaker = Matchmaker::new();
+        matchmaker.rooms.insert(
+            1,
+            Room {
+                room_id: 1,
+                room_code: None,
+                mode: GameMode::SoloVsAi,
+                p1_peer: Some(1),
+                p2_peer: None,
+                is_active: true,
+                match_time: 1.0,
+                current_wave: 0,
+                time_until_next_wave: 40.0,
+            },
+        );
+        app.insert_resource(matchmaker);
+        app.insert_resource(PlayerEconomy::new());
+
+        // Spawn an idle friendly soldier at (0, 0) with NO MoveTarget
+        let friendly = app.world_mut().spawn((
+            NetEntity { net_id: 1, owner_peer_id: 1 },
+            Faction::Player1,
+            RoomId(1),
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            Radius(16.0),
+            MoveSpeed(200.0),
+            Health::new(100.0),
+            Unit { name: "Marine".to_string(), supply_cost: 1 },
+            Soldier {
+                attack_range: 150.0,
+                aggro_radius: 240.0,
+                attack_damage: 15.0,
+                attack_cooldown: 1.0,
+                ..default()
+            },
+        )).id();
+
+        // Spawn a hostile enemy at (80, 0) (within 150px attack range)
+        let hostile = app.world_mut().spawn((
+            NetEntity { net_id: 2, owner_peer_id: 2 },
+            Faction::HostileAi,
+            RoomId(1),
+            Transform::from_xyz(80.0, 0.0, 0.0),
+            Radius(16.0),
+            Health::new(100.0),
+            Unit { name: "Enemy".to_string(), supply_cost: 1 },
+            Soldier::default(),
+        )).id();
+
+        app.add_systems(Update, server_combat_system);
+
+        // Step simulation
+        app.update();
+
+        let friendly_entity = app.world().entity(friendly);
+        let soldier = friendly_entity.get::<Soldier>().unwrap();
+        assert_eq!(soldier.target, Some(hostile), "Idle soldier must auto-acquire hostile within attack range");
+        assert_eq!(soldier.state, SoldierState::Attacking, "Soldier must be in Attacking state");
+    }
+
+    #[test]
+    fn test_unit_to_unit_hard_collision() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+
+        // Spawn two overlapping friendly units at (0,0) and (10,0) with radius 16.0 (min_dist = 32.0)
+        let u1 = app.world_mut().spawn((
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            Radius(16.0),
+            Faction::Player1,
+            RoomId(1),
+            Unit { name: "Marine 1".to_string(), supply_cost: 1 },
+        )).id();
+
+        let u2 = app.world_mut().spawn((
+            Transform::from_xyz(10.0, 0.0, 0.0),
+            Radius(16.0),
+            Faction::Player1,
+            RoomId(1),
+            Unit { name: "Marine 2".to_string(), supply_cost: 1 },
+        )).id();
+
+        app.add_systems(Update, server_unit_separation_and_collision_system);
+        app.update();
+
+        let p1 = app.world().entity(u1).get::<Transform>().unwrap().translation.truncate();
+        let p2 = app.world().entity(u2).get::<Transform>().unwrap().translation.truncate();
+        let dist = p1.distance(p2);
+
+        assert!(dist >= 31.9, "Overlapping units must be pushed apart to at least radius+radius (was {:.2})", dist);
+    }
+
+    #[test]
+    fn test_building_obstacle_collision_resolution() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+
+        // Spawn a building at (100, 0) with radius 50.0
+        let _building = app.world_mut().spawn((
+            Building::new("Barracks", Vec2::new(100.0, 100.0), 3.0, false),
+            Transform::from_xyz(100.0, 0.0, 0.0),
+            Radius(50.0),
+            Faction::Player1,
+            RoomId(1),
+        )).id();
+
+        // Spawn a unit inside the building footprint at (110, 0) with radius 16.0 (required min_dist = 68.0)
+        let unit = app.world_mut().spawn((
+            Transform::from_xyz(110.0, 0.0, 0.0),
+            Radius(16.0),
+            Faction::Player1,
+            RoomId(1),
+            Unit { name: "Marine".to_string(), supply_cost: 1 },
+        )).id();
+
+        app.add_systems(Update, server_unit_separation_and_collision_system);
+        app.update();
+
+        let u_pos = app.world().entity(unit).get::<Transform>().unwrap().translation.truncate();
+        let dist_to_building = u_pos.distance(Vec2::new(100.0, 0.0));
+
+        assert!(dist_to_building >= 67.9, "Unit must be ejected outside building radius (dist: {:.2})", dist_to_building);
+    }
+
+    #[test]
+    fn test_attack_move_acquires_and_engages_enemy_on_encounter() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        let (_tx_in, rx_in) = crossbeam_channel::unbounded();
+        let (tx_out, _rx_out) = tokio::sync::mpsc::unbounded_channel();
+        app.insert_resource(ServerNetworkChannels {
+            rx_incoming: rx_in,
+            tx_outgoing: tx_out,
+        });
+        let mut matchmaker = Matchmaker::new();
+        matchmaker.rooms.insert(
+            1,
+            Room {
+                room_id: 1,
+                room_code: None,
+                mode: GameMode::SoloVsAi,
+                p1_peer: Some(1),
+                p2_peer: None,
+                is_active: true,
+                match_time: 1.0,
+                current_wave: 1,
+                time_until_next_wave: 40.0,
+            },
+        );
+        app.insert_resource(matchmaker);
+        app.insert_resource(PlayerEconomy::new());
+
+        // Spawn Hostile AI marine attack-moving towards player base at (1000, 0)
+        let hostile = app.world_mut().spawn((
+            NetEntity { net_id: 1, owner_peer_id: 2 },
+            Faction::HostileAi,
+            RoomId(1),
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            Radius(16.0),
+            MoveSpeed(180.0),
+            Velocity::default(),
+            Health::new(120.0),
+            Unit { name: "Hostile Marine".to_string(), supply_cost: 2 },
+            Soldier {
+                state: SoldierState::AttackMoving,
+                attack_range: 150.0,
+                aggro_radius: 240.0,
+                attack_damage: 15.0,
+                attack_cooldown: 0.85,
+                ..default()
+            },
+            MoveTarget::new(Vec2::new(1000.0, 0.0), true), // Attack-Move order!
+        )).id();
+
+        // Spawn Player marine standing at (180, 0) (within 240px aggro range)
+        let friendly = app.world_mut().spawn((
+            NetEntity { net_id: 2, owner_peer_id: 1 },
+            Faction::Player1,
+            RoomId(1),
+            Transform::from_xyz(180.0, 0.0, 0.0),
+            Radius(16.0),
+            MoveSpeed(180.0),
+            Velocity::default(),
+            Health::new(120.0),
+            Unit { name: "Marine".to_string(), supply_cost: 1 },
+            Soldier::default(),
+        )).id();
+
+        app.add_systems(Update, (server_combat_system, server_movement_system).chain());
+        app.update();
+
+        // Assert hostile marine stopped ignoring player and engaged in combat!
+        let hostile_soldier = app.world().entity(hostile).get::<Soldier>().unwrap();
+        assert_eq!(hostile_soldier.target, Some(friendly), "Attack-moving enemy must acquire encountered player unit");
+        assert_eq!(hostile_soldier.state, SoldierState::ChasingTarget, "Hostile soldier should be chasing/engaging the target");
+
+        // Velocity must be zeroed for waypoint marching
+        let hostile_vel = app.world().entity(hostile).get::<Velocity>().unwrap();
+        assert_eq!(hostile_vel.0, Vec2::ZERO, "Waypoint velocity must pause while actively engaging in combat");
+    }
+
+    #[test]
+    fn test_inactive_room_freezes_movement_and_combat() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        let (_tx_in, rx_in) = crossbeam_channel::unbounded();
+        let (tx_out, _rx_out) = tokio::sync::mpsc::unbounded_channel();
+        app.insert_resource(ServerNetworkChannels {
+            rx_incoming: rx_in,
+            tx_outgoing: tx_out,
+        });
+
+        // Set room.is_active = false (Match ended!)
+        let mut matchmaker = Matchmaker::new();
+        matchmaker.rooms.insert(
+            1,
+            Room {
+                room_id: 1,
+                room_code: None,
+                mode: GameMode::SoloVsAi,
+                p1_peer: Some(1),
+                p2_peer: None,
+                is_active: false, // Inactive / Ended
+                match_time: 120.0,
+                current_wave: 2,
+                time_until_next_wave: 0.0,
+            },
+        );
+        app.insert_resource(matchmaker);
+        app.insert_resource(PlayerEconomy::new());
+
+        let unit = app.world_mut().spawn((
+            NetEntity { net_id: 1, owner_peer_id: 1 },
+            Faction::Player1,
+            RoomId(1),
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            Radius(16.0),
+            MoveSpeed(180.0),
+            Velocity::default(),
+            Health::new(120.0),
+            Unit { name: "Marine".to_string(), supply_cost: 1 },
+            Soldier::default(),
+            MoveTarget::new(Vec2::new(500.0, 0.0), false),
+        )).id();
+
+        app.add_systems(Update, (server_movement_system, server_combat_system));
+        app.update();
+
+        let vel = app.world().entity(unit).get::<Velocity>().unwrap();
+        assert_eq!(vel.0, Vec2::ZERO, "Movement must freeze when match is inactive / ended");
+        let soldier = app.world().entity(unit).get::<Soldier>().unwrap();
+        assert_eq!(soldier.target, None, "No target acquisition when match is inactive / ended");
     }
 }

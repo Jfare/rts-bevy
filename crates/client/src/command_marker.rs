@@ -2,8 +2,8 @@ use bevy::prelude::*;
 use bevy::render::camera::OrthographicProjection;
 use bevy::window::PrimaryWindow;
 use shared::components::{
-    Faction, Health, MoveTarget, NetEntity, Radius, ResourceNode, Selectable, SiegeTank, Soldier,
-    SoldierState, Stimpack, TacticalStance, TankMode, Worker,
+    Faction, Health, MatchOutcome, MoveTarget, NetEntity, Radius, ResourceNode, Selectable,
+    SiegeTank, Soldier, SoldierState, Stimpack, TacticalStance, TankMode, Worker,
 };
 use shared::grid::{NavGrid, WorldGridConfig};
 use shared::protocol::ClientMessage;
@@ -40,8 +40,8 @@ impl Plugin for CommandMarkerPlugin {
 fn handle_right_click_orders(
     mut commands: Commands,
     mouse_button: Res<ButtonInput<MouseButton>>,
-    keyboard: Res<ButtonInput<KeyCode>>,
     net_client: Res<NetClient>,
+    outcome_opt: Option<Res<MatchOutcome>>,
     nav_grid: Res<NavGrid>,
     grid_cfg: Option<Res<WorldGridConfig>>,
     fog: Res<FogOfWarGrid>,
@@ -63,6 +63,10 @@ fn handle_right_click_orders(
         Option<&mut SiegeTank>,
     )>,
 ) {
+    if outcome_opt.as_deref() == Some(&MatchOutcome::Victory) || outcome_opt.as_deref() == Some(&MatchOutcome::Defeat) {
+        return;
+    }
+
     if !mouse_button.just_pressed(MouseButton::Right) {
         return;
     }
@@ -83,8 +87,6 @@ fn handle_right_click_orders(
     let cam_scale = ortho_opt.map(|o| o.scale).unwrap_or(1.0);
 
     let target_world_pos = screen_to_world_2d(cursor_screen, win_size, cam_pos, cam_scale);
-    let is_attack_move = keyboard.pressed(KeyCode::KeyA);
-    let is_patrol = keyboard.pressed(KeyCode::KeyP);
 
     // Check if clicked directly on an active mineral resource node
     let is_clicking_mineral = node_query.iter().any(|(t, r, n)| {
@@ -166,7 +168,7 @@ fn handle_right_click_orders(
             }
         }
 
-        // Set attack target and remove ground MoveTarget so unit stops at weapon range
+        // Set attack target and remove ground MoveTarget so unit chases/attacks the target
         for (entity, _, faction, selectable, _, _, _, _, soldier_opt, tank_opt) in &mut unit_query {
             if *faction == net_client.my_faction && selectable.is_selected {
                 commands.entity(entity).remove::<MoveTarget>();
@@ -185,20 +187,13 @@ fn handle_right_click_orders(
 
     sound_events.send(SoundEffect::OrderIssued);
 
-    // Send networked command if online
+    // Send networked command if online (pure Ground Move)
     if net_client.status != NetStatus::Disconnected && !selected_net_ids.is_empty() {
-        if is_patrol {
-            net_client.send(&ClientMessage::RequestPatrol {
-                unit_net_ids: selected_net_ids.clone(),
-                target_position: target_world_pos,
-            });
-        } else {
-            net_client.send(&ClientMessage::RequestMove {
-                unit_net_ids: selected_net_ids,
-                target_position: target_world_pos,
-                is_attack_move,
-            });
-        }
+        net_client.send(&ClientMessage::RequestMove {
+            unit_net_ids: selected_net_ids,
+            target_position: target_world_pos,
+            is_attack_move: false,
+        });
     }
 
     let unit_count = selected_units.len();
@@ -217,68 +212,41 @@ fn handle_right_click_orders(
         let waypoints = nav_grid.find_path(*unit_pos, destination);
 
         if let Ok((_, _, _, _, _, move_target_opt, stance_opt, _, soldier_opt, tank_opt)) = unit_query.get_mut(*entity) {
+            // Ground Move cancels any current attack target immediately!
             if let Some(mut soldier) = soldier_opt {
                 soldier.target = None;
-                if soldier.state == SoldierState::Attacking || soldier.state == SoldierState::ChasingTarget {
-                    soldier.state = if is_attack_move || is_patrol {
-                        SoldierState::AttackMoving
-                    } else {
-                        SoldierState::MovingToGround
-                    };
-                }
+                soldier.state = SoldierState::MovingToGround;
             }
             if let Some(mut tank) = tank_opt {
                 tank.target = None;
             }
 
-            if is_patrol {
-                if let Some(mut stance) = stance_opt {
-                    *stance = TacticalStance::Patrol {
-                        origin: *unit_pos,
-                        target: destination,
-                        heading_to_target: true,
-                    };
-                } else {
-                    commands.entity(*entity).insert(TacticalStance::Patrol {
-                        origin: *unit_pos,
-                        target: destination,
-                        heading_to_target: true,
-                    });
-                }
-            } else if let Some(mut stance) = stance_opt {
+            if let Some(mut stance) = stance_opt {
                 *stance = TacticalStance::Aggressive;
             }
 
             if let Some(mut existing_target) = move_target_opt {
                 existing_target.destination = destination;
-                existing_target.is_attack_move = is_attack_move || is_patrol;
+                existing_target.is_attack_move = false;
                 existing_target.waypoints = waypoints;
                 existing_target.current_waypoint_idx = 0;
             } else {
                 commands.entity(*entity).insert(MoveTarget::with_waypoints(
                     destination,
-                    is_attack_move || is_patrol,
+                    false,
                     waypoints,
                 ));
             }
         }
     }
 
-    // 3. Spawn visual tactical pulse marker
-    let marker_color = if is_patrol {
-        Color::srgba(0.35, 0.70, 1.0, 0.95) // Light blue for Patrol
-    } else if is_attack_move {
-        Color::srgba(1.0, 0.35, 0.25, 0.95) // Red-orange for Attack-Move
-    } else {
-        Color::srgba(0.25, 0.95, 0.45, 0.95) // Bright green for Move
-    };
-
+    // 3. Spawn visual tactical pulse marker (Bright green for ground move)
     commands.spawn((
         CommandMarker {
             lifetime: 0.0,
             max_lifetime: 0.45,
             initial_radius: 20.0,
-            color: marker_color,
+            color: Color::srgba(0.25, 0.95, 0.45, 0.95), // Bright green for Move
         },
         Transform::from_xyz(target_world_pos.x, target_world_pos.y, 1.0),
     ));
@@ -291,6 +259,7 @@ fn handle_stance_and_ability_hotkeys(
     mut commands: Commands,
     keyboard: Res<ButtonInput<KeyCode>>,
     net_client: Res<NetClient>,
+    outcome_opt: Option<Res<MatchOutcome>>,
     mut sound_events: EventWriter<SoundEffect>,
     mut particle_events: EventWriter<ParticleEvent>,
     mut unit_query: Query<(
@@ -306,17 +275,24 @@ fn handle_stance_and_ability_hotkeys(
         Option<&mut TacticalStance>,
     )>,
 ) {
+    if outcome_opt.as_deref() == Some(&MatchOutcome::Victory) || outcome_opt.as_deref() == Some(&MatchOutcome::Defeat) {
+        return;
+    }
+
     let my_faction = net_client.my_faction;
 
     // 1. [S] Key: Stop Order
     if keyboard.just_pressed(KeyCode::KeyS) {
         let mut net_ids = Vec::new();
-        for (entity, _, faction, selectable, net_opt, _, mut soldier_opt, _, _, mut stance_opt) in &mut unit_query {
+        for (entity, _, faction, selectable, net_opt, _, mut soldier_opt, _, mut tank_opt, mut stance_opt) in &mut unit_query {
             if *faction == my_faction && selectable.is_selected {
                 commands.entity(entity).remove::<MoveTarget>();
                 if let Some(ref mut soldier) = soldier_opt {
                     soldier.state = SoldierState::Idle;
                     soldier.target = None;
+                }
+                if let Some(ref mut tank) = tank_opt {
+                    tank.target = None;
                 }
                 if let Some(ref mut stance) = stance_opt {
                     **stance = TacticalStance::Aggressive;
@@ -336,11 +312,15 @@ fn handle_stance_and_ability_hotkeys(
     // 2. [H] Key: Hold Position Order
     if keyboard.just_pressed(KeyCode::KeyH) {
         let mut net_ids = Vec::new();
-        for (entity, _, faction, selectable, net_opt, _, mut soldier_opt, _, _, mut stance_opt) in &mut unit_query {
+        for (entity, _, faction, selectable, net_opt, _, mut soldier_opt, _, mut tank_opt, mut stance_opt) in &mut unit_query {
             if *faction == my_faction && selectable.is_selected {
                 commands.entity(entity).remove::<MoveTarget>();
                 if let Some(ref mut soldier) = soldier_opt {
                     soldier.state = SoldierState::HoldingPosition;
+                    soldier.target = None;
+                }
+                if let Some(ref mut tank) = tank_opt {
+                    tank.target = None;
                 }
                 if let Some(ref mut stance) = stance_opt {
                     **stance = TacticalStance::HoldPosition;

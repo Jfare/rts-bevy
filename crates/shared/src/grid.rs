@@ -231,8 +231,12 @@ impl NavGrid {
 
     /// 8-Directional A* Pathfinding from Start to Goal with line-of-sight shortcutting
     pub fn find_path(&self, start: Vec2, goal: Vec2) -> Vec<Vec2> {
-        // Fast path: if direct line is clear, return straight goal
-        if self.is_line_clear(start, goal) {
+        let goal_blocked = Self::world_to_grid(goal)
+            .map(|(gx, gy)| self.is_blocked(gx, gy))
+            .unwrap_or(false);
+
+        // Fast path: if direct line is clear and goal is walkable, return straight goal
+        if !goal_blocked && self.is_line_clear(start, goal) {
             return vec![goal];
         }
 
@@ -252,8 +256,14 @@ impl NavGrid {
             None => return vec![goal],
         };
 
+        let final_destination = if goal_blocked {
+            Self::grid_to_world(goal_node.0, goal_node.1)
+        } else {
+            goal
+        };
+
         if start_node == goal_node {
-            return vec![goal];
+            return vec![final_destination];
         }
 
         use std::cmp::Ordering;
@@ -366,13 +376,13 @@ impl NavGrid {
         }
 
         if !found {
-            return vec![goal];
+            return vec![final_destination];
         }
 
         // Reconstruct path
         let mut raw_waypoints = Vec::new();
         let mut curr = goal_node;
-        raw_waypoints.push(goal);
+        raw_waypoints.push(final_destination);
 
         while curr != start_node {
             raw_waypoints.push(Self::grid_to_world(curr.0, curr.1));
@@ -454,6 +464,23 @@ mod tests {
                 assert!(!nav.is_blocked(gx, gy), "Waypoint should not be blocked!");
             }
         }
+    }
+
+    #[test]
+    fn test_path_destination_inside_obstacle_clamps_to_walkable_boundary() {
+        let mut nav = NavGrid::default();
+        // Place building at (0, 0)
+        nav.mark_circle(Vec2::new(0.0, 0.0), 70.0);
+
+        let start = Vec2::new(-300.0, 0.0);
+        let goal_inside = Vec2::new(0.0, 0.0); // Inside building!
+
+        let path = nav.find_path(start, goal_inside);
+        let final_wp = path.last().copied().unwrap();
+
+        let (fgx, fgy) = NavGrid::world_to_grid(final_wp).unwrap();
+        assert!(!nav.is_blocked(fgx, fgy), "Final waypoint must be in a walkable cell outside the building");
+        assert!(final_wp.distance(goal_inside) >= 40.0, "Final waypoint must be clamped away from obstacle center");
     }
 }
 

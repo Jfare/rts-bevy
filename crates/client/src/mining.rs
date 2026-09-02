@@ -29,6 +29,7 @@ fn handle_mining_click_orders(
     mut commands: Commands,
     mouse_button: Res<ButtonInput<MouseButton>>,
     net_client: Res<NetClient>,
+    outcome_opt: Option<Res<MatchOutcome>>,
     window_query: Query<&Window, With<PrimaryWindow>>,
 
     camera_query: Query<(&Camera, &Transform, Option<&OrthographicProjection>), With<Camera>>,
@@ -36,6 +37,10 @@ fn handle_mining_click_orders(
     mut worker_query: Query<(Entity, &Faction, &Selectable, &mut Worker, Option<&NetEntity>), (With<Worker>, Without<ResourceNode>)>,
     mut sound_events: EventWriter<SoundEffect>,
 ) {
+    if outcome_opt.as_deref() == Some(&MatchOutcome::Victory) || outcome_opt.as_deref() == Some(&MatchOutcome::Defeat) {
+        return;
+    }
+
     if !mouse_button.just_pressed(MouseButton::Right) {
         return;
     }
@@ -59,27 +64,26 @@ fn handle_mining_click_orders(
     let mut clicked_node = None;
     for (node_entity, node_transform, radius, resource_node, net_opt) in &node_query {
         let node_pos = node_transform.translation.truncate();
-        if node_pos.distance(click_pos) <= (radius.0 + 16.0) && resource_node.remaining_minerals > 0 {
+        if click_pos.distance(node_pos) <= (radius.0 + 8.0) && resource_node.remaining_minerals > 0 {
             clicked_node = Some((node_entity, net_opt.map(|n| n.net_id)));
             break;
         }
     }
 
-    let Some((target_node_entity, target_node_net_opt)) = clicked_node else {
+    let Some((target_node_entity, target_net_id_opt)) = clicked_node else {
         return;
     };
 
-    // Assign harvest order to all selected friendly workers
-    let my_faction = net_client.my_faction;
     let mut worker_net_ids = Vec::new();
 
-    for (worker_entity, faction, selectable, mut worker, net_entity_opt) in &mut worker_query {
-        if *faction == my_faction && selectable.is_selected {
+    for (worker_entity, faction, selectable, mut worker, net_opt) in &mut worker_query {
+        if selectable.is_selected && *faction == Faction::Player1 {
             worker.target_node = Some(target_node_entity);
             worker.state = WorkerState::MovingToResource;
+            worker.harvest_timer = 0.0;
             commands.entity(worker_entity).remove::<MoveTarget>();
 
-            if let Some(net) = net_entity_opt {
+            if let Some(net) = net_opt {
                 worker_net_ids.push(net.net_id);
             }
         }
@@ -88,7 +92,7 @@ fn handle_mining_click_orders(
     if !worker_net_ids.is_empty() {
         sound_events.send(SoundEffect::OrderIssued);
         if net_client.status != NetStatus::Disconnected {
-            if let Some(resource_net_id) = target_node_net_opt {
+            if let Some(resource_net_id) = target_net_id_opt {
                 net_client.send(&ClientMessage::RequestHarvest {
                     worker_net_ids,
                     resource_net_id,

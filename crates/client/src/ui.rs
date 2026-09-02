@@ -29,6 +29,7 @@ impl Plugin for RtsUiPlugin {
                     handle_lobby_button_interactions,
                     handle_join_code_keyboard_input,
                     handle_play_again_button_interaction,
+                    handle_return_to_landing_button_interaction,
                     update_lobby_modal_status_text,
                     update_color_swatches_system,
                 ),
@@ -104,6 +105,9 @@ struct MatchStatsSummaryText;
 
 #[derive(Component)]
 struct PlayAgainButton;
+
+#[derive(Component)]
+struct ReturnToLandingButton;
 
 fn setup_hud(mut commands: Commands) {
     // Root UI container overlay (FocusPolicy::Pass allows mouse clicks to pass to the 2D world)
@@ -301,31 +305,67 @@ fn setup_hud(mut commands: Commands) {
                     MatchStatsSummaryText,
                 ));
 
-                // Play Again / Restart Button
+                // Action Buttons Row
                 banner
-                    .spawn((
-                        Button,
-                        Node {
-                            padding: UiRect::axes(Val::Px(24.0), Val::Px(10.0)),
-                            border: UiRect::all(Val::Px(1.5)),
-                            align_items: AlignItems::Center,
-                            justify_content: JustifyContent::Center,
-                            ..default()
-                        },
-                        BorderRadius::all(Val::Px(6.0)),
-                        BackgroundColor(Color::srgba(0.15, 0.35, 0.55, 0.95)),
-                        BorderColor(Color::srgb(0.35, 0.85, 1.0)),
-                        PlayAgainButton,
-                    ))
-                    .with_children(|btn| {
-                        btn.spawn((
-                            Text::new("🔄 PLAY AGAIN (RESTART)"),
-                            TextFont {
-                                font_size: 14.0,
+                    .spawn(Node {
+                        flex_direction: FlexDirection::Row,
+                        column_gap: Val::Px(14.0),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        ..default()
+                    })
+                    .with_children(|row| {
+                        // Play Again / Restart Button
+                        row.spawn((
+                            Button,
+                            Node {
+                                padding: UiRect::axes(Val::Px(24.0), Val::Px(10.0)),
+                                border: UiRect::all(Val::Px(1.5)),
+                                align_items: AlignItems::Center,
+                                justify_content: JustifyContent::Center,
                                 ..default()
                             },
-                            TextColor(Color::WHITE),
-                        ));
+                            BorderRadius::all(Val::Px(6.0)),
+                            BackgroundColor(Color::srgba(0.15, 0.35, 0.55, 0.95)),
+                            BorderColor(Color::srgb(0.35, 0.85, 1.0)),
+                            PlayAgainButton,
+                        ))
+                        .with_children(|btn| {
+                            btn.spawn((
+                                Text::new("🔄 PLAY AGAIN"),
+                                TextFont {
+                                    font_size: 14.0,
+                                    ..default()
+                                },
+                                TextColor(Color::WHITE),
+                            ));
+                        });
+
+                        // Return to Landing Button
+                        row.spawn((
+                            Button,
+                            Node {
+                                padding: UiRect::axes(Val::Px(24.0), Val::Px(10.0)),
+                                border: UiRect::all(Val::Px(1.5)),
+                                align_items: AlignItems::Center,
+                                justify_content: JustifyContent::Center,
+                                ..default()
+                            },
+                            BorderRadius::all(Val::Px(6.0)),
+                            BackgroundColor(Color::srgba(0.22, 0.26, 0.34, 0.95)),
+                            BorderColor(Color::srgb(0.60, 0.70, 0.85)),
+                            ReturnToLandingButton,
+                        ))
+                        .with_children(|btn| {
+                            btn.spawn((
+                                Text::new("🏠 LANDING PAGE"),
+                                TextFont {
+                                    font_size: 14.0,
+                                    ..default()
+                                },
+                                TextColor(Color::WHITE),
+                            ));
+                        });
                     });
             });
 
@@ -1151,7 +1191,7 @@ fn update_selection_info_text(
     }
 
     let mut title_str = "No Units Selected".to_string();
-    let mut details_str = "Drag left-click to select | [A] Attack-Move | [S] Stop | [H] Hold | [P] Patrol".to_string();
+    let mut details_str = "Drag left-click to select | Right-click Move / Attack | [S] Stop | [H] Hold".to_string();
     let mut queue_str = String::new();
 
     if let Some((building, faction, health, prod_opt, turret_opt)) = selected_building {
@@ -1190,7 +1230,6 @@ fn update_selection_info_text(
 
             let stance_suffix = match stance_opt {
                 Some(shared::components::TacticalStance::HoldPosition) => " [HOLDING POSITION]",
-                Some(shared::components::TacticalStance::Patrol { .. }) => " [PATROLLING]",
                 _ => "",
             };
 
@@ -1205,7 +1244,7 @@ fn update_selection_info_text(
             } else if let Some(tank) = tank_opt {
                 match tank.mode {
                     shared::components::TankMode::Tank => {
-                        details_str = format!("Mobile Tank (35 DMG, 240 Rng){} | [E] Deploy Siege Mode | [S] Stop | [H] Hold | [P] Patrol", stance_suffix);
+                        details_str = format!("Mobile Tank (35 DMG, 240 Rng){} | [E] Deploy Siege Mode | [S] Stop | [H] Hold", stance_suffix);
                     }
                     shared::components::TankMode::Siege => {
                         details_str = "🛡️ SIEGE MODE (70 DMG + 45px Splash, 380 Rng, Immobile) | [E] Mobile Mode".to_string();
@@ -1227,13 +1266,13 @@ fn update_selection_info_text(
                 } else {
                     " | [T] Stimpack".to_string()
                 };
-                details_str = format!("Marine Rifleman (15 DMG){} | [A] Attack | [S] Stop | [H] Hold | [P] Patrol{}", stance_suffix, stim_status);
+                details_str = format!("Marine Rifleman (15 DMG){} | Right-Click Move/Attack | [S] Stop | [H] Hold{}", stance_suffix, stim_status);
             } else {
-                details_str = "Combat Unit ready | [A] Attack | [S] Stop | [H] Hold | [P] Patrol".to_string();
+                details_str = "Combat Unit ready | Right-Click Move/Attack | [S] Stop | [H] Hold".to_string();
             }
         } else {
             title_str = format!("Selected: {} Units", selected_units.len());
-            details_str = "Squad Command: [A] Attack-Move | [S] Stop | [H] Hold Position | [P] Patrol | [T] Stimpack | [E] Siege".to_string();
+            details_str = "Squad Command: Right-Click Move/Attack | [S] Stop | [H] Hold Position | [T] Stimpack | [E] Siege".to_string();
         }
     }
 
@@ -1373,6 +1412,36 @@ fn handle_play_again_button_interaction(
             }
             Interaction::None => {
                 bg_color.0 = Color::srgba(0.15, 0.35, 0.55, 0.95);
+            }
+        }
+    }
+}
+
+fn handle_return_to_landing_button_interaction(
+    mut interaction_query: Query<
+        (&Interaction, &mut BackgroundColor),
+        (Changed<Interaction>, With<ReturnToLandingButton>),
+    >,
+) {
+    for (interaction, mut bg_color) in &mut interaction_query {
+        match *interaction {
+            Interaction::Pressed => {
+                #[cfg(target_arch = "wasm32")]
+                {
+                    if let Some(win) = web_sys::window() {
+                        let _ = win.location().set_href("/");
+                    }
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    info!("🏠 Return to Landing Page requested.");
+                }
+            }
+            Interaction::Hovered => {
+                bg_color.0 = Color::srgba(0.35, 0.40, 0.50, 0.95);
+            }
+            Interaction::None => {
+                bg_color.0 = Color::srgba(0.22, 0.26, 0.34, 0.95);
             }
         }
     }

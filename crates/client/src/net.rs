@@ -697,12 +697,15 @@ fn handle_server_message(
         }
 
         ServerMessage::UnitsOrderedStop { unit_net_ids } => {
-            for (entity, net_entity, _fac, _tf, _hp, worker_opt, soldier_opt, _, _, stance_opt, ..) in entity_query.iter_mut() {
+            for (entity, net_entity, _fac, _tf, _hp, worker_opt, soldier_opt, mut tank_opt, _, stance_opt, ..) in entity_query.iter_mut() {
                 if unit_net_ids.contains(&net_entity.net_id) {
                     commands.entity(entity).remove::<MoveTarget>();
                     if let Some(mut soldier) = soldier_opt {
                         soldier.target = None;
                         soldier.state = SoldierState::Idle;
+                    }
+                    if let Some(ref mut tank) = tank_opt {
+                        tank.target = None;
                     }
                     if let Some(mut worker) = worker_opt {
                         worker.state = WorkerState::Idle;
@@ -715,12 +718,15 @@ fn handle_server_message(
         }
 
         ServerMessage::UnitsOrderedHoldPosition { unit_net_ids } => {
-            for (entity, net_entity, _fac, _tf, _hp, _worker, soldier_opt, _, _, stance_opt, ..) in entity_query.iter_mut() {
+            for (entity, net_entity, _fac, _tf, _hp, _worker, soldier_opt, mut tank_opt, _, stance_opt, ..) in entity_query.iter_mut() {
                 if unit_net_ids.contains(&net_entity.net_id) {
                     commands.entity(entity).remove::<MoveTarget>();
                     if let Some(mut soldier) = soldier_opt {
                         soldier.target = None;
                         soldier.state = SoldierState::HoldingPosition;
+                    }
+                    if let Some(ref mut tank) = tank_opt {
+                        tank.target = None;
                     }
                     if let Some(mut stance) = stance_opt {
                         *stance = TacticalStance::HoldPosition;
