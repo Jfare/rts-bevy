@@ -25,6 +25,7 @@ pub struct Room {
     pub p2_peer: Option<u64>,
     pub is_active: bool,
     pub match_time: f32,
+    pub countdown_timer: f32,
     pub current_wave: u32,
     pub time_until_next_wave: f32,
 }
@@ -50,6 +51,16 @@ impl Matchmaker {
             waiting_1v1_peer: None,
             next_room_id: 1,
             next_net_id: 1000,
+        }
+    }
+
+    pub fn cancel_queue(&mut self, peer_id: u64) -> bool {
+        if self.waiting_1v1_peer == Some(peer_id) {
+            self.waiting_1v1_peer = None;
+            self.players.remove(&peer_id);
+            true
+        } else {
+            false
         }
     }
 
@@ -167,9 +178,9 @@ pub fn spawn_match_entities(
     let mut initial_states = Vec::new();
 
     // ─────────────────────────────────────────────────────────────────────────
-    // PLAYER 1 BASE
+    // PLAYER 1 BASE (South: 0, -1000)
     // ─────────────────────────────────────────────────────────────────────────
-    let p1_base_pos = Vec2::new(-700.0, 250.0);
+    let p1_base_pos = shared::map::P1_BASE_POS;
     let p1_hq_id = matchmaker.alloc_net_id();
 
     commands.spawn((
@@ -187,7 +198,7 @@ pub fn spawn_match_entities(
             queue: Vec::new(),
             current_timer: 0.0,
             max_queue_size: 5,
-            rally_point: p1_base_pos + Vec2::new(0.0, -100.0),
+            rally_point: p1_base_pos + Vec2::new(0.0, 100.0),
         },
         Health::new(BuildingKind::BaseHQ.max_health()),
         Faction::Player1,
@@ -210,34 +221,38 @@ pub fn spawn_match_entities(
         max_hp: BuildingKind::BaseHQ.max_health(),
     });
 
-    // P1 Starting Mineral Field
-    let p1_minerals_pos = p1_base_pos + Vec2::new(180.0, -40.0);
-    let p1_minerals_id = matchmaker.alloc_net_id();
-    let p1_minerals_e = commands.spawn((
-        ResourceNode::new(1500),
-        Radius(32.0),
-        RoomId(room_id),
-        NetEntity {
-            net_id: p1_minerals_id,
-            owner_peer_id: 0,
-        },
-        Transform::from_xyz(p1_minerals_pos.x, p1_minerals_pos.y, 1.0),
-    )).id();
+    // P1 Starting Mineral Field (3 nodes)
+    let mut p1_primary_mineral_e = None;
+    for &min_pos in shared::map::P1_MAIN_MINERALS.iter() {
+        let min_id = matchmaker.alloc_net_id();
+        let e = commands.spawn((
+            ResourceNode::new(1500),
+            Radius(32.0),
+            RoomId(room_id),
+            NetEntity {
+                net_id: min_id,
+                owner_peer_id: 0,
+            },
+            Transform::from_xyz(min_pos.x, min_pos.y, 1.0),
+        )).id();
 
-    initial_states.push(EntityState {
-        net_id: p1_minerals_id,
-        kind: EntityKind::ResourceNode,
-        faction: Faction::Neutral,
-        position: p1_minerals_pos,
-        rotation: 0.0,
-        current_hp: 1500.0,
-        max_hp: 1500.0,
-    });
+        if p1_primary_mineral_e.is_none() {
+            p1_primary_mineral_e = Some(e);
+        }
 
-    // P1 SCVs
-    let worker_offsets = [Vec2::new(-60.0, -80.0), Vec2::new(60.0, -80.0)];
-    for offset in worker_offsets {
-        let pos = p1_base_pos + offset;
+        initial_states.push(EntityState {
+            net_id: min_id,
+            kind: EntityKind::ResourceNode,
+            faction: Faction::Neutral,
+            position: min_pos,
+            rotation: 0.0,
+            current_hp: 1500.0,
+            max_hp: 1500.0,
+        });
+    }
+
+    // P1 Starting SCVs (2 workers auto-harvesting at start)
+    for &pos in shared::map::P1_STARTER_WORKERS.iter() {
         let scv_id = matchmaker.alloc_net_id();
 
         commands.spawn((
@@ -247,7 +262,7 @@ pub fn spawn_match_entities(
             },
             Worker {
                 state: WorkerState::MovingToResource,
-                target_node: Some(p1_minerals_e),
+                target_node: p1_primary_mineral_e,
                 ..default()
             },
             Health::new(80.0),
@@ -274,91 +289,11 @@ pub fn spawn_match_entities(
         });
     }
 
-    // P1 Marines
-    let soldier_offsets = [
-        Vec2::new(-120.0, 0.0),
-        Vec2::new(-120.0, 40.0),
-        Vec2::new(-120.0, -40.0),
-    ];
-    for offset in soldier_offsets {
-        let pos = p1_base_pos + offset;
-        let marine_id = matchmaker.alloc_net_id();
-
-        commands.spawn((
-            Unit {
-                name: "Marine Soldier".to_string(),
-                supply_cost: 2,
-            },
-            Soldier {
-                state: SoldierState::Idle,
-                attack_range: 150.0,
-                aggro_radius: 240.0,
-                attack_damage: 15.0,
-                attack_cooldown: 0.85,
-                ..default()
-            },
-            Health::new(120.0),
-            Radius(16.0),
-            MoveSpeed(180.0),
-            Velocity::default(),
-            Faction::Player1,
-            RoomId(room_id),
-            NetEntity {
-                net_id: marine_id,
-                owner_peer_id: p1_peer,
-            },
-            Transform::from_xyz(pos.x, pos.y, 2.0),
-        ));
-
-        initial_states.push(EntityState {
-            net_id: marine_id,
-            kind: EntityKind::Unit(UnitKind::Soldier),
-            faction: Faction::Player1,
-            position: pos,
-            rotation: 0.0,
-            current_hp: 120.0,
-            max_hp: 120.0,
-        });
-    }
-
-    // P1 Starting Siege Tank
-    let p1_tank_pos = p1_base_pos + Vec2::new(-160.0, 80.0);
-    let p1_tank_id = matchmaker.alloc_net_id();
-    commands.spawn((
-        Unit {
-            name: "Siege Tank".to_string(),
-            supply_cost: 3,
-        },
-        SiegeTank::default(),
-        TacticalStance::default(),
-        Health::new(220.0),
-        Radius(22.0),
-        MoveSpeed(140.0),
-        Velocity::default(),
-        Faction::Player1,
-        RoomId(room_id),
-        NetEntity {
-            net_id: p1_tank_id,
-            owner_peer_id: p1_peer,
-        },
-        Transform::from_xyz(p1_tank_pos.x, p1_tank_pos.y, 2.0),
-    ));
-
-    initial_states.push(EntityState {
-        net_id: p1_tank_id,
-        kind: EntityKind::Unit(UnitKind::Tank),
-        faction: Faction::Player1,
-        position: p1_tank_pos,
-        rotation: 0.0,
-        current_hp: 220.0,
-        max_hp: 220.0,
-    });
-
 
     // ─────────────────────────────────────────────────────────────────────────
-    // PLAYER 2 / HOSTILE AI BASE
+    // PLAYER 2 / HOSTILE AI BASE (North: 0, 1000)
     // ─────────────────────────────────────────────────────────────────────────
-    let p2_base_pos = Vec2::new(700.0, -250.0);
+    let p2_base_pos = shared::map::P2_BASE_POS;
     let p2_faction = match mode {
         GameMode::SoloVsAi => Faction::HostileAi,
         GameMode::Multiplayer1v1 | GameMode::CustomPrivate => Faction::Player2,
@@ -381,7 +316,7 @@ pub fn spawn_match_entities(
             queue: Vec::new(),
             current_timer: 0.0,
             max_queue_size: 5,
-            rally_point: p2_base_pos + Vec2::new(0.0, 100.0),
+            rally_point: p2_base_pos + Vec2::new(0.0, -100.0),
         },
         Health::new(BuildingKind::BaseHQ.max_health()),
         p2_faction,
@@ -404,76 +339,109 @@ pub fn spawn_match_entities(
         max_hp: BuildingKind::BaseHQ.max_health(),
     });
 
-    // Starting Defenders / Units for P2 / AI
-    let p2_unit_offsets = [Vec2::new(-80.0, 0.0), Vec2::new(-80.0, -40.0)];
-    for offset in p2_unit_offsets {
-        let pos = p2_base_pos + offset;
-        let def_id = matchmaker.alloc_net_id();
+    // P2 / AI Starting Mineral Field (3 nodes)
+    let mut p2_primary_mineral_e = None;
+    for &min_pos in shared::map::P2_MAIN_MINERALS.iter() {
+        let min_id = matchmaker.alloc_net_id();
+        let e = commands.spawn((
+            ResourceNode::new(1500),
+            Radius(32.0),
+            RoomId(room_id),
+            NetEntity {
+                net_id: min_id,
+                owner_peer_id: 0,
+            },
+            Transform::from_xyz(min_pos.x, min_pos.y, 1.0),
+        )).id();
+
+        if p2_primary_mineral_e.is_none() {
+            p2_primary_mineral_e = Some(e);
+        }
+
+        initial_states.push(EntityState {
+            net_id: min_id,
+            kind: EntityKind::ResourceNode,
+            faction: Faction::Neutral,
+            position: min_pos,
+            rotation: 0.0,
+            current_hp: 1500.0,
+            max_hp: 1500.0,
+        });
+    }
+
+    // P2 Starting SCVs (2 workers auto-harvesting at start)
+    for &pos in shared::map::P2_STARTER_WORKERS.iter() {
+        let scv_id = matchmaker.alloc_net_id();
 
         commands.spawn((
             Unit {
-                name: if p2_faction == Faction::HostileAi {
-                    "Hostile Marine".to_string()
-                } else {
-                    "Marine Soldier".to_string()
-                },
-                supply_cost: 2,
+                name: "SCV Worker".to_string(),
+                supply_cost: 1,
             },
-            Soldier {
-                state: SoldierState::Idle,
-                attack_range: 150.0,
-                aggro_radius: 240.0,
-                attack_damage: 14.0,
-                attack_cooldown: 0.9,
+            Worker {
+                state: WorkerState::MovingToResource,
+                target_node: p2_primary_mineral_e,
                 ..default()
             },
-            Health::new(120.0),
-            Radius(16.0),
-            MoveSpeed(175.0),
+            Health::new(80.0),
+            Radius(14.0),
+            MoveSpeed(190.0),
             Velocity::default(),
             p2_faction,
             RoomId(room_id),
             NetEntity {
-                net_id: def_id,
+                net_id: scv_id,
                 owner_peer_id: p2_owner,
             },
             Transform::from_xyz(pos.x, pos.y, 2.0),
         ));
 
         initial_states.push(EntityState {
-            net_id: def_id,
-            kind: EntityKind::Unit(UnitKind::Soldier),
+            net_id: scv_id,
+            kind: EntityKind::Unit(UnitKind::Worker),
             faction: p2_faction,
             position: pos,
             rotation: 0.0,
-            current_hp: 120.0,
-            max_hp: 120.0,
+            current_hp: 80.0,
+            max_hp: 80.0,
         });
     }
 
-    // P2 / AI Starting Mineral Field
-    let p2_minerals_pos = p2_base_pos + Vec2::new(-180.0, 40.0);
-    let p2_minerals_id = matchmaker.alloc_net_id();
-    commands.spawn((
-        ResourceNode::new(1500),
-        Radius(32.0),
-        RoomId(room_id),
-        NetEntity {
-            net_id: p2_minerals_id,
-            owner_peer_id: 0,
-        },
-        Transform::from_xyz(p2_minerals_pos.x, p2_minerals_pos.y, 1.0),
-    ));
+    // ─────────────────────────────────────────────────────────────────────────
+    // EXPANSION MINERAL FIELDS (Natural Expansions & Contested Thirds)
+    // ─────────────────────────────────────────────────────────────────────────
+    let all_expansions = [
+        &shared::map::P1_NATURAL_EXPANSION_MINERALS[..],
+        &shared::map::P2_NATURAL_EXPANSION_MINERALS[..],
+        &shared::map::CONTESTED_WEST_MINERALS[..],
+        &shared::map::CONTESTED_EAST_MINERALS[..],
+    ];
 
-    initial_states.push(EntityState {
-        net_id: p2_minerals_id,
-        kind: EntityKind::ResourceNode,
-        faction: Faction::Neutral,
-        position: p2_minerals_pos,
-        rotation: 0.0,
-        current_hp: 1500.0,
-        max_hp: 1500.0,
-    });
+    for exp_cluster in all_expansions {
+        for &exp_pos in exp_cluster {
+            let exp_id = matchmaker.alloc_net_id();
+            commands.spawn((
+                ResourceNode::new(1500),
+                Radius(32.0),
+                RoomId(room_id),
+                NetEntity {
+                    net_id: exp_id,
+                    owner_peer_id: 0,
+                },
+                Transform::from_xyz(exp_pos.x, exp_pos.y, 1.0),
+            ));
+
+            initial_states.push(EntityState {
+                net_id: exp_id,
+                kind: EntityKind::ResourceNode,
+                faction: Faction::Neutral,
+                position: exp_pos,
+                rotation: 0.0,
+                current_hp: 1500.0,
+                max_hp: 1500.0,
+            });
+        }
+    }
 
     initial_states
 }
@@ -531,7 +499,7 @@ mod tests {
         assert_eq!(total_entities, states_r1.len() + states_r2.len());
         assert_eq!(r1_count, states_r1.len());
         assert_eq!(r2_count, states_r2.len());
-        assert_eq!(r1_count, 12, "Room 1 should spawn 12 entities (HQ, Minerals, 2 SCVs, 3 Marines, 1 Tank for P1 + HQ, 2 Marines, Minerals for P2)");
+        assert_eq!(r1_count, 20, "Room 1 should spawn 20 entities (HQs, SCVs, Main & Expansion Minerals)");
     }
 
     #[test]
@@ -569,6 +537,7 @@ mod tests {
                 p2_peer: Some(102),
                 is_active: true,
                 match_time: 0.0,
+                countdown_timer: 0.0,
                 current_wave: 0,
                 time_until_next_wave: 40.0,
             },
@@ -595,6 +564,7 @@ mod tests {
                 p2_peer: None,
                 is_active: true,
                 match_time: 0.0,
+                countdown_timer: 0.0,
                 current_wave: 0,
                 time_until_next_wave: 40.0,
             },
@@ -632,6 +602,7 @@ mod tests {
                 p2_peer: Some(102),
                 is_active: true,
                 match_time: 0.0,
+                countdown_timer: 0.0,
                 current_wave: 0,
                 time_until_next_wave: 40.0,
             },
@@ -667,6 +638,7 @@ mod tests {
                 p2_peer: None,
                 is_active: true,
                 match_time: 0.0,
+                countdown_timer: 0.0,
                 current_wave: 0,
                 time_until_next_wave: 40.0,
             },

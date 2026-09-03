@@ -217,6 +217,185 @@
             box-shadow: 0 6px 20px rgba(20, 184, 166, 0.6);
         }
 
+        .btn-danger {
+            background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
+            color: #ffffff;
+            box-shadow: 0 4px 14px rgba(220, 38, 38, 0.4);
+            border: 1px solid rgba(248, 113, 113, 0.5);
+        }
+
+        .btn-danger:hover {
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(239, 68, 68, 0.6);
+        }
+
+        /* ── Views Container ── */
+        .portal-view {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            width: 100%;
+        }
+
+        /* ── Radar Scanner Animation ── */
+        .radar-container {
+            position: relative;
+            width: 130px;
+            height: 130px;
+            margin: 4px auto;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(2, 132, 199, 0.1) 0%, rgba(10, 16, 24, 0.85) 100%);
+            border: 2px solid rgba(56, 189, 248, 0.4);
+            box-shadow: 0 0 25px rgba(56, 189, 248, 0.25), inset 0 0 20px rgba(56, 189, 248, 0.15);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        .radar-grid {
+            position: absolute;
+            width: 65%;
+            height: 65%;
+            border-radius: 50%;
+            border: 1px dashed rgba(56, 189, 248, 0.35);
+        }
+
+        .radar-crosshair-x {
+            position: absolute;
+            width: 100%;
+            height: 1px;
+            background: rgba(56, 189, 248, 0.25);
+        }
+
+        .radar-crosshair-y {
+            position: absolute;
+            height: 100%;
+            width: 1px;
+            background: rgba(56, 189, 248, 0.25);
+        }
+
+        .radar-sweep {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            background: conic-gradient(from 0deg, rgba(56, 189, 248, 0.5) 0deg, rgba(56, 189, 248, 0) 70deg);
+            animation: radarSpin 2.2s linear infinite;
+        }
+
+        @keyframes radarSpin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        .radar-center-dot {
+            position: relative;
+            z-index: 2;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #38bdf8;
+            box-shadow: 0 0 10px #38bdf8;
+        }
+
+        /* ── Queue Card Content ── */
+        .queue-status-box {
+            background: rgba(10, 16, 24, 0.7);
+            border: 1px solid rgba(56, 189, 248, 0.25);
+            border-radius: 8px;
+            padding: 14px 18px;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .queue-timer {
+            font-size: 2.2rem;
+            font-weight: 800;
+            font-family: monospace;
+            color: #38bdf8;
+            letter-spacing: 0.08em;
+            text-shadow: 0 0 12px rgba(56, 189, 248, 0.6);
+        }
+
+        .queue-subtitle {
+            font-size: 0.85rem;
+            color: var(--text-dim);
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+
+        /* ── Match Found View ── */
+        .matchup-banner {
+            display: flex;
+            align-items: center;
+            justify-content: space-around;
+            background: rgba(15, 23, 42, 0.85);
+            border: 1px solid rgba(56, 189, 248, 0.4);
+            border-radius: 10px;
+            padding: 16px 20px;
+            box-shadow: 0 0 25px rgba(2, 132, 199, 0.3);
+        }
+
+        .match-player {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .player-badge {
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.3rem;
+            font-weight: 800;
+        }
+
+        .player-name {
+            font-size: 1.05rem;
+            font-weight: 700;
+            color: #ffffff;
+        }
+
+        .vs-text {
+            font-size: 1.6rem;
+            font-weight: 900;
+            color: #f59e0b;
+            font-style: italic;
+            text-shadow: 0 0 15px rgba(245, 158, 11, 0.6);
+        }
+
+        .countdown-box {
+            text-align: center;
+            padding: 6px 0;
+        }
+
+        .countdown-badge {
+            font-size: 4rem;
+            font-weight: 900;
+            color: #38bdf8;
+            text-align: center;
+            margin: 4px 0;
+            text-shadow: 0 0 30px rgba(56, 189, 248, 0.8);
+            animation: pulseScale 1s ease-in-out infinite;
+        }
+
+        @keyframes pulseScale {
+            0% { transform: scale(0.95); opacity: 0.85; }
+            50% { transform: scale(1.08); opacity: 1; text-shadow: 0 0 35px rgba(56, 189, 248, 1); }
+            100% { transform: scale(0.95); opacity: 0.85; }
+        }
+
         /* ── Controls Field Manual Drawer ── */
         .controls-card {
             background: rgba(10, 16, 24, 0.6);
@@ -428,60 +607,119 @@
     <!-- Desktop Portal Overlay -->
     <div id="portal-overlay">
         <div class="portal-card">
-            <div class="portal-header">
-                <div class="portal-title">⚡ MINI-RTS // TACTICAL COMMAND</div>
-                <div class="portal-subtitle">Real-Time Strategy in Browser (Rust & Bevy 0.15 Wasm)</div>
-            </div>
+            <!-- VIEW 1: Main Landing Dashboard -->
+            <div id="portal-view-main" class="portal-view">
+                <div class="portal-header">
+                    <div class="portal-title">⚡ MINI-RTS // TACTICAL COMMAND</div>
+                    <div class="portal-subtitle">Real-Time Strategy in Browser (Rust & Bevy 0.15 Wasm)</div>
+                </div>
 
-            <!-- Live Server Telemetry -->
-            <div class="telemetry-grid">
-                <div class="telemetry-item">
-                    <div class="telemetry-label">Matchmaking Queue (1v1)</div>
-                    <div class="telemetry-val" style="color: #38bdf8;">
-                        <span class="pulse-dot"></span>
-                        <span id="stat-queue">0</span>
+                <!-- Live Server Telemetry -->
+                <div class="telemetry-grid">
+                    <div class="telemetry-item">
+                        <div class="telemetry-label">Matchmaking Queue (1v1)</div>
+                        <div class="telemetry-val" style="color: #38bdf8;">
+                            <span class="pulse-dot"></span>
+                            <span id="stat-queue">0</span>
+                        </div>
+                    </div>
+                    <div class="telemetry-item">
+                        <div class="telemetry-label">1v1 PvP Matches</div>
+                        <div class="telemetry-val" style="color: #fb923c;" id="stat-pvp">0 / 10</div>
+                    </div>
+                    <div class="telemetry-item">
+                        <div class="telemetry-label">Solo vs AI Matches</div>
+                        <div class="telemetry-val" style="color: #4ade80;" id="stat-solo">0 / 10</div>
                     </div>
                 </div>
-                <div class="telemetry-item">
-                    <div class="telemetry-label">1v1 PvP Matches</div>
-                    <div class="telemetry-val" style="color: #fb923c;" id="stat-pvp">0 / 10</div>
+
+                <!-- Action Buttons -->
+                <div class="btn-group">
+                    <button class="portal-btn btn-primary" id="btn-play-1v1">
+                        ⚔️ Find 1v1 Match
+                    </button>
+                    <button class="portal-btn btn-secondary" id="btn-play-solo">
+                        🤖 Play Solo vs AI
+                    </button>
                 </div>
-                <div class="telemetry-item">
-                    <div class="telemetry-label">Solo vs AI Matches</div>
-                    <div class="telemetry-val" style="color: #4ade80;" id="stat-solo">0 / 10</div>
+
+                <!-- Tactical Field Manual -->
+                <div class="controls-card">
+                    <div class="controls-title">🎮 QUICK GUIDE & CONTROLS</div>
+                    <div class="controls-row">
+                        <span><strong>Select:</strong> Left-Click / Drag Box</span>
+                        <span><strong>Orders:</strong> Right-Click (Move / Attack / Harvest)</span>
+                    </div>
+                    <div class="controls-row">
+                        <span><strong>Tactics:</strong> Right-Click Move/Focus Fire | <span class="kbd">S</span> Stop | <span class="kbd">H</span> Hold Position</span>
+                        <span><strong>Abilities:</strong> <span class="kbd">T</span> Stimpack | <span class="kbd">E</span> Siege Mode</span>
+                    </div>
+                    <div class="controls-row">
+                        <span><strong>Structures:</strong> <span class="kbd">B</span> Build Menu (HQ, Barracks, Supply Depot, Gun Turret)</span>
+                        <span><strong>Menu:</strong> <span class="kbd">Tab</span> / <span class="kbd">F1</span> for Match Lobby</span>
+                    </div>
+                </div>
+
+                <div class="server-status-bar">
+                    <span id="loading-badge"><div class="mini-spinner"></div> Loading Wasm Game Engine...</span>
+                    <span id="server-cloud-badge" style="display:none;">🌐 Server: <strong>Online (Helsinki)</strong></span>
                 </div>
             </div>
 
-            <!-- Action Buttons -->
-            <div class="btn-group">
-                <button class="portal-btn btn-primary" id="btn-play-1v1">
-                    ⚔️ Find 1v1 Match
+            <!-- VIEW 2: In Queue Modal -->
+            <div id="portal-view-queue" class="portal-view" style="display: none;">
+                <div class="portal-header">
+                    <div class="portal-title" style="color: #38bdf8;">📡 SEARCHING FOR OPPONENT...</div>
+                    <div class="portal-subtitle">1v1 Ranked Matchmaking • Standby on Landing Deck</div>
+                </div>
+
+                <!-- Radar Sweep Animation -->
+                <div class="radar-container">
+                    <div class="radar-grid"></div>
+                    <div class="radar-crosshair-x"></div>
+                    <div class="radar-crosshair-y"></div>
+                    <div class="radar-sweep"></div>
+                    <div class="radar-center-dot"></div>
+                </div>
+
+                <div class="queue-status-box">
+                    <div class="queue-subtitle">TIME ELAPSED IN QUEUE</div>
+                    <div class="queue-timer" id="queue-timer-display">00:00</div>
+                    <div class="queue-tip" style="color: #94a3b8; font-size: 0.85rem;">
+                        Connecting to tactical network • Initializing battlefield sectors...
+                    </div>
+                </div>
+
+                <button class="portal-btn btn-danger" id="btn-cancel-queue">
+                    ❌ Cancel Queue
                 </button>
-                <button class="portal-btn btn-secondary" id="btn-play-solo">
-                    🤖 Play Solo vs AI
-                </button>
             </div>
 
-            <!-- Tactical Field Manual -->
-            <div class="controls-card">
-                <div class="controls-title">🎮 QUICK GUIDE & CONTROLS</div>
-                <div class="controls-row">
-                    <span><strong>Select:</strong> Left-Click / Drag Box</span>
-                    <span><strong>Orders:</strong> Right-Click (Move / Attack / Harvest)</span>
+            <!-- VIEW 3: Match Found & 3-2-1 Countdown Modal -->
+            <div id="portal-view-match-found" class="portal-view" style="display: none;">
+                <div class="portal-header">
+                    <div class="portal-title" style="color: #4ade80;">⚔️ MATCH FOUND!</div>
+                    <div class="portal-subtitle">Opponent Verified • Deploying to Battlefield</div>
                 </div>
-                <div class="controls-row">
-                    <span><strong>Tactics:</strong> Right-Click Move/Focus Fire | <span class="kbd">S</span> Stop | <span class="kbd">H</span> Hold Position</span>
-                    <span><strong>Abilities:</strong> <span class="kbd">T</span> Stimpack | <span class="kbd">E</span> Siege Mode</span>
-                </div>
-                <div class="controls-row">
-                    <span><strong>Structures:</strong> <span class="kbd">B</span> Build Menu (HQ, Barracks, Supply Depot, Gun Turret)</span>
-                    <span><strong>Menu:</strong> <span class="kbd">Tab</span> / <span class="kbd">F1</span> for Match Lobby</span>
-                </div>
-            </div>
 
-            <div class="server-status-bar">
-                <span id="loading-badge"><div class="mini-spinner"></div> Loading Wasm Game Engine...</span>
-                <span id="server-cloud-badge" style="display:none;">🌐 Server: <strong>Online (UpCloud FI-HEL1)</strong></span>
+                <div class="matchup-banner">
+                    <div class="match-player">
+                        <div class="player-badge" style="background: rgba(56, 189, 248, 0.2); color: #38bdf8; border: 2px solid #38bdf8;">C</div>
+                        <div class="player-name">Commander</div>
+                        <div class="player-role" style="font-size: 0.75rem; color: #38bdf8;">YOU (BLUE)</div>
+                    </div>
+                    <div class="vs-text">VS</div>
+                    <div class="match-player">
+                        <div class="player-badge" id="opponent-badge" style="background: rgba(239, 68, 68, 0.2); color: #ef4444; border: 2px solid #ef4444;">E</div>
+                        <div class="player-name" id="opponent-name-val">Challenger</div>
+                        <div class="player-role" id="opponent-color-val" style="font-size: 0.75rem; color: #ef4444;">OPPONENT (RED)</div>
+                    </div>
+                </div>
+
+                <div class="countdown-box">
+                    <div class="countdown-badge" id="match-countdown-number">3</div>
+                    <div id="match-countdown-label" style="text-align:center; font-weight:700; color:#94a3b8; font-size:0.9rem; letter-spacing:0.05em;">PREPARE FOR BATTLE...</div>
+                </div>
             </div>
         </div>
     </div>
@@ -538,6 +776,7 @@
         const mobileOverlay = document.getElementById('mobile-overlay');
         const btnPlay1v1 = document.getElementById('btn-play-1v1');
         const btnPlaySolo = document.getElementById('btn-play-solo');
+        const btnCancelQueue = document.getElementById('btn-cancel-queue');
         const loadingBadge = document.getElementById('loading-badge');
         const serverCloudBadge = document.getElementById('server-cloud-badge');
         const btnCopyLink = document.getElementById('btn-copy-link');
@@ -621,7 +860,60 @@
                 });
             }
         } else {
-            // Desktop flow
+            // Desktop flow & Views Management
+            let queueTimerInterval = null;
+            let queueSeconds = 0;
+            let countdownTimerInterval = null;
+
+            function showView(viewId) {
+                ['portal-view-main', 'portal-view-queue', 'portal-view-match-found'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.style.display = (id === viewId) ? 'flex' : 'none';
+                });
+            }
+
+            function startQueueTimer() {
+                clearInterval(queueTimerInterval);
+                queueSeconds = 0;
+                const timerEl = document.getElementById('queue-timer-display');
+                if (timerEl) timerEl.innerText = '00:00';
+                queueTimerInterval = setInterval(() => {
+                    queueSeconds++;
+                    const mins = String(Math.floor(queueSeconds / 60)).padStart(2, '0');
+                    const secs = String(queueSeconds % 60).padStart(2, '0');
+                    if (timerEl) timerEl.innerText = `${mins}:${secs}`;
+                }, 1000);
+            }
+
+            function stopQueueTimer() {
+                clearInterval(queueTimerInterval);
+                queueTimerInterval = null;
+            }
+
+            function playWebAudioBeep(freq = 880, duration = 0.08) {
+                try {
+                    const AudioContext = window.AudioContext || window.webkitAudioContext;
+                    if (!AudioContext) return;
+                    if (!window.__audio_ctx) {
+                        window.__audio_ctx = new AudioContext();
+                    }
+                    const ctx = window.__audio_ctx;
+                    if (ctx.state === 'suspended') {
+                        ctx.resume();
+                    }
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(freq, ctx.currentTime);
+                    gain.gain.setValueAtTime(0.12, ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    osc.start();
+                    osc.stop(ctx.currentTime + duration);
+                } catch (e) {}
+            }
+
             function launchGame(mode) {
                 window.__rts_requested_mode = mode;
                 if (portalOverlay) {
@@ -633,11 +925,80 @@
             }
 
             if (btnPlay1v1) {
-                btnPlay1v1.addEventListener('click', () => launchGame('1v1'));
+                btnPlay1v1.addEventListener('click', () => {
+                    showView('portal-view-queue');
+                    startQueueTimer();
+                    window.__rts_requested_mode = '1v1';
+                });
             }
+
             if (btnPlaySolo) {
                 btnPlaySolo.addEventListener('click', () => launchGame('solo'));
             }
+
+            if (btnCancelQueue) {
+                btnCancelQueue.addEventListener('click', () => {
+                    stopQueueTimer();
+                    window.__rts_cancel_queue = true;
+                    showView('portal-view-main');
+                });
+            }
+
+            // Global callbacks invoked from Bevy Rust WebAssembly
+            window.__rts_on_queue_cancelled = function() {
+                stopQueueTimer();
+                showView('portal-view-main');
+            };
+
+            window.__rts_on_match_found = function(opponentName, opponentColor, countdownSecs) {
+                stopQueueTimer();
+                showView('portal-view-match-found');
+
+                const oppNameEl = document.getElementById('opponent-name-val');
+                const oppColorEl = document.getElementById('opponent-color-val');
+                const oppBadge = document.getElementById('opponent-badge');
+                const countNumEl = document.getElementById('match-countdown-number');
+                const countLblEl = document.getElementById('match-countdown-label');
+
+                const oppName = opponentName || 'Challenger';
+                const oppCol = opponentColor || 'Red';
+
+                if (oppNameEl) oppNameEl.innerText = oppName;
+                if (oppColorEl) oppColorEl.innerText = `OPPONENT (${oppCol.toUpperCase()})`;
+                if (oppBadge) oppBadge.innerText = oppName.charAt(0).toUpperCase();
+
+                let count = Math.ceil(countdownSecs || 3);
+                if (countNumEl) {
+                    countNumEl.innerText = count;
+                    countNumEl.style.color = '#38bdf8';
+                }
+                playWebAudioBeep(880, 0.1);
+
+                clearInterval(countdownTimerInterval);
+                countdownTimerInterval = setInterval(() => {
+                    count--;
+                    if (count > 0) {
+                        if (countNumEl) {
+                            countNumEl.innerText = count;
+                            countNumEl.style.color = '#38bdf8';
+                        }
+                        playWebAudioBeep(880, 0.1);
+                    } else if (count === 0) {
+                        if (countNumEl) {
+                            countNumEl.innerText = '⚡ ENGAGE! ⚡';
+                            countNumEl.style.color = '#4ade80';
+                        }
+                        if (countLblEl) countLblEl.innerText = 'COMMAND PROTOCOLS ENGAGED';
+                        playWebAudioBeep(1320, 0.25);
+                    } else {
+                        clearInterval(countdownTimerInterval);
+                        if (portalOverlay) {
+                            portalOverlay.classList.add('hidden');
+                            if (canvas) canvas.focus();
+                        }
+                    }
+                }, 1000);
+            };
 
             // Live Telemetry Polling via /api/stats
             async function fetchServerTelemetry() {

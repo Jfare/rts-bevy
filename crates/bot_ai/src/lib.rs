@@ -21,8 +21,8 @@ impl Default for WaveAiState {
             initial_delay: 40.0,
             wave_interval: 45.0,
             is_active: true,
-            ai_spawn_pos: Vec2::new(700.0, -250.0),
-            target_player_pos: Vec2::new(-700.0, 250.0),
+            ai_spawn_pos: shared::map::P2_BASE_POS,
+            target_player_pos: shared::map::P1_BASE_POS,
         }
     }
 }

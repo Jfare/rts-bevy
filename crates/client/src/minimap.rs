@@ -138,6 +138,21 @@ fn draw_minimap_system(
         Color::srgba(0.15, 0.30, 0.45, 0.35),
     );
 
+    // 1.5. Draw Static Map Obstacles (Dark Slate Radar Terrain) - shrouded if unexplored
+    let obs_color = Color::srgba(0.12, 0.16, 0.22, 0.90);
+    let obs_border = Color::srgba(0.24, 0.35, 0.45, 0.70);
+    let mm_scale = (mm_rect.max.x - mm_rect.min.x) / config.width();
+    for obs in shared::map::STATIC_MAP_OBSTACLES {
+        if fog.get_state_at_world_pos(obs.position, config) == FogState::Unexplored {
+            continue;
+        }
+        let sc = world_to_minimap_screen(obs.position, config, &mm_rect);
+        let wp = to_world(sc);
+        let r_cam = obs.radius * mm_scale * cam_scale;
+        gizmos.circle_2d(wp, r_cam, obs_color);
+        gizmos.circle_2d(wp, r_cam, obs_border);
+    }
+
     // 2. Draw Mineral Nodes (Gold Diamonds) - shrouded if unexplored
     let gold_color = Color::srgb(0.95, 0.80, 0.20);
     for (res_tf, _) in &resources_query {

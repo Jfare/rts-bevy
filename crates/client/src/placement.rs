@@ -117,61 +117,65 @@ fn handle_placement_input(
                     building_kind,
                     position: spawn_pos,
                 });
-            }
+            } else {
+                let size = building_kind.size();
+                let duration = building_kind.build_duration();
+                let max_hp = building_kind.max_health();
 
-            let size = building_kind.size();
-            let duration = building_kind.build_duration();
-            let max_hp = building_kind.max_health();
+                let radius = match building_kind {
+                    BuildingKind::BaseHQ => 55.0,
+                    BuildingKind::Barracks => 46.0,
+                    BuildingKind::SupplyDepot => 30.0,
+                    BuildingKind::Turret => 28.0,
+                };
 
-            let radius = match building_kind {
-                BuildingKind::BaseHQ => 55.0,
-                BuildingKind::Barracks => 46.0,
-                BuildingKind::SupplyDepot => 30.0,
-                BuildingKind::Turret => 28.0,
-            };
+                let mut entity_cmds = commands.spawn((
+                    Building::new(building_kind.name(), size, duration, false),
+                    Health::new(max_hp),
+                    my_faction,
+                    Selectable::default(),
+                    Radius(radius),
+                    NetEntity {
+                        net_id: 9000 + ((spawn_pos.x.abs() as u32 * 31 + spawn_pos.y.abs() as u32 * 17) % 1000),
+                        owner_peer_id: 1,
+                    },
+                    Transform::from_xyz(spawn_pos.x, spawn_pos.y, 1.0),
+                ));
 
-            let mut entity_cmds = commands.spawn((
-                Building::new(building_kind.name(), size, duration, false),
-                Health::new(max_hp),
-                my_faction,
-                Selectable::default(),
-                Radius(radius),
-                Transform::from_xyz(spawn_pos.x, spawn_pos.y, 1.0),
-            ));
-
-            match building_kind {
-                BuildingKind::BaseHQ => {
-                    entity_cmds.insert((
-                        BaseHQ {
-                            supply_provided: 10,
-                            dropoff_radius: 70.0,
-                        },
-                        ProductionBuilding {
-                            queue: Vec::new(),
-                            current_timer: 0.0,
-                            max_queue_size: 5,
-                            rally_point: spawn_pos + Vec2::new(0.0, -100.0),
-                        },
-                    ));
-                }
-                BuildingKind::Barracks => {
-                    entity_cmds.insert((
-                        Barracks,
-                        ProductionBuilding {
-                            queue: Vec::new(),
-                            current_timer: 0.0,
-                            max_queue_size: 5,
-                            rally_point: spawn_pos + Vec2::new(0.0, -90.0),
-                        },
-                    ));
-                }
-                BuildingKind::SupplyDepot => {
-                    entity_cmds.insert(SupplyDepot {
-                        supply_provided: 8,
-                    });
-                }
-                BuildingKind::Turret => {
-                    entity_cmds.insert(GunTurret::default());
+                match building_kind {
+                    BuildingKind::BaseHQ => {
+                        entity_cmds.insert((
+                            BaseHQ {
+                                supply_provided: 10,
+                                dropoff_radius: 70.0,
+                            },
+                            ProductionBuilding {
+                                queue: Vec::new(),
+                                current_timer: 0.0,
+                                max_queue_size: 5,
+                                rally_point: spawn_pos + Vec2::new(0.0, -100.0),
+                            },
+                        ));
+                    }
+                    BuildingKind::Barracks => {
+                        entity_cmds.insert((
+                            Barracks,
+                            ProductionBuilding {
+                                queue: Vec::new(),
+                                current_timer: 0.0,
+                                max_queue_size: 5,
+                                rally_point: spawn_pos + Vec2::new(0.0, -90.0),
+                            },
+                        ));
+                    }
+                    BuildingKind::SupplyDepot => {
+                        entity_cmds.insert(SupplyDepot {
+                            supply_provided: 8,
+                        });
+                    }
+                    BuildingKind::Turret => {
+                        entity_cmds.insert(GunTurret::default());
+                    }
                 }
             }
 
@@ -272,6 +276,12 @@ fn update_placement_validation(
             state.is_valid = false;
             return;
         }
+    }
+
+    // 7. Check Overlap with Static Map Obstacles (Rocks, Cliff Bluffs)
+    if shared::map::is_obstacle_blocked(ghost_pos, ghost_radius, 8.0) {
+        state.is_valid = false;
+        return;
     }
 
     state.is_valid = true;

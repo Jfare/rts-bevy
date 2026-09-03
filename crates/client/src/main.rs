@@ -106,6 +106,6 @@ fn setup_demo_scene(mut commands: Commands) {
     commands.spawn((
         Camera2d,
         RtsCamera::default(),
-        Transform::from_xyz(-600.0, 250.0, 0.0),
+        Transform::from_xyz(shared::map::P1_BASE_POS.x, shared::map::P1_BASE_POS.y, 0.0),
     ));
 }

@@ -172,6 +172,7 @@ pub enum ClientMessage {
         unit_net_ids: Vec<u32>,
         target_position: Vec2,
     },
+    CancelQueue,
     RequestStimpack {
         unit_net_ids: Vec<u32>,
     },
@@ -225,6 +226,12 @@ pub enum ServerMessage {
         room_code: Option<String>,
         is_game_ready: bool,
     },
+    MatchFound {
+        opponent_name: String,
+        opponent_color: FactionColor,
+        countdown_seconds: f32,
+    },
+    QueueCancelled,
     LobbyStats {
         queue_1v1: u32,
         active_1v1_matches: u32,

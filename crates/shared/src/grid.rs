@@ -163,9 +163,9 @@ impl NavGrid {
         }
     }
 
-    /// Marks circular obstacle bounding area as blocked
+    /// Marks circular obstacle bounding area as blocked with unit clearance padding
     pub fn mark_circle(&mut self, center: Vec2, radius: f32) {
-        let cell_r = ((radius + 12.0) / NAV_CELL_SIZE).ceil() as isize;
+        let cell_r = ((radius + 18.0) / NAV_CELL_SIZE).ceil() as isize;
         if let Some((cgx, cgy)) = Self::world_to_grid(center) {
             let cx = cgx as isize;
             let cy = cgy as isize;
@@ -175,7 +175,7 @@ impl NavGrid {
                     let ny = cy + dy;
                     if nx >= 0 && nx < NAV_GRID_DIM as isize && ny >= 0 && ny < NAV_GRID_DIM as isize {
                         let cell_world = Self::grid_to_world(nx as usize, ny as usize);
-                        if cell_world.distance(center) <= (radius + 10.0) {
+                        if cell_world.distance(center) <= (radius + 14.0) {
                             self.set_blocked(nx as usize, ny as usize, true);
                         }
                     }
@@ -190,7 +190,7 @@ impl NavGrid {
         if dist < 1.0 {
             return true;
         }
-        let steps = (dist / (NAV_CELL_SIZE * 0.4)).ceil() as usize;
+        let steps = (dist / (NAV_CELL_SIZE * 0.3)).ceil() as usize;
         for i in 0..=steps {
             let t = i as f32 / steps as f32;
             let sample = p1.lerp(p2, t);
@@ -469,9 +469,7 @@ mod tests {
     #[test]
     fn test_path_destination_inside_obstacle_clamps_to_walkable_boundary() {
         let mut nav = NavGrid::default();
-        // Place building at (0, 0)
         nav.mark_circle(Vec2::new(0.0, 0.0), 70.0);
-
         let start = Vec2::new(-300.0, 0.0);
         let goal_inside = Vec2::new(0.0, 0.0); // Inside building!
 
@@ -481,6 +479,26 @@ mod tests {
         let (fgx, fgy) = NavGrid::world_to_grid(final_wp).unwrap();
         assert!(!nav.is_blocked(fgx, fgy), "Final waypoint must be in a walkable cell outside the building");
         assert!(final_wp.distance(goal_inside) >= 40.0, "Final waypoint must be clamped away from obstacle center");
+    }
+
+    #[test]
+    fn test_nav_grid_routes_from_south_to_north_base() {
+        let mut nav = NavGrid::default();
+        crate::map::mark_static_obstacles(&mut nav);
+
+        let start = crate::map::P1_BASE_POS; // (0, -1000)
+        let goal = crate::map::P2_BASE_POS;  // (0, 1000)
+
+        let path = nav.find_path(start, goal);
+        assert!(!path.is_empty(), "A path between bases must exist");
+        assert_eq!(path.last().copied(), Some(goal), "Final destination must reach goal");
+
+        // Verify none of the waypoints are inside any static map obstacle
+        for wp in &path {
+            if let Some((gx, gy)) = NavGrid::world_to_grid(*wp) {
+                assert!(!nav.is_blocked(gx, gy), "Waypoint {:?} should not be blocked in NavGrid", wp);
+            }
+        }
     }
 }
 

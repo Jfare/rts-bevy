@@ -1,12 +1,12 @@
 use bevy::prelude::*;
 use bevy::ui::FocusPolicy;
-use bot_ai::WaveAiState;
 use shared::components::{
     Building, Faction, GunTurret, Health, MatchOutcome, ProductionBuilding, ResourceNode, Selectable,
     SiegeTank, Soldier, Stimpack, TacticalStance, Unit, Worker,
 };
 use shared::economy::PlayerEconomy;
 use shared::protocol::{ClientMessage, FactionColor, GameMode};
+use crate::audio_sfx::SoundEffect;
 use crate::net::{NetClient, NetStatus};
 use crate::placement::PlacementState;
 use crate::stats::MatchStats;
@@ -16,16 +16,17 @@ pub struct RtsUiPlugin;
 impl Plugin for RtsUiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<JoinCodeInputState>()
+            .init_resource::<MatchCountdown>()
             .add_systems(Startup, setup_hud)
             .add_systems(
                 Update,
                 (
                     update_hud_economy_text,
-                    update_hud_wave_text,
                     update_hud_network_status,
                     update_selection_info_text,
                     update_command_card_text,
                     update_match_outcome_banner,
+                    update_match_countdown_system,
                     handle_lobby_button_interactions,
                     handle_join_code_keyboard_input,
                     handle_play_again_button_interaction,
@@ -38,6 +39,16 @@ impl Plugin for RtsUiPlugin {
 }
 
 #[derive(Resource, Default, Debug, Clone)]
+pub struct MatchCountdown {
+    pub is_active: bool,
+    pub remaining_seconds: f32,
+    pub opponent_name: String,
+    pub opponent_color: FactionColor,
+    pub last_announced_second: i32,
+    pub has_played_go_sound: bool,
+}
+
+#[derive(Resource, Default, Debug, Clone)]
 pub struct JoinCodeInputState {
     pub code: String,
     pub is_focused: bool,
@@ -47,6 +58,7 @@ pub struct JoinCodeInputState {
 pub enum LobbyButtonAction {
     PlaySolo,
     Find1v1,
+    CancelQueue,
     CreatePrivate,
     JoinPrivate,
     FocusJoinCode,
@@ -54,6 +66,15 @@ pub enum LobbyButtonAction {
     ToggleModal,
     CloseModal,
 }
+
+#[derive(Component)]
+pub struct CountdownOverlayContainer;
+
+#[derive(Component)]
+pub struct CountdownNumberText;
+
+#[derive(Component)]
+pub struct CountdownSubText;
 
 #[derive(Component)]
 pub struct ColorSwatchBorder(pub FactionColor);
@@ -78,9 +99,6 @@ struct SupplyText;
 
 #[derive(Component)]
 struct ApmText;
-
-#[derive(Component)]
-struct WaveCountdownText;
 
 #[derive(Component)]
 struct SelectionTitleText;
@@ -234,16 +252,6 @@ fn setup_hud(mut commands: Commands) {
                             FocusPolicy::Pass,
                         ));
                         res_group.spawn((
-                            Text::new("⏳ Wave 1 in: 40s"),
-                            TextFont {
-                                font_size: 16.0,
-                                ..default()
-                            },
-                            TextColor(Color::srgb(0.95, 0.40, 0.30)),
-                            WaveCountdownText,
-                            FocusPolicy::Pass,
-                        ));
-                        res_group.spawn((
                             Text::new("🌐 Connecting..."),
                             TextFont {
                                 font_size: 14.0,
@@ -370,6 +378,56 @@ fn setup_hud(mut commands: Commands) {
             });
 
             // ─────────────────────────────────────────────────────────────────
+            // CENTER COUNTDOWN OVERLAY (3, 2, 1, ENGAGE!)
+            // ─────────────────────────────────────────────────────────────────
+            root.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Percent(50.0),
+                    top: Val::Percent(38.0),
+                    margin: UiRect {
+                        left: Val::Px(-180.0),
+                        top: Val::Px(-80.0),
+                        ..default()
+                    },
+                    width: Val::Px(360.0),
+                    height: Val::Px(160.0),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    flex_direction: FlexDirection::Column,
+                    display: Display::None,
+                    padding: UiRect::all(Val::Px(16.0)),
+                    row_gap: Val::Px(6.0),
+                    border: UiRect::all(Val::Px(2.0)),
+                    ..default()
+                },
+                BorderRadius::all(Val::Px(12.0)),
+                BackgroundColor(Color::srgba(0.04, 0.07, 0.12, 0.95)),
+                BorderColor(Color::srgb(0.22, 0.74, 0.97)),
+                CountdownOverlayContainer,
+            ))
+            .with_children(|cd| {
+                cd.spawn((
+                    Text::new("3"),
+                    TextFont {
+                        font_size: 56.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.22, 0.74, 0.97)),
+                    CountdownNumberText,
+                ));
+                cd.spawn((
+                    Text::new("PREPARE FOR BATTLE"),
+                    TextFont {
+                        font_size: 13.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.70, 0.85, 0.95)),
+                    CountdownSubText,
+                ));
+            });
+
+            // ─────────────────────────────────────────────────────────────────
             // CENTER MULTIPLAYER LOBBY MODAL (Interactive Mode Selector)
             // ─────────────────────────────────────────────────────────────────
             root.spawn((
@@ -490,32 +548,70 @@ fn setup_hud(mut commands: Commands) {
                 // MATCHMAKING & PRIVATE LOBBY BUTTONS
                 // ─────────────────────────────────────────────────────────────
 
-                // Button 1: Quick Match 1v1
+                // Button 1: Quick Match 1v1 and Cancel Queue Row
                 modal
                     .spawn((
-                        Button,
                         Node {
-                            padding: UiRect::axes(Val::Px(14.0), Val::Px(10.0)),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            border: UiRect::all(Val::Px(1.5)),
+                            width: Val::Percent(100.0),
+                            flex_direction: FlexDirection::Row,
+                            column_gap: Val::Px(10.0),
                             ..default()
                         },
-                        BorderRadius::all(Val::Px(6.0)),
-                        BackgroundColor(Color::srgba(0.15, 0.30, 0.45, 0.95)),
-                        BorderColor(Color::srgb(0.40, 0.85, 1.0)),
-                        LobbyButtonAction::Find1v1,
+                        FocusPolicy::Pass,
                     ))
-                    .with_children(|btn| {
-                        btn.spawn((
-                            Text::new("⚔️ QUICK MATCH (FIND 1v1 OPPONENT)"),
-                            TextFont {
-                                font_size: 14.0,
+                    .with_children(|row| {
+                        row.spawn((
+                            Button,
+                            Node {
+                                flex_grow: 1.0,
+                                padding: UiRect::axes(Val::Px(14.0), Val::Px(10.0)),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                border: UiRect::all(Val::Px(1.5)),
                                 ..default()
                             },
-                            TextColor(Color::srgb(0.95, 0.98, 1.0)),
-                            FocusPolicy::Pass,
-                        ));
+                            BorderRadius::all(Val::Px(6.0)),
+                            BackgroundColor(Color::srgba(0.15, 0.30, 0.45, 0.95)),
+                            BorderColor(Color::srgb(0.40, 0.85, 1.0)),
+                            LobbyButtonAction::Find1v1,
+                        ))
+                        .with_children(|btn| {
+                            btn.spawn((
+                                Text::new("⚔️ QUICK MATCH (FIND 1v1)"),
+                                TextFont {
+                                    font_size: 13.0,
+                                    ..default()
+                                },
+                                TextColor(Color::srgb(0.95, 0.98, 1.0)),
+                                FocusPolicy::Pass,
+                            ));
+                        });
+
+                        row.spawn((
+                            Button,
+                            Node {
+                                padding: UiRect::axes(Val::Px(12.0), Val::Px(10.0)),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                border: UiRect::all(Val::Px(1.5)),
+                                ..default()
+                            },
+                            BorderRadius::all(Val::Px(6.0)),
+                            BackgroundColor(Color::srgba(0.35, 0.15, 0.15, 0.95)),
+                            BorderColor(Color::srgb(0.90, 0.35, 0.35)),
+                            LobbyButtonAction::CancelQueue,
+                        ))
+                        .with_children(|btn| {
+                            btn.spawn((
+                                Text::new("❌ CANCEL"),
+                                TextFont {
+                                    font_size: 13.0,
+                                    ..default()
+                                },
+                                TextColor(Color::srgb(1.0, 0.85, 0.85)),
+                                FocusPolicy::Pass,
+                            ));
+                        });
                     });
 
                 // Row for Private Lobby creation and joining
@@ -915,6 +1011,10 @@ fn handle_lobby_button_interactions(
                             info!("🔑 [Lobby] Joining private room with code: {}", join_code_state.code);
                         }
                     }
+                    LobbyButtonAction::CancelQueue => {
+                        net_client.send(&ClientMessage::CancelQueue);
+                        info!("🚪 [Lobby] Sent CancelQueue to server.");
+                    }
                     LobbyButtonAction::PlaySolo => {
                         net_client.current_mode = GameMode::SoloVsAi;
                         net_client.send(&ClientMessage::JoinLobby {
@@ -936,6 +1036,7 @@ fn handle_lobby_button_interactions(
             Interaction::None => {
                 bg_color.0 = match action {
                     LobbyButtonAction::Find1v1 => Color::srgba(0.15, 0.30, 0.45, 0.95),
+                    LobbyButtonAction::CancelQueue => Color::srgba(0.35, 0.15, 0.15, 0.95),
                     LobbyButtonAction::CreatePrivate => Color::srgba(0.25, 0.20, 0.40, 0.95),
                     LobbyButtonAction::FocusJoinCode | LobbyButtonAction::JoinPrivate => Color::srgba(0.20, 0.28, 0.35, 0.95),
                     LobbyButtonAction::PlaySolo => Color::srgba(0.12, 0.28, 0.22, 0.95),
@@ -1083,38 +1184,6 @@ fn update_hud_economy_text(
     }
     for mut text in &mut apm_query {
         text.0 = format!("⚡ APM: {}", stats.current_apm());
-    }
-}
-
-fn update_hud_wave_text(
-    net_client: Res<NetClient>,
-    wave_state: Option<Res<WaveAiState>>,
-    outcome: Option<Res<MatchOutcome>>,
-    mut text_query: Query<&mut Text, With<WaveCountdownText>>,
-) {
-    for mut text in &mut text_query {
-        if net_client.current_mode == GameMode::Multiplayer1v1 {
-            let role = if net_client.my_faction == Faction::Player1 {
-                "P1 (Blue)"
-            } else {
-                "P2 (Red)"
-            };
-            text.0 = format!("⚔️ 1v1 PvP [{}]", role);
-        } else if let Some(ref wave_state) = wave_state {
-            if !wave_state.is_active {
-                if outcome.as_deref() == Some(&MatchOutcome::Victory) {
-                    text.0 = "🏆 Victory! Waves Cleared".to_string();
-                } else if outcome.as_deref() == Some(&MatchOutcome::Defeat) {
-                    text.0 = "💥 Base Fallen".to_string();
-                } else {
-                    text.0 = "🛑 Assault Ended".to_string();
-                }
-            } else {
-                let secs = wave_state.time_until_next_wave.max(0.0) as u32;
-                let wave_num = wave_state.current_wave + 1;
-                text.0 = format!("⏳ Wave {} in: {}s", wave_num, secs);
-            }
-        }
     }
 }
 
@@ -1443,6 +1512,80 @@ fn handle_return_to_landing_button_interaction(
             Interaction::None => {
                 bg_color.0 = Color::srgba(0.22, 0.26, 0.34, 0.95);
             }
+        }
+    }
+}
+
+fn update_match_countdown_system(
+    time: Res<Time>,
+    mut countdown: ResMut<MatchCountdown>,
+    mut sound_events: EventWriter<SoundEffect>,
+    mut container_query: Query<&mut Node, With<CountdownOverlayContainer>>,
+    mut text_query: Query<&mut Text, (With<CountdownNumberText>, Without<CountdownSubText>)>,
+    mut subtext_query: Query<&mut Text, (With<CountdownSubText>, Without<CountdownNumberText>)>,
+    mut color_query: Query<&mut TextColor, With<CountdownNumberText>>,
+) {
+    if !countdown.is_active {
+        for mut node in &mut container_query {
+            node.display = Display::None;
+        }
+        return;
+    }
+
+    countdown.remaining_seconds -= time.delta_secs();
+
+    let sec = countdown.remaining_seconds.ceil() as i32;
+    if sec > 0 && sec < countdown.last_announced_second {
+        countdown.last_announced_second = sec;
+        sound_events.send(SoundEffect::CountdownBeep);
+    }
+
+    if countdown.remaining_seconds <= 0.0 && !countdown.has_played_go_sound {
+        countdown.has_played_go_sound = true;
+        sound_events.send(SoundEffect::MatchStart);
+    }
+
+    if countdown.remaining_seconds <= -1.2 {
+        countdown.is_active = false;
+        for mut node in &mut container_query {
+            node.display = Display::None;
+        }
+        return;
+    }
+
+    for mut node in &mut container_query {
+        node.display = Display::Flex;
+    }
+
+    for mut text in &mut text_query {
+        if countdown.remaining_seconds > 2.0 {
+            text.0 = "3".to_string();
+        } else if countdown.remaining_seconds > 1.0 {
+            text.0 = "2".to_string();
+        } else if countdown.remaining_seconds > 0.0 {
+            text.0 = "1".to_string();
+        } else {
+            text.0 = "⚡ ENGAGE! ⚡".to_string();
+        }
+    }
+
+    for mut color in &mut color_query {
+        if countdown.remaining_seconds > 0.0 {
+            color.0 = Color::srgb(0.22, 0.74, 0.97); // Cyan
+        } else {
+            color.0 = Color::srgb(0.29, 0.87, 0.50); // Emerald Green
+        }
+    }
+
+    for mut subtext in &mut subtext_query {
+        if countdown.remaining_seconds > 0.0 {
+            if !countdown.opponent_name.is_empty() {
+                subtext.0 = format!("VS {}", countdown.opponent_name);
+            } else {
+                subtext.0 = "PREPARE FOR BATTLE".to_string();
+            }
+        } else {
+            subtext.0 = "COMMAND PROTOCOLS ENGAGED".to_string();
         }
     }
 }

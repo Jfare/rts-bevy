@@ -86,13 +86,7 @@ fn production_queue_system(
         return;
     }
 
-    if let Some(ref net) = net_client {
-        if net.status == NetStatus::InGame {
-            // In online matches, the server simulates production queues and authoritatively spawns units
-            return;
-        }
-    }
-
+    let is_online = net_client.as_ref().map(|n| n.status == NetStatus::InGame).unwrap_or(false);
     let dt = time.delta_secs();
 
     for (building_entity, mut prod, building, transform, faction, radius) in &mut prod_query {
@@ -100,9 +94,16 @@ fn production_queue_system(
             continue;
         }
 
-        prod.current_timer += dt;
         let target_duration = prod.queue[0].build_duration;
 
+        if is_online {
+            // In online matches, smoothly advance the client-side timer for visuals,
+            // while unit completion and entity spawning is handled authoritatively by the server
+            prod.current_timer = (prod.current_timer + dt).min(target_duration);
+            continue;
+        }
+
+        prod.current_timer += dt;
         if prod.current_timer >= target_duration {
             let completed_unit = prod.queue.remove(0);
             prod.current_timer = 0.0;

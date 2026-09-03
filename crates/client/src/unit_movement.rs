@@ -29,6 +29,7 @@ fn update_nav_grid_system(
     resources: Query<(&Transform, &Radius), With<ResourceNode>>,
 ) {
     nav_grid.clear();
+    shared::map::mark_static_obstacles(&mut nav_grid);
 
     for (tf, radius, building) in &buildings {
         let pos = tf.translation.truncate();
@@ -114,7 +115,7 @@ fn unit_movement_system(
         let is_final_waypoint = move_target.current_waypoint_idx >= (move_target.waypoints.len() - 1);
 
         // If close to intermediate waypoint, advance to next waypoint
-        if !is_final_waypoint && dist <= 16.0 {
+        if !is_final_waypoint && dist <= 20.0 {
             move_target.advance_waypoint();
             move_target.stall_timer = 0.0;
             move_target.last_pos = current_pos;
@@ -123,7 +124,7 @@ fn unit_movement_system(
 
         // Final destination reached or cleanly settled against obstacle
         if is_final_waypoint {
-            if dist <= 8.0 || (dist <= 26.0 && move_target.stall_timer > 0.25) || move_target.stall_timer > 0.75 {
+            if dist <= 12.0 || (dist <= 32.0 && move_target.stall_timer > 0.20) || move_target.stall_timer > 0.50 {
                 commands.entity(entity).remove::<MoveTarget>();
                 continue;
             }
@@ -334,7 +335,7 @@ fn unit_separation_and_collision_system(
 
             let b_pos = b_trans.translation.truncate();
             let d = snap.pos.distance(b_pos);
-            let min_b_dist = snap.radius + b_radius.0 + 2.0;
+            let min_b_dist = snap.radius + b_radius.0;
 
             if d < min_b_dist {
                 let push_dir = if d > 0.001 {
@@ -351,7 +352,7 @@ fn unit_separation_and_collision_system(
             for (r_trans, r_radius) in &resource_query {
                 let r_pos = r_trans.translation.truncate();
                 let d = snap.pos.distance(r_pos);
-                let min_r_dist = snap.radius + r_radius.0 + 2.0;
+                let min_r_dist = snap.radius + r_radius.0;
 
                 if d < min_r_dist {
                     let push_dir = if d > 0.001 {
@@ -361,6 +362,21 @@ fn unit_separation_and_collision_system(
                     };
                     snap.pos = r_pos + push_dir * min_r_dist;
                 }
+            }
+        }
+
+        // Push away from static map obstacles (rocks, cliff bluffs)
+        for obs in shared::map::STATIC_MAP_OBSTACLES {
+            let d = snap.pos.distance(obs.position);
+            let min_obs_dist = snap.radius + obs.radius;
+
+            if d < min_obs_dist {
+                let push_dir = if d > 0.001 {
+                    (snap.pos - obs.position) / d
+                } else {
+                    Vec2::new(0.0, 1.0)
+                };
+                snap.pos = obs.position + push_dir * min_obs_dist;
             }
         }
     }

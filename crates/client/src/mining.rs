@@ -64,7 +64,7 @@ fn handle_mining_click_orders(
     let mut clicked_node = None;
     for (node_entity, node_transform, radius, resource_node, net_opt) in &node_query {
         let node_pos = node_transform.translation.truncate();
-        if click_pos.distance(node_pos) <= (radius.0 + 8.0) && resource_node.remaining_minerals > 0 {
+        if click_pos.distance(node_pos) <= (radius.0 + 20.0) && resource_node.remaining_minerals > 0 {
             clicked_node = Some((node_entity, net_opt.map(|n| n.net_id)));
             break;
         }

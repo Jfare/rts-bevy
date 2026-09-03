@@ -34,6 +34,7 @@ impl Plugin for ServerSimulationPlugin {
             .add_systems(
                 Update,
                 (
+                    server_room_tick_system,
                     handle_incoming_network_events,
                     update_server_nav_grid_system,
                     server_combat_system,
@@ -58,6 +59,22 @@ pub struct ServerTickTimer(pub Timer);
 
 #[derive(Resource)]
 pub struct ServerStatsTimer(pub Timer);
+
+fn server_room_tick_system(
+    time: Res<Time>,
+    mut matchmaker: ResMut<Matchmaker>,
+) {
+    let dt = time.delta_secs();
+    for room in matchmaker.rooms.values_mut() {
+        if room.is_active {
+            if room.countdown_timer > 0.0 {
+                room.countdown_timer = (room.countdown_timer - dt).max(0.0);
+            } else {
+                room.match_time += dt;
+            }
+        }
+    }
+}
 
 fn server_lobby_stats_broadcast_system(
     time: Res<Time>,
@@ -175,6 +192,27 @@ fn handle_incoming_network_events(
                             room_code,
                             faction_color,
                         );
+                    }
+                    shared::protocol::ClientMessage::CancelQueue => {
+                        if matchmaker.cancel_queue(peer_id) {
+                            info!("🚪 [GameServer] Peer #{} cancelled 1v1 queue", peer_id);
+                            let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::SendToPeer {
+                                peer_id,
+                                msg: ServerMessage::QueueCancelled,
+                            });
+                            let (q, a1, m1, aso, mso, tot) = matchmaker.get_telemetry();
+                            crate::net_server::update_global_telemetry(q, a1, aso, tot);
+                            let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::Broadcast {
+                                msg: ServerMessage::LobbyStats {
+                                    queue_1v1: q,
+                                    active_1v1_matches: a1,
+                                    max_1v1_matches: m1,
+                                    active_solo_matches: aso,
+                                    max_solo_matches: mso,
+                                    total_online: tot,
+                                },
+                            });
+                        }
                     }
                     shared::protocol::ClientMessage::RequestLobbyStats => {
                         let (q, a1, m1, aso, mso, tot) = matchmaker.get_telemetry();
@@ -688,6 +726,11 @@ fn handle_incoming_network_events(
                             .map(|p| p.room_id)
                             .unwrap_or(0);
 
+                        let b_radius = building_kind.size().x.max(building_kind.size().y) * 0.5;
+                        if shared::map::is_obstacle_blocked(position, b_radius, 4.0) {
+                            continue;
+                        }
+
                         if economy.has_minerals(player_faction, building_kind.mineral_cost()) {
                             economy.spend_minerals(player_faction, building_kind.mineral_cost());
                             let net_id = matchmaker.alloc_net_id();
@@ -925,6 +968,7 @@ fn handle_join_lobby(
                     p2_peer: None,
                     is_active: true,
                     match_time: 0.0,
+                    countdown_timer: 0.0,
                     current_wave: 0,
                     time_until_next_wave: 40.0,
                 },
@@ -956,8 +1000,8 @@ fn handle_join_lobby(
             let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::SendToPeer {
                 peer_id,
                 msg: ServerMessage::GameStarted {
-                    p1_pos: Vec2::new(-700.0, 250.0),
-                    p2_pos: Vec2::new(700.0, -250.0),
+                    p1_pos: shared::map::P1_BASE_POS,
+                    p2_pos: shared::map::P2_BASE_POS,
                     wave_initial_delay: 40.0,
                 },
             });
@@ -1015,6 +1059,8 @@ fn handle_join_lobby(
                     .map(|p| p.color)
                     .unwrap_or(FactionColor::Blue);
 
+                let p2_color = if color == p1_color { FactionColor::Red } else { color };
+
                 matchmaker.players.insert(
                     waiting_p1,
                     PlayerSession {
@@ -1033,7 +1079,7 @@ fn handle_join_lobby(
                         name: player_name.clone(),
                         room_id,
                         faction: Faction::Player2,
-                        color: if color == p1_color { FactionColor::Red } else { color },
+                        color: p2_color,
                     },
                 );
 
@@ -1047,6 +1093,7 @@ fn handle_join_lobby(
                         p2_peer: Some(peer_id),
                         is_active: true,
                         match_time: 0.0,
+                        countdown_timer: 3.0,
                         current_wave: 0,
                         time_until_next_wave: 40.0,
                     },
@@ -1064,7 +1111,19 @@ fn handle_join_lobby(
                 let (p1_cur_sup, p1_max_sup) = economy.get_supply(Faction::Player1);
                 let (p2_cur_sup, p2_max_sup) = economy.get_supply(Faction::Player2);
 
-                for (p_id, faction) in [(waiting_p1, Faction::Player1), (peer_id, Faction::Player2)] {
+                for (p_id, faction, opp_name, opp_color) in [
+                    (waiting_p1, Faction::Player1, player_name.clone(), p2_color),
+                    (peer_id, Faction::Player2, p1_name.clone(), p1_color),
+                ] {
+                    let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::SendToPeer {
+                        peer_id: p_id,
+                        msg: ServerMessage::MatchFound {
+                            opponent_name: opp_name,
+                            opponent_color: opp_color,
+                            countdown_seconds: 3.0,
+                        },
+                    });
+
                     let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::SendToPeer {
                         peer_id: p_id,
                         msg: ServerMessage::LobbyJoined {
@@ -1079,8 +1138,8 @@ fn handle_join_lobby(
                     let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::SendToPeer {
                         peer_id: p_id,
                         msg: ServerMessage::GameStarted {
-                            p1_pos: Vec2::new(-700.0, 250.0),
-                            p2_pos: Vec2::new(700.0, -250.0),
+                            p1_pos: shared::map::P1_BASE_POS,
+                            p2_pos: shared::map::P2_BASE_POS,
                             wave_initial_delay: 0.0,
                         },
                     });
@@ -1110,6 +1169,19 @@ fn handle_join_lobby(
                         is_system: true,
                     },
                 });
+
+                let (q, a1, m1, aso, mso, tot) = matchmaker.get_telemetry();
+                crate::net_server::update_global_telemetry(q, a1, aso, tot);
+                let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::Broadcast {
+                    msg: ServerMessage::LobbyStats {
+                        queue_1v1: q,
+                        active_1v1_matches: a1,
+                        max_1v1_matches: m1,
+                        active_solo_matches: aso,
+                        max_solo_matches: mso,
+                        total_online: tot,
+                    },
+                });
             } else {
                 // First player in 1v1 queue -> wait for opponent
                 matchmaker.waiting_1v1_peer = Some(peer_id);
@@ -1134,6 +1206,19 @@ fn handle_join_lobby(
                         is_game_ready: false,
                     },
                 });
+
+                let (q, a1, m1, aso, mso, tot) = matchmaker.get_telemetry();
+                crate::net_server::update_global_telemetry(q, a1, aso, tot);
+                let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::Broadcast {
+                    msg: ServerMessage::LobbyStats {
+                        queue_1v1: q,
+                        active_1v1_matches: a1,
+                        max_1v1_matches: m1,
+                        active_solo_matches: aso,
+                        max_solo_matches: mso,
+                        total_online: tot,
+                    },
+                });
             }
         }
         GameMode::CustomPrivate => {
@@ -1144,6 +1229,7 @@ fn handle_join_lobby(
                     if let Some(room) = matchmaker.rooms.get_mut(&target_room_id) {
                         room.p2_peer = Some(peer_id);
                         room.is_active = true;
+                        room.countdown_timer = 3.0;
                     }
 
                     let p1_name = matchmaker
@@ -1158,6 +1244,8 @@ fn handle_join_lobby(
                         .map(|p| p.color)
                         .unwrap_or(FactionColor::Blue);
 
+                    let p2_color = if color == p1_color { FactionColor::Red } else { color };
+
                     matchmaker.players.insert(
                         peer_id,
                         PlayerSession {
@@ -1165,7 +1253,7 @@ fn handle_join_lobby(
                             name: player_name.clone(),
                             room_id: target_room_id,
                             faction: Faction::Player2,
-                            color: if color == p1_color { FactionColor::Red } else { color },
+                            color: p2_color,
                         },
                     );
 
@@ -1181,7 +1269,19 @@ fn handle_join_lobby(
                     let (p1_cur_sup, p1_max_sup) = economy.get_supply(Faction::Player1);
                     let (p2_cur_sup, p2_max_sup) = economy.get_supply(Faction::Player2);
 
-                    for (p_id, faction) in [(waiting_p1, Faction::Player1), (peer_id, Faction::Player2)] {
+                    for (p_id, faction, opp_name, opp_color) in [
+                        (waiting_p1, Faction::Player1, player_name.clone(), p2_color),
+                        (peer_id, Faction::Player2, p1_name.clone(), p1_color),
+                    ] {
+                        let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::SendToPeer {
+                            peer_id: p_id,
+                            msg: ServerMessage::MatchFound {
+                                opponent_name: opp_name,
+                                opponent_color: opp_color,
+                                countdown_seconds: 3.0,
+                            },
+                        });
+
                         let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::SendToPeer {
                             peer_id: p_id,
                             msg: ServerMessage::LobbyJoined {
@@ -1196,8 +1296,8 @@ fn handle_join_lobby(
                         let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::SendToPeer {
                             peer_id: p_id,
                             msg: ServerMessage::GameStarted {
-                                p1_pos: Vec2::new(-700.0, 250.0),
-                                p2_pos: Vec2::new(700.0, -250.0),
+                                p1_pos: shared::map::P1_BASE_POS,
+                                p2_pos: shared::map::P2_BASE_POS,
                                 wave_initial_delay: 0.0,
                             },
                         });
@@ -1225,6 +1325,19 @@ fn handle_join_lobby(
                             color: FactionColor::Amber,
                             text: format!("Private match started! [{}] vs [{}] (Room Code: {})", p1_name, player_name, code.to_uppercase()),
                             is_system: true,
+                        },
+                    });
+
+                    let (q, a1, m1, aso, mso, tot) = matchmaker.get_telemetry();
+                    crate::net_server::update_global_telemetry(q, a1, aso, tot);
+                    let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::Broadcast {
+                        msg: ServerMessage::LobbyStats {
+                            queue_1v1: q,
+                            active_1v1_matches: a1,
+                            max_1v1_matches: m1,
+                            active_solo_matches: aso,
+                            max_solo_matches: mso,
+                            total_online: tot,
                         },
                     });
                 } else {
@@ -1262,6 +1375,7 @@ fn handle_join_lobby(
                         p2_peer: None,
                         is_active: false,
                         match_time: 0.0,
+                        countdown_timer: 0.0,
                         current_wave: 0,
                         time_until_next_wave: 40.0,
                     },
@@ -1288,6 +1402,17 @@ fn handle_join_lobby(
                         is_system: true,
                     },
                 });
+
+                let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::SendToPeer {
+                    peer_id,
+                    msg: ServerMessage::ChatMessageReceived {
+                        sender_name: "SYSTEM".to_string(),
+                        faction: Faction::Neutral,
+                        color: FactionColor::Amber,
+                        text: format!("Private Room created! Share code [{}] with your opponent to join.", generated_code),
+                        is_system: true,
+                    },
+                });
             }
         }
     }
@@ -1300,6 +1425,7 @@ fn update_server_nav_grid_system(
     resources: Query<(&Transform, &Radius), With<ResourceNode>>,
 ) {
     nav_grid.clear();
+    shared::map::mark_static_obstacles(&mut nav_grid);
     for (tf, radius, building) in &buildings {
         let pos = tf.translation.truncate();
         let r = if building.name.contains("Base HQ") {
@@ -1430,7 +1556,7 @@ fn server_movement_system(
 ) {
     let dt = time.delta_secs();
     for (entity, mut transform, speed, mut velocity, mut move_target, room_id, stim_opt, tank_opt, soldier_opt) in &mut query {
-        let is_room_active = matchmaker.rooms.get(&room_id.0).map(|r| r.is_active).unwrap_or(true);
+        let is_room_active = matchmaker.rooms.get(&room_id.0).map(|r| r.is_active && r.countdown_timer <= 0.0).unwrap_or(true);
         if !is_room_active {
             velocity.0 = Vec2::ZERO;
             continue;
@@ -1484,7 +1610,7 @@ fn server_movement_system(
         let is_final_waypoint = move_target.current_waypoint_idx >= (move_target.waypoints.len() - 1);
 
         // Advance waypoint if close to intermediate
-        if !is_final_waypoint && dist <= 16.0 {
+        if !is_final_waypoint && dist <= 20.0 {
             move_target.advance_waypoint();
             move_target.stall_timer = 0.0;
             move_target.last_pos = current_pos;
@@ -1493,7 +1619,7 @@ fn server_movement_system(
 
         // Final arrival or stall clean removal
         if is_final_waypoint {
-            if dist <= 8.0 || (dist <= 26.0 && move_target.stall_timer > 0.25) || move_target.stall_timer > 0.75 {
+            if dist <= 12.0 || (dist <= 32.0 && move_target.stall_timer > 0.20) || move_target.stall_timer > 0.50 {
                 velocity.0 = Vec2::ZERO;
                 commands.entity(entity).remove::<MoveTarget>();
                 continue;
@@ -1609,7 +1735,7 @@ fn server_unit_separation_and_collision_system(
 
             let b_pos = b_trans.translation.truncate();
             let d = snap.pos.distance(b_pos);
-            let min_b_dist = snap.radius + b_radius.0 + 2.0;
+            let min_b_dist = snap.radius + b_radius.0;
 
             if d < min_b_dist {
                 let push_dir = if d > 0.001 {
@@ -1628,7 +1754,7 @@ fn server_unit_separation_and_collision_system(
                 }
                 let r_pos = r_trans.translation.truncate();
                 let d = snap.pos.distance(r_pos);
-                let min_r_dist = snap.radius + r_radius.0 + 2.0;
+                let min_r_dist = snap.radius + r_radius.0;
 
                 if d < min_r_dist {
                     let push_dir = if d > 0.001 {
@@ -1638,6 +1764,21 @@ fn server_unit_separation_and_collision_system(
                     };
                     snap.pos = r_pos + push_dir * min_r_dist;
                 }
+            }
+        }
+
+        // Push away from static map obstacles (rocks, cliff bluffs)
+        for obs in shared::map::STATIC_MAP_OBSTACLES {
+            let d = snap.pos.distance(obs.position);
+            let min_obs_dist = snap.radius + obs.radius;
+
+            if d < min_obs_dist {
+                let push_dir = if d > 0.001 {
+                    (snap.pos - obs.position) / d
+                } else {
+                    Vec2::new(0.0, 1.0)
+                };
+                snap.pos = obs.position + push_dir * min_obs_dist;
             }
         }
     }
@@ -1663,7 +1804,7 @@ fn server_mining_system(
 ) {
     let dt = time.delta_secs();
     for (worker_e, mut transform, speed, faction, worker_room, mut worker, move_target_opt) in &mut workers {
-        let is_room_active = matchmaker.rooms.get(&worker_room.0).map(|r| r.is_active).unwrap_or(true);
+        let is_room_active = matchmaker.rooms.get(&worker_room.0).map(|r| r.is_active && r.countdown_timer <= 0.0).unwrap_or(true);
         if !is_room_active {
             continue;
         }
@@ -1795,7 +1936,7 @@ fn server_production_system(
     for (_entity, net_entity, faction, room_id, transform, mut building, prod_opt, supply_depot_opt) in
         &mut buildings
     {
-        let is_room_active = matchmaker.rooms.get(&room_id.0).map(|r| r.is_active).unwrap_or(true);
+        let is_room_active = matchmaker.rooms.get(&room_id.0).map(|r| r.is_active && r.countdown_timer <= 0.0).unwrap_or(true);
         if !is_room_active {
             continue;
         }
@@ -1924,6 +2065,7 @@ fn server_solo_wave_spawner_system(
     time: Res<Time>,
     net_channels: Res<ServerNetworkChannels>,
     mut matchmaker: ResMut<Matchmaker>,
+    nav_grid: Res<NavGrid>,
     base_query: Query<(&Transform, &Faction, &RoomId), With<BaseHQ>>,
 ) {
     let dt = time.delta_secs();
@@ -1938,7 +2080,7 @@ fn server_solo_wave_spawner_system(
 
         // Check if Hostile AI Base HQ exists in this room
         let mut ai_base_pos = None;
-        let mut p1_base_pos = Vec2::new(-700.0, 250.0);
+        let mut p1_base_pos = shared::map::P1_BASE_POS;
 
         for (tf, faction, b_room) in &base_query {
             if b_room.0 == *room_id {
@@ -1985,6 +2127,7 @@ fn server_solo_wave_spawner_system(
             let offset = Vec2::new(angle.cos(), angle.sin()) * dist;
             let spawn_pos = base_spawn + offset;
             let net_id = matchmaker.alloc_net_id();
+            let waypoints = nav_grid.find_path(spawn_pos, target_pos);
 
             commands.spawn((
                 Unit {
@@ -2011,7 +2154,7 @@ fn server_solo_wave_spawner_system(
                     net_id,
                     owner_peer_id: 2,
                 },
-                MoveTarget::new(target_pos, true),
+                MoveTarget::with_waypoints(target_pos, true, waypoints),
                 Transform::from_xyz(spawn_pos.x, spawn_pos.y, 2.0),
             ));
 
@@ -2099,7 +2242,7 @@ fn server_combat_system(
     for (s_entity, attacker_net, attacker_faction, attacker_room, mut attacker_tf, move_speed, mut soldier, stim_opt, move_target_opt) in
         &mut queries.p1()
     {
-        let is_room_active = matchmaker.rooms.get(&attacker_room.0).map(|r| r.is_active).unwrap_or(true);
+        let is_room_active = matchmaker.rooms.get(&attacker_room.0).map(|r| r.is_active && r.countdown_timer <= 0.0).unwrap_or(true);
         if !is_room_active {
             continue;
         }
@@ -2298,11 +2441,22 @@ fn server_combat_system(
 
 /// Dedicated Server Defensive Gun Turret Combat System
 fn server_turret_combat_system(
+    mut commands: Commands,
     time: Res<Time>,
     net_channels: Res<ServerNetworkChannels>,
     matchmaker: Res<Matchmaker>,
+    mut economy: ResMut<PlayerEconomy>,
     mut queries: ParamSet<(
-        Query<(Entity, &NetEntity, &Faction, &RoomId, &Transform, &Radius, &Health)>,
+        Query<(
+            Entity,
+            &NetEntity,
+            &Faction,
+            &RoomId,
+            &Transform,
+            &Radius,
+            &Health,
+            Option<&Unit>,
+        )>,
         Query<(Entity, &NetEntity, &Faction, &RoomId, &Transform, &Building, &mut GunTurret)>,
         Query<(Entity, &mut Health)>,
     )>,
@@ -2312,7 +2466,7 @@ fn server_turret_combat_system(
     let targets: Vec<ServerTargetSnapshot> = queries
         .p0()
         .iter()
-        .map(|(e, net, fac, room, tf, rad, hp)| ServerTargetSnapshot {
+        .map(|(e, net, fac, room, tf, rad, hp, unit_opt)| ServerTargetSnapshot {
             entity: e,
             net_id: net.net_id,
             pos: tf.translation.truncate(),
@@ -2320,16 +2474,16 @@ fn server_turret_combat_system(
             faction: *fac,
             room_id: room.0,
             is_dead: hp.is_dead(),
-            supply_cost: 0,
+            supply_cost: unit_opt.map(|u| u.supply_cost).unwrap_or(0),
         })
         .collect();
 
-    let mut damages_to_apply = Vec::new();
+    let mut damages_to_apply: Vec<(Entity, u32, f32, Faction, u32, u32, u32)> = Vec::new();
 
     for (_t_entity, turret_net, turret_faction, turret_room, turret_tf, building, mut turret) in
         &mut queries.p1()
     {
-        let is_room_active = matchmaker.rooms.get(&turret_room.0).map(|r| r.is_active).unwrap_or(true);
+        let is_room_active = matchmaker.rooms.get(&turret_room.0).map(|r| r.is_active && r.countdown_timer <= 0.0).unwrap_or(true);
         if !is_room_active || !building.is_constructed {
             continue;
         }
@@ -2380,6 +2534,7 @@ fn server_turret_combat_system(
                     *turret_faction,
                     turret_room.0,
                     turret_net.net_id,
+                    target_snap.supply_cost,
                 ));
 
                 let peers = matchmaker.get_room_peers(turret_room.0);
@@ -2400,7 +2555,7 @@ fn server_turret_combat_system(
     }
 
     let mut health_query = queries.p2();
-    for (target_e, target_net, dmg, attacker_fac, attacker_room_id, _attacker_net) in damages_to_apply {
+    for (target_e, target_net, dmg, attacker_fac, attacker_room_id, _attacker_net, supply_cost) in damages_to_apply {
         if let Ok((_, mut hp)) = health_query.get_mut(target_e) {
             hp.take_damage(dmg);
 
@@ -2416,6 +2571,15 @@ fn server_turret_combat_system(
                 });
 
                 if hp.is_dead() {
+                    if supply_cost > 0 {
+                        let victim_faction = if attacker_fac == Faction::Player1 {
+                            Faction::Player2
+                        } else {
+                            Faction::Player1
+                        };
+                        economy.unregister_supply(victim_faction, supply_cost);
+                    }
+
                     let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::BroadcastToPeers {
                         peer_ids: peers,
                         msg: ServerMessage::EntityDied {
@@ -2423,6 +2587,8 @@ fn server_turret_combat_system(
                             faction: attacker_fac,
                         },
                     });
+
+                    commands.entity(target_e).despawn_recursive();
                 }
             }
         }
@@ -2482,7 +2648,7 @@ fn server_siege_tank_combat_system(
     for (tank_ent, tank_net, tank_faction, tank_room, mut tank_tf, move_speed, mut tank, move_target_opt) in
         &mut queries.p1()
     {
-        let is_room_active = matchmaker.rooms.get(&tank_room.0).map(|r| r.is_active).unwrap_or(true);
+        let is_room_active = matchmaker.rooms.get(&tank_room.0).map(|r| r.is_active && r.countdown_timer <= 0.0).unwrap_or(true);
         if !is_room_active {
             continue;
         }
@@ -2939,6 +3105,7 @@ mod tests {
                 p2_peer: Some(102),
                 is_active: true,
                 match_time: 25.0,
+                countdown_timer: 0.0,
                 current_wave: 0,
                 time_until_next_wave: 40.0,
             },
@@ -2953,6 +3120,7 @@ mod tests {
                 p2_peer: None,
                 is_active: true,
                 match_time: 50.0,
+                countdown_timer: 0.0,
                 current_wave: 2,
                 time_until_next_wave: 20.0,
             },
@@ -3030,6 +3198,7 @@ mod tests {
                 p2_peer: None,
                 is_active: true,
                 match_time: 10.0,
+                countdown_timer: 0.0,
                 current_wave: 1,
                 time_until_next_wave: 30.0,
             },
@@ -3098,6 +3267,7 @@ mod tests {
                 p2_peer: None,
                 is_active: true,
                 match_time: 5.0,
+                countdown_timer: 0.0,
                 current_wave: 1,
                 time_until_next_wave: 30.0,
             },
@@ -3123,6 +3293,7 @@ mod tests {
                 p2_peer: None,
                 is_active: true,
                 match_time: 15.0,
+                countdown_timer: 0.0,
                 current_wave: 3,
                 time_until_next_wave: 10.0,
             },
@@ -3303,6 +3474,7 @@ mod tests {
                 p2_peer: Some(102),
                 is_active: true,
                 match_time: 10.0,
+                countdown_timer: 0.0,
                 current_wave: 0,
                 time_until_next_wave: 40.0,
             },
@@ -3375,6 +3547,7 @@ mod tests {
                 p2_peer: None,
                 is_active: true,
                 match_time: 1.0,
+                countdown_timer: 0.0,
                 current_wave: 0,
                 time_until_next_wave: 40.0,
             },
@@ -3449,6 +3622,7 @@ mod tests {
                 p2_peer: None,
                 is_active: true,
                 match_time: 1.0,
+                countdown_timer: 0.0,
                 current_wave: 0,
                 time_until_next_wave: 40.0,
             },
@@ -3535,18 +3709,19 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
 
-        // Spawn a building at (100, 0) with radius 50.0
+        // Spawn a building in open terrain at (-800, -800) with radius 50.0
+        let b_pos = Vec2::new(-800.0, -800.0);
         let _building = app.world_mut().spawn((
             Building::new("Barracks", Vec2::new(100.0, 100.0), 3.0, false),
-            Transform::from_xyz(100.0, 0.0, 0.0),
+            Transform::from_xyz(b_pos.x, b_pos.y, 0.0),
             Radius(50.0),
             Faction::Player1,
             RoomId(1),
         )).id();
 
-        // Spawn a unit inside the building footprint at (110, 0) with radius 16.0 (required min_dist = 68.0)
+        // Spawn a unit inside the building footprint at (-790, -800) with radius 16.0 (required min_dist = 68.0)
         let unit = app.world_mut().spawn((
-            Transform::from_xyz(110.0, 0.0, 0.0),
+            Transform::from_xyz(b_pos.x + 10.0, b_pos.y, 0.0),
             Radius(16.0),
             Faction::Player1,
             RoomId(1),
@@ -3557,9 +3732,36 @@ mod tests {
         app.update();
 
         let u_pos = app.world().entity(unit).get::<Transform>().unwrap().translation.truncate();
-        let dist_to_building = u_pos.distance(Vec2::new(100.0, 0.0));
+        let dist_to_building = u_pos.distance(b_pos);
 
-        assert!(dist_to_building >= 67.9, "Unit must be ejected outside building radius (dist: {:.2})", dist_to_building);
+        assert!(dist_to_building >= 65.9, "Unit must be ejected outside building radius (dist: {:.2})", dist_to_building);
+    }
+
+    #[test]
+    fn test_static_map_obstacle_collision_resolution() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+
+        // Pick an obstacle from STATIC_MAP_OBSTACLES
+        let obs = shared::map::STATIC_MAP_OBSTACLES[0];
+
+        // Spawn a unit inside the obstacle center (pos = obs.position, radius = 16.0)
+        let unit = app.world_mut().spawn((
+            Transform::from_xyz(obs.position.x, obs.position.y, 0.0),
+            Radius(16.0),
+            Faction::Player1,
+            RoomId(1),
+            Unit { name: "Marine".to_string(), supply_cost: 1 },
+        )).id();
+
+        app.add_systems(Update, server_unit_separation_and_collision_system);
+        app.update();
+
+        let u_pos = app.world().entity(unit).get::<Transform>().unwrap().translation.truncate();
+        let dist = u_pos.distance(obs.position);
+        let min_required = 16.0 + obs.radius - 0.1;
+
+        assert!(dist >= min_required, "Unit must be pushed outside static obstacle radius (dist: {:.2}, req: {:.2})", dist, min_required);
     }
 
     #[test]
@@ -3583,6 +3785,7 @@ mod tests {
                 p2_peer: None,
                 is_active: true,
                 match_time: 1.0,
+                countdown_timer: 0.0,
                 current_wave: 1,
                 time_until_next_wave: 40.0,
             },
@@ -3662,6 +3865,7 @@ mod tests {
                 p2_peer: None,
                 is_active: false, // Inactive / Ended
                 match_time: 120.0,
+                countdown_timer: 0.0,
                 current_wave: 2,
                 time_until_next_wave: 0.0,
             },
@@ -3690,5 +3894,105 @@ mod tests {
         assert_eq!(vel.0, Vec2::ZERO, "Movement must freeze when match is inactive / ended");
         let soldier = app.world().entity(unit).get::<Soldier>().unwrap();
         assert_eq!(soldier.target, None, "No target acquisition when match is inactive / ended");
+    }
+
+    #[test]
+    fn test_queue_cancellation_and_telemetry() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        let (tx_in, rx_in) = crossbeam_channel::unbounded();
+        let (tx_out, mut rx_out) = tokio::sync::mpsc::unbounded_channel();
+        app.insert_resource(ServerNetworkChannels {
+            rx_incoming: rx_in,
+            tx_outgoing: tx_out,
+        });
+        app.insert_resource(Matchmaker::new());
+        app.insert_resource(PlayerEconomy::new());
+        app.insert_resource(NavGrid::default());
+        app.add_systems(Update, handle_incoming_network_events);
+
+        // 1. Peer 101 joins 1v1 queue
+        tx_in.send(IncomingNetEvent::MessageReceived {
+            peer_id: 101,
+            msg: ClientMessage::JoinLobby {
+                player_name: "Player 101".to_string(),
+                mode: GameMode::Multiplayer1v1,
+                room_code: None,
+                faction_color: Some(FactionColor::Blue),
+            },
+        }).unwrap();
+        app.update();
+
+        assert_eq!(app.world().resource::<Matchmaker>().waiting_1v1_peer, Some(101));
+
+        // 2. Peer 101 cancels queue
+        tx_in.send(IncomingNetEvent::MessageReceived {
+            peer_id: 101,
+            msg: ClientMessage::CancelQueue,
+        }).unwrap();
+        app.update();
+
+        assert_eq!(app.world().resource::<Matchmaker>().waiting_1v1_peer, None);
+        let mut received_cancel = false;
+        while let Ok(ev) = rx_out.try_recv() {
+            if let OutgoingNetEvent::SendToPeer { peer_id, msg: ServerMessage::QueueCancelled } = ev {
+                assert_eq!(peer_id, 101);
+                received_cancel = true;
+            }
+        }
+        assert!(received_cancel, "Must send QueueCancelled acknowledgement to client");
+    }
+
+    #[test]
+    fn test_match_found_triggers_3s_countdown() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        let (tx_in, rx_in) = crossbeam_channel::unbounded();
+        let (tx_out, mut rx_out) = tokio::sync::mpsc::unbounded_channel();
+        app.insert_resource(ServerNetworkChannels {
+            rx_incoming: rx_in,
+            tx_outgoing: tx_out,
+        });
+        app.insert_resource(Matchmaker::new());
+        app.insert_resource(PlayerEconomy::new());
+        app.insert_resource(NavGrid::default());
+        app.add_systems(Update, handle_incoming_network_events);
+
+        // P1 queues
+        tx_in.send(IncomingNetEvent::MessageReceived {
+            peer_id: 101,
+            msg: ClientMessage::JoinLobby {
+                player_name: "Alice".to_string(),
+                mode: GameMode::Multiplayer1v1,
+                room_code: None,
+                faction_color: Some(FactionColor::Blue),
+            },
+        }).unwrap();
+        app.update();
+
+        // P2 queues -> Match made!
+        tx_in.send(IncomingNetEvent::MessageReceived {
+            peer_id: 102,
+            msg: ClientMessage::JoinLobby {
+                player_name: "Bob".to_string(),
+                mode: GameMode::Multiplayer1v1,
+                room_code: None,
+                faction_color: Some(FactionColor::Red),
+            },
+        }).unwrap();
+        app.update();
+
+        let mm = app.world().resource::<Matchmaker>();
+        let room = mm.rooms.get(&1).unwrap();
+        assert_eq!(room.countdown_timer, 3.0, "Room must start with 3.0s countdown");
+
+        let mut match_found_count = 0;
+        while let Ok(ev) = rx_out.try_recv() {
+            if let OutgoingNetEvent::SendToPeer { msg: ServerMessage::MatchFound { countdown_seconds, .. }, .. } = ev {
+                assert_eq!(countdown_seconds, 3.0);
+                match_found_count += 1;
+            }
+        }
+        assert_eq!(match_found_count, 2, "Both players must receive MatchFound message");
     }
 }

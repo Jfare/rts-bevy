@@ -17,6 +17,8 @@ pub enum SoundEffect {
     WorkerSelect,
     BaseUnderAttack,
     SupplyBlocked,
+    CountdownBeep,
+    MatchStart,
     Victory,
     Defeat,
 }
@@ -358,6 +360,49 @@ fn play_synth_audio_wasm(sfx: SoundEffect) {
                     gain.connect(ctx.destination);
                     osc.start();
                     osc.stop(ctx.currentTime + 0.15);
+                } catch (e) {}
+            })()
+            "#
+        }
+        SoundEffect::CountdownBeep => {
+            r#"
+            (function() {
+                try {
+                    const ctx = window._rts_audio_ctx || (window._rts_audio_ctx = new (window.AudioContext || window.webkitAudioContext)());
+                    if (ctx.state === 'suspended') ctx.resume();
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(880, ctx.currentTime);
+                    gain.gain.setValueAtTime(0.20, ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    osc.start();
+                    osc.stop(ctx.currentTime + 0.13);
+                } catch (e) {}
+            })()
+            "#
+        }
+        SoundEffect::MatchStart => {
+            r#"
+            (function() {
+                try {
+                    const ctx = window._rts_audio_ctx || (window._rts_audio_ctx = new (window.AudioContext || window.webkitAudioContext)());
+                    if (ctx.state === 'suspended') ctx.resume();
+                    [587.33, 880.0, 1174.66].forEach((freq, i) => {
+                        const osc = ctx.createOscillator();
+                        const gain = ctx.createGain();
+                        osc.type = 'triangle';
+                        osc.frequency.value = freq;
+                        const t = ctx.currentTime + i * 0.08;
+                        gain.gain.setValueAtTime(0.22, t);
+                        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+                        osc.connect(gain);
+                        gain.connect(ctx.destination);
+                        osc.start(t);
+                        osc.stop(t + 0.36);
+                    });
                 } catch (e) {}
             })()
             "#
