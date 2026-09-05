@@ -32,7 +32,6 @@ pub struct WaveAiPlugin;
 impl Plugin for WaveAiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<WaveAiState>()
-            .add_systems(Update, wave_spawner_system);
             .add_systems(Update, wave_spawner_system.run_if(in_state(AppState::InGame)));
     }
 }
