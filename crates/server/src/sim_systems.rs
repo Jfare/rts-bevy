@@ -87,18 +87,16 @@ fn server_lobby_stats_broadcast_system(
         let (q, a1, m1, aso, mso, tot) = matchmaker.get_telemetry();
         crate::net_server::update_global_telemetry(q, a1, aso, tot);
 
-        if !matchmaker.players.is_empty() {
-            let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::Broadcast {
-                msg: ServerMessage::LobbyStats {
-                    queue_1v1: q,
-                    active_1v1_matches: a1,
-                    max_1v1_matches: m1,
-                    active_solo_matches: aso,
-                    max_solo_matches: mso,
-                    total_online: tot,
-                },
-            });
-        }
+        let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::Broadcast {
+            msg: ServerMessage::LobbyStats {
+                queue_1v1: q,
+                active_1v1_matches: a1,
+                max_1v1_matches: m1,
+                active_solo_matches: aso,
+                max_solo_matches: mso,
+                total_online: tot,
+            },
+        });
     }
 }
 
@@ -170,8 +168,18 @@ fn handle_incoming_network_events(
                     }
                     matchmaker.remove_room(room_id);
                 }
-                let (q, a1, _, aso, _, tot) = matchmaker.get_telemetry();
+                let (q, a1, m1, aso, mso, tot) = matchmaker.get_telemetry();
                 crate::net_server::update_global_telemetry(q, a1, aso, tot);
+                let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::Broadcast {
+                    msg: ServerMessage::LobbyStats {
+                        queue_1v1: q,
+                        active_1v1_matches: a1,
+                        max_1v1_matches: m1,
+                        active_solo_matches: aso,
+                        max_solo_matches: mso,
+                        total_online: tot,
+                    },
+                });
             }
             IncomingNetEvent::MessageReceived { peer_id, msg } => {
                 match msg {
@@ -200,6 +208,54 @@ fn handle_incoming_network_events(
                                 peer_id,
                                 msg: ServerMessage::QueueCancelled,
                             });
+                            let (q, a1, m1, aso, mso, tot) = matchmaker.get_telemetry();
+                            crate::net_server::update_global_telemetry(q, a1, aso, tot);
+                            let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::Broadcast {
+                                msg: ServerMessage::LobbyStats {
+                                    queue_1v1: q,
+                                    active_1v1_matches: a1,
+                                    max_1v1_matches: m1,
+                                    active_solo_matches: aso,
+                                    max_solo_matches: mso,
+                                    total_online: tot,
+                                },
+                            });
+                        }
+                    }
+                    shared::protocol::ClientMessage::ForfeitMatch => {
+                        info!("🏳️ [GameServer] Peer #{} forfeited active match", peer_id);
+                        if let Some(player) = matchmaker.players.remove(&peer_id) {
+                            let room_id = player.room_id;
+                            let remaining_peers: Vec<u64> = matchmaker
+                                .get_room_peers(room_id)
+                                .into_iter()
+                                .filter(|p| *p != peer_id)
+                                .collect();
+                            let match_time = matchmaker.rooms.get(&room_id).map(|r| r.match_time).unwrap_or(0.0);
+                            if let Some(room) = matchmaker.rooms.get_mut(&room_id) {
+                                room.is_active = false;
+                            }
+                            if !remaining_peers.is_empty() {
+                                let winning_faction = if player.faction == Faction::Player1 {
+                                    Faction::Player2
+                                } else {
+                                    Faction::Player1
+                                };
+                                let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::BroadcastToPeers {
+                                    peer_ids: remaining_peers,
+                                    msg: ServerMessage::MatchEnded {
+                                        winning_faction,
+                                        duration_seconds: match_time,
+                                    },
+                                });
+                            }
+                            // Despawn all entities belonging to this room from the ECS World
+                            for (e, r) in &room_entities {
+                                if r.0 == room_id {
+                                    commands.entity(e).despawn_recursive();
+                                }
+                            }
+                            matchmaker.remove_room(room_id);
                             let (q, a1, m1, aso, mso, tot) = matchmaker.get_telemetry();
                             crate::net_server::update_global_telemetry(q, a1, aso, tot);
                             let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::Broadcast {
@@ -1026,6 +1082,19 @@ fn handle_join_lobby(
                     color: FactionColor::Amber,
                     text: format!("Commander {} deployed to Sector 4. Defend your Base HQ against hostile assault waves!", player_name),
                     is_system: true,
+                },
+            });
+
+            let (q, a1, m1, aso, mso, tot) = matchmaker.get_telemetry();
+            crate::net_server::update_global_telemetry(q, a1, aso, tot);
+            let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::Broadcast {
+                msg: ServerMessage::LobbyStats {
+                    queue_1v1: q,
+                    active_1v1_matches: a1,
+                    max_1v1_matches: m1,
+                    active_solo_matches: aso,
+                    max_solo_matches: mso,
+                    total_online: tot,
                 },
             });
         }
@@ -2848,7 +2917,7 @@ fn server_match_outcome_system(
         }
     }
 
-    for (room_id, winning_faction, duration) in ended_rooms {
+    for &(room_id, winning_faction, duration) in &ended_rooms {
         if let Some(room) = matchmaker.rooms.get_mut(&room_id) {
             room.is_active = false;
         }
@@ -2868,6 +2937,21 @@ fn server_match_outcome_system(
                 },
             });
         }
+    }
+
+    if !ended_rooms.is_empty() {
+        let (q, a1, m1, aso, mso, tot) = matchmaker.get_telemetry();
+        crate::net_server::update_global_telemetry(q, a1, aso, tot);
+        let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::Broadcast {
+            msg: ServerMessage::LobbyStats {
+                queue_1v1: q,
+                active_1v1_matches: a1,
+                max_1v1_matches: m1,
+                active_solo_matches: aso,
+                max_solo_matches: mso,
+                total_online: tot,
+            },
+        });
     }
 }
 
@@ -3228,6 +3312,75 @@ mod tests {
         let mm = app.world().resource::<Matchmaker>();
         assert!(!mm.rooms.contains_key(&1), "Room 1 should be removed from matchmaker");
         assert!(!mm.players.contains_key(&101), "Player 101 should be removed");
+    }
+
+    #[test]
+    fn test_forfeit_cleans_up_room_entities_and_telemetry() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+
+        let (tx_in, rx_in) = crossbeam_channel::unbounded();
+        let (tx_out, mut rx_out) = tokio::sync::mpsc::unbounded_channel();
+        app.insert_resource(ServerNetworkChannels {
+            rx_incoming: rx_in,
+            tx_outgoing: tx_out,
+        });
+        app.insert_resource(PlayerEconomy::new());
+        app.insert_resource(NavGrid::default());
+
+        let mut matchmaker = Matchmaker::new();
+        matchmaker.players.insert(
+            101,
+            PlayerSession {
+                peer_id: 101,
+                name: "SoloCommander".to_string(),
+                room_id: 1,
+                faction: Faction::Player1,
+                color: FactionColor::Blue,
+            },
+        );
+        matchmaker.rooms.insert(
+            1,
+            Room {
+                room_id: 1,
+                room_code: None,
+                mode: GameMode::SoloVsAi,
+                p1_peer: Some(101),
+                p2_peer: None,
+                is_active: true,
+                match_time: 5.0,
+                countdown_timer: 0.0,
+                current_wave: 1,
+                time_until_next_wave: 30.0,
+            },
+        );
+        app.insert_resource(matchmaker);
+        app.add_systems(Update, handle_incoming_network_events);
+
+        let world = app.world_mut();
+        let e1 = world.spawn((RoomId(1), Unit { name: "Marine".to_string(), supply_cost: 2 }, NetEntity { net_id: 10, owner_peer_id: 101 }, Transform::default(), Faction::Player1)).id();
+
+        tx_in.send(IncomingNetEvent::MessageReceived {
+            peer_id: 101,
+            msg: shared::protocol::ClientMessage::ForfeitMatch,
+        }).unwrap();
+
+        app.update();
+
+        assert!(app.world().get_entity(e1).is_err(), "Room 1 unit must be despawned on forfeit");
+
+        let mm = app.world().resource::<Matchmaker>();
+        assert!(!mm.rooms.contains_key(&1), "Room 1 should be removed from matchmaker on forfeit");
+        assert_eq!(mm.active_solo_count(), 0, "Active solo matches must drop to 0");
+
+        let mut found_lobby_stats = false;
+        while let Ok(event) = rx_out.try_recv() {
+            if let OutgoingNetEvent::Broadcast { msg: ServerMessage::LobbyStats { active_solo_matches, .. } } = event {
+                assert_eq!(active_solo_matches, 0);
+                found_lobby_stats = true;
+            }
+        }
+        assert!(found_lobby_stats, "LobbyStats broadcast must be emitted on forfeit");
     }
 
     #[test]

@@ -142,6 +142,7 @@ impl Plugin for NetClientPlugin {
         });
 
         app.add_systems(Startup, connect_to_server_startup)
+            .add_systems(OnEnter(AppState::Lobby), cleanup_on_lobby_enter)
             .add_systems(
                 Update,
                 (
@@ -151,6 +152,32 @@ impl Plugin for NetClientPlugin {
                     poll_web_portal_launch_requests,
                 ),
             );
+    }
+}
+
+fn cleanup_on_lobby_enter(
+    mut commands: Commands,
+    cleanup_query: Query<Entity, Or<(With<NetEntity>, With<Unit>, With<Building>, With<ResourceNode>)>>,
+    mut camera_query: Query<&mut Transform, (With<Camera2d>, Without<NetEntity>, Without<Unit>, Without<Building>, Without<ResourceNode>)>,
+    mut outcome_opt: Option<ResMut<MatchOutcome>>,
+    mut countdown_opt: Option<ResMut<crate::ui::MatchCountdown>>,
+    mut wave_ai_opt: Option<ResMut<bot_ai::WaveAiState>>,
+) {
+    info!("🧹 [AppState::Lobby] Cleaning up match entities and resetting match state.");
+    for ent in cleanup_query.iter() {
+        commands.entity(ent).despawn_recursive();
+    }
+    for mut cam_tf in camera_query.iter_mut() {
+        cam_tf.translation = Vec3::new(0.0, 0.0, 100.0);
+    }
+    if let Some(ref mut outcome) = outcome_opt {
+        **outcome = MatchOutcome::InProgress;
+    }
+    if let Some(ref mut cd) = countdown_opt {
+        cd.is_active = false;
+    }
+    if let Some(ref mut wave) = wave_ai_opt {
+        wave.is_active = false;
     }
 }
 

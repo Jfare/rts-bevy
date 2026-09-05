@@ -1,11 +1,11 @@
 use bevy::prelude::*;
 use bevy::ui::FocusPolicy;
 use shared::components::{
-    Building, Faction, GunTurret, Health, MatchOutcome, ProductionBuilding, ResourceNode, Selectable,
+    AppState, Building, Faction, GunTurret, Health, MatchOutcome, ProductionBuilding, ResourceNode, Selectable,
     SiegeTank, Soldier, Stimpack, TacticalStance, Unit, Worker,
 };
 use shared::economy::PlayerEconomy;
-use shared::protocol::{ClientMessage, FactionColor, GameMode};
+use shared::protocol::{ClientMessage, FactionColor};
 use crate::audio_sfx::SoundEffect;
 use crate::net::{NetClient, NetStatus};
 use crate::placement::PlacementState;
@@ -15,9 +15,9 @@ pub struct RtsUiPlugin;
 
 impl Plugin for RtsUiPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<JoinCodeInputState>()
-            .init_resource::<MatchCountdown>()
+        app.init_resource::<MatchCountdown>()
             .add_systems(Startup, setup_hud)
+            .add_systems(OnEnter(AppState::InGame), close_menu_on_game_start)
             .add_systems(
                 Update,
                 (
@@ -28,13 +28,17 @@ impl Plugin for RtsUiPlugin {
                     update_match_outcome_banner,
                     update_match_countdown_system,
                     handle_lobby_button_interactions,
-                    handle_join_code_keyboard_input,
                     handle_play_again_button_interaction,
                     handle_return_to_landing_button_interaction,
                     update_lobby_modal_status_text,
-                    update_color_swatches_system,
                 ),
             );
+    }
+}
+
+fn close_menu_on_game_start(mut modal_query: Query<&mut Node, With<LobbyModalContainer>>) {
+    for mut node in &mut modal_query {
+        node.display = Display::None;
     }
 }
 
@@ -48,23 +52,11 @@ pub struct MatchCountdown {
     pub has_played_go_sound: bool,
 }
 
-#[derive(Resource, Default, Debug, Clone)]
-pub struct JoinCodeInputState {
-    pub code: String,
-    pub is_focused: bool,
-}
-
 #[derive(Component, Clone, Copy, PartialEq, Eq)]
 pub enum LobbyButtonAction {
-    PlaySolo,
-    Find1v1,
-    CancelQueue,
-    CreatePrivate,
-    JoinPrivate,
-    FocusJoinCode,
-    SelectColor(FactionColor),
     ToggleModal,
     CloseModal,
+    ForfeitMatch,
 }
 
 #[derive(Component)]
@@ -75,12 +67,6 @@ pub struct CountdownNumberText;
 
 #[derive(Component)]
 pub struct CountdownSubText;
-
-#[derive(Component)]
-pub struct ColorSwatchBorder(pub FactionColor);
-
-#[derive(Component)]
-pub struct JoinCodeFieldText;
 
 #[derive(Component)]
 pub struct LobbyModalContainer;
@@ -199,7 +185,7 @@ fn setup_hud(mut commands: Commands) {
                             ))
                             .with_children(|btn| {
                                 btn.spawn((
-                                    Text::new("🌐 MATCHMAKING & MODES"),
+                                    Text::new("⚙️ GAME MENU"),
                                     TextFont {
                                         font_size: 12.0,
                                         ..default()
@@ -428,7 +414,7 @@ fn setup_hud(mut commands: Commands) {
             });
 
             // ─────────────────────────────────────────────────────────────────
-            // CENTER MULTIPLAYER LOBBY MODAL (Interactive Mode Selector)
+            // IN-GAME GAME MENU (Resume Match, Quick Guide, Forfeit)
             // ─────────────────────────────────────────────────────────────────
             root.spawn((
                 Node {
@@ -436,16 +422,16 @@ fn setup_hud(mut commands: Commands) {
                     left: Val::Percent(50.0),
                     top: Val::Percent(50.0),
                     margin: UiRect {
-                        left: Val::Px(-260.0),
-                        top: Val::Px(-220.0),
+                        left: Val::Px(-240.0),
+                        top: Val::Px(-200.0),
                         right: Val::Px(0.0),
                         bottom: Val::Px(0.0),
                     },
-                    width: Val::Px(520.0),
-                    padding: UiRect::all(Val::Px(20.0)),
+                    width: Val::Px(480.0),
+                    padding: UiRect::all(Val::Px(24.0)),
                     border: UiRect::all(Val::Px(2.0)),
                     flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(12.0),
+                    row_gap: Val::Px(14.0),
                     display: Display::None,
                     ..default()
                 },
@@ -456,9 +442,9 @@ fn setup_hud(mut commands: Commands) {
             ))
             .with_children(|modal| {
                 modal.spawn((
-                    Text::new("🌐 COMMAND CENTER & MULTIPLAYER"),
+                    Text::new("⚙️ GAME MENU"),
                     TextFont {
-                        font_size: 19.0,
+                        font_size: 20.0,
                         ..default()
                     },
                     TextColor(Color::srgb(0.35, 0.85, 1.0)),
@@ -466,7 +452,7 @@ fn setup_hud(mut commands: Commands) {
                 ));
 
                 modal.spawn((
-                    Text::new("Customize your faction colors and deploy into battle against players or AI."),
+                    Text::new("Match is in progress. Review game status and controls, resume, or forfeit."),
                     TextFont {
                         font_size: 12.5,
                         ..default()
@@ -475,313 +461,125 @@ fn setup_hud(mut commands: Commands) {
                     FocusPolicy::Pass,
                 ));
 
-                // ─────────────────────────────────────────────────────────────
-                // FACTION COLOR PICKER
-                // ─────────────────────────────────────────────────────────────
+                // Match status card
                 modal.spawn((
-                    Text::new("🎨 SELECT COMMANDER COLOR THEME:"),
+                    Text::new("Status: Match Active"),
                     TextFont {
-                        font_size: 12.0,
+                        font_size: 13.0,
                         ..default()
                     },
-                    TextColor(Color::srgb(0.85, 0.90, 0.95)),
-                    FocusPolicy::Pass,
-                ));
-
-                modal
-                    .spawn((
-                        Node {
-                            width: Val::Percent(100.0),
-                            flex_direction: FlexDirection::Row,
-                            justify_content: JustifyContent::SpaceBetween,
-                            column_gap: Val::Px(8.0),
-                            ..default()
-                        },
-                        FocusPolicy::Pass,
-                    ))
-                    .with_children(|row| {
-                        let colors = [
-                            (FactionColor::Blue, "Blue", Color::srgb(0.23, 0.51, 0.96)),
-                            (FactionColor::Red, "Red", Color::srgb(0.94, 0.27, 0.27)),
-                            (FactionColor::Teal, "Teal", Color::srgb(0.08, 0.72, 0.65)),
-                            (FactionColor::Amber, "Amber", Color::srgb(0.96, 0.62, 0.04)),
-                            (FactionColor::Purple, "Purple", Color::srgb(0.66, 0.33, 0.97)),
-                            (FactionColor::Green, "Green", Color::srgb(0.13, 0.77, 0.37)),
-                        ];
-
-                        for (fcolor, label, bg) in colors {
-                            row.spawn((
-                                Button,
-                                Node {
-                                    flex_grow: 1.0,
-                                    padding: UiRect::axes(Val::Px(6.0), Val::Px(8.0)),
-                                    justify_content: JustifyContent::Center,
-                                    align_items: AlignItems::Center,
-                                    border: UiRect::all(Val::Px(2.0)),
-                                    ..default()
-                                },
-                                BorderRadius::all(Val::Px(4.0)),
-                                BackgroundColor(bg),
-                                BorderColor(if fcolor == FactionColor::Blue {
-                                    Color::srgb(1.0, 0.9, 0.2)
-                                } else {
-                                    Color::NONE
-                                }),
-                                LobbyButtonAction::SelectColor(fcolor),
-                                ColorSwatchBorder(fcolor),
-                            ))
-                            .with_children(|btn| {
-                                btn.spawn((
-                                    Text::new(label),
-                                    TextFont {
-                                        font_size: 12.0,
-                                        ..default()
-                                    },
-                                    TextColor(Color::WHITE),
-                                    FocusPolicy::Pass,
-                                ));
-                            });
-                        }
-                    });
-
-                // ─────────────────────────────────────────────────────────────
-                // MATCHMAKING & PRIVATE LOBBY BUTTONS
-                // ─────────────────────────────────────────────────────────────
-
-                // Button 1: Quick Match 1v1 and Cancel Queue Row
-                modal
-                    .spawn((
-                        Node {
-                            width: Val::Percent(100.0),
-                            flex_direction: FlexDirection::Row,
-                            column_gap: Val::Px(10.0),
-                            ..default()
-                        },
-                        FocusPolicy::Pass,
-                    ))
-                    .with_children(|row| {
-                        row.spawn((
-                            Button,
-                            Node {
-                                flex_grow: 1.0,
-                                padding: UiRect::axes(Val::Px(14.0), Val::Px(10.0)),
-                                justify_content: JustifyContent::Center,
-                                align_items: AlignItems::Center,
-                                border: UiRect::all(Val::Px(1.5)),
-                                ..default()
-                            },
-                            BorderRadius::all(Val::Px(6.0)),
-                            BackgroundColor(Color::srgba(0.15, 0.30, 0.45, 0.95)),
-                            BorderColor(Color::srgb(0.40, 0.85, 1.0)),
-                            LobbyButtonAction::Find1v1,
-                        ))
-                        .with_children(|btn| {
-                            btn.spawn((
-                                Text::new("⚔️ QUICK MATCH (FIND 1v1)"),
-                                TextFont {
-                                    font_size: 13.0,
-                                    ..default()
-                                },
-                                TextColor(Color::srgb(0.95, 0.98, 1.0)),
-                                FocusPolicy::Pass,
-                            ));
-                        });
-
-                        row.spawn((
-                            Button,
-                            Node {
-                                padding: UiRect::axes(Val::Px(12.0), Val::Px(10.0)),
-                                justify_content: JustifyContent::Center,
-                                align_items: AlignItems::Center,
-                                border: UiRect::all(Val::Px(1.5)),
-                                ..default()
-                            },
-                            BorderRadius::all(Val::Px(6.0)),
-                            BackgroundColor(Color::srgba(0.35, 0.15, 0.15, 0.95)),
-                            BorderColor(Color::srgb(0.90, 0.35, 0.35)),
-                            LobbyButtonAction::CancelQueue,
-                        ))
-                        .with_children(|btn| {
-                            btn.spawn((
-                                Text::new("❌ CANCEL"),
-                                TextFont {
-                                    font_size: 13.0,
-                                    ..default()
-                                },
-                                TextColor(Color::srgb(1.0, 0.85, 0.85)),
-                                FocusPolicy::Pass,
-                            ));
-                        });
-                    });
-
-                // Row for Private Lobby creation and joining
-                modal
-                    .spawn((
-                        Node {
-                            width: Val::Percent(100.0),
-                            flex_direction: FlexDirection::Row,
-                            column_gap: Val::Px(10.0),
-                            ..default()
-                        },
-                        FocusPolicy::Pass,
-                    ))
-                    .with_children(|p_row| {
-                        // Create Private Room
-                        p_row
-                            .spawn((
-                                Button,
-                                Node {
-                                    flex_grow: 1.0,
-                                    padding: UiRect::axes(Val::Px(10.0), Val::Px(10.0)),
-                                    justify_content: JustifyContent::Center,
-                                    align_items: AlignItems::Center,
-                                    border: UiRect::all(Val::Px(1.5)),
-                                    ..default()
-                                },
-                                BorderRadius::all(Val::Px(6.0)),
-                                BackgroundColor(Color::srgba(0.25, 0.20, 0.40, 0.95)),
-                                BorderColor(Color::srgb(0.70, 0.50, 1.0)),
-                                LobbyButtonAction::CreatePrivate,
-                            ))
-                            .with_children(|btn| {
-                                btn.spawn((
-                                    Text::new("🔒 CREATE PRIVATE (4-DIGIT)"),
-                                    TextFont {
-                                        font_size: 13.0,
-                                        ..default()
-                                    },
-                                    TextColor(Color::srgb(0.95, 0.90, 1.0)),
-                                    FocusPolicy::Pass,
-                                ));
-                            });
-
-                        // Join with Code button
-                        p_row
-                            .spawn((
-                                Button,
-                                Node {
-                                    flex_grow: 2.0,
-                                    padding: UiRect::axes(Val::Px(8.0), Val::Px(10.0)),
-                                    justify_content: JustifyContent::Center,
-                                    align_items: AlignItems::Center,
-                                    border: UiRect::all(Val::Px(1.5)),
-                                    ..default()
-                                },
-                                BorderRadius::all(Val::Px(6.0)),
-                                BackgroundColor(Color::srgba(0.20, 0.28, 0.35, 0.95)),
-                                BorderColor(Color::srgb(0.50, 0.80, 1.0)),
-                                LobbyButtonAction::FocusJoinCode,
-                            ))
-                            .with_children(|btn| {
-                                btn.spawn((
-                                    Text::new("🔑 CODE: [ ---- ]"),
-                                    TextFont {
-                                        font_size: 13.0,
-                                        ..default()
-                                    },
-                                    TextColor(Color::srgb(0.90, 0.95, 1.0)),
-                                    JoinCodeFieldText,
-                                    FocusPolicy::Pass,
-                                ));
-                            });
-
-                        // Submit Join button
-                        p_row
-                            .spawn((
-                                Button,
-                                Node {
-                                    flex_grow: 1.0,
-                                    padding: UiRect::axes(Val::Px(8.0), Val::Px(10.0)),
-                                    justify_content: JustifyContent::Center,
-                                    align_items: AlignItems::Center,
-                                    border: UiRect::all(Val::Px(1.5)),
-                                    ..default()
-                                },
-                                BorderRadius::all(Val::Px(6.0)),
-                                BackgroundColor(Color::srgba(0.12, 0.35, 0.30, 0.95)),
-                                BorderColor(Color::srgb(0.35, 0.95, 0.70)),
-                                LobbyButtonAction::JoinPrivate,
-                            ))
-                            .with_children(|btn| {
-                                btn.spawn((
-                                    Text::new("▶ JOIN"),
-                                    TextFont {
-                                        font_size: 13.0,
-                                        ..default()
-                                    },
-                                    TextColor(Color::WHITE),
-                                    FocusPolicy::Pass,
-                                ));
-                            });
-                    });
-
-                // Button 3: Solo Skirmish Practice
-                modal
-                    .spawn((
-                        Button,
-                        Node {
-                            padding: UiRect::axes(Val::Px(14.0), Val::Px(10.0)),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            border: UiRect::all(Val::Px(1.5)),
-                            ..default()
-                        },
-                        BorderRadius::all(Val::Px(6.0)),
-                        BackgroundColor(Color::srgba(0.12, 0.28, 0.22, 0.95)),
-                        BorderColor(Color::srgb(0.35, 0.90, 0.55)),
-                        LobbyButtonAction::PlaySolo,
-                    ))
-                    .with_children(|btn| {
-                        btn.spawn((
-                            Text::new("🤖 SOLO PRACTICE (VS AI WAVES)"),
-                            TextFont {
-                                font_size: 14.0,
-                                ..default()
-                            },
-                            TextColor(Color::srgb(0.90, 1.0, 0.92)),
-                            FocusPolicy::Pass,
-                        ));
-                    });
-
-                // Status message inside modal
-                modal.spawn((
-                    Text::new("Status: Standalone Practice"),
-                    TextFont {
-                        font_size: 12.5,
-                        ..default()
-                    },
-                    TextColor(Color::srgb(0.80, 0.85, 0.90)),
+                    TextColor(Color::srgb(0.80, 0.92, 1.0)),
                     LobbyStatusText,
                     FocusPolicy::Pass,
                 ));
 
-                // Close Button
+                // Quick Controls summary container
                 modal
                     .spawn((
-                        Button,
                         Node {
-                            align_self: AlignSelf::Center,
-                            padding: UiRect::axes(Val::Px(18.0), Val::Px(6.0)),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
+                            width: Val::Percent(100.0),
+                            flex_direction: FlexDirection::Column,
+                            padding: UiRect::all(Val::Px(12.0)),
+                            row_gap: Val::Px(6.0),
                             border: UiRect::all(Val::Px(1.0)),
                             ..default()
                         },
-                        BorderRadius::all(Val::Px(4.0)),
-                        BackgroundColor(Color::srgba(0.20, 0.22, 0.26, 0.95)),
-                        BorderColor(Color::srgb(0.45, 0.50, 0.55)),
-                        LobbyButtonAction::CloseModal,
+                        BorderRadius::all(Val::Px(6.0)),
+                        BackgroundColor(Color::srgba(0.08, 0.12, 0.18, 0.95)),
+                        BorderColor(Color::srgb(0.20, 0.35, 0.50)),
+                        FocusPolicy::Pass,
                     ))
-                    .with_children(|btn| {
-                        btn.spawn((
-                            Text::new("✕ Close"),
+                    .with_children(|guide| {
+                        guide.spawn((
+                            Text::new("🎮 CONTROLS & COMMANDS"),
                             TextFont {
-                                font_size: 13.0,
+                                font_size: 12.0,
                                 ..default()
                             },
-                            TextColor(Color::srgb(0.75, 0.80, 0.85)),
+                            TextColor(Color::srgb(0.35, 0.85, 1.0)),
                             FocusPolicy::Pass,
                         ));
+                        guide.spawn((
+                            Text::new("• Select Units: Left-Click / Drag Selection Box\n• Issue Orders: Right-Click (Move / Attack / Harvest)\n• Unit Tactics: [S] Stop | [H] Hold Position\n• Unit Abilities: [T] Stimpack | [E] Siege Mode\n• Structures: [B] Build Menu (HQ, Barracks, Supply Depot, Turret)\n• Game Menu: [Tab] / [F1] / [Esc]"),
+                            TextFont {
+                                font_size: 11.5,
+                                ..default()
+                            },
+                            TextColor(Color::srgb(0.75, 0.85, 0.95)),
+                            FocusPolicy::Pass,
+                        ));
+                    });
+
+                // Action Buttons (Resume & Forfeit)
+                modal
+                    .spawn((
+                        Node {
+                            width: Val::Percent(100.0),
+                            flex_direction: FlexDirection::Column,
+                            row_gap: Val::Px(10.0),
+                            margin: UiRect::top(Val::Px(8.0)),
+                            ..default()
+                        },
+                        FocusPolicy::Pass,
+                    ))
+                    .with_children(|actions| {
+                        // Resume Button
+                        actions
+                            .spawn((
+                                Button,
+                                Node {
+                                    width: Val::Percent(100.0),
+                                    padding: UiRect::axes(Val::Px(16.0), Val::Px(12.0)),
+                                    justify_content: JustifyContent::Center,
+                                    align_items: AlignItems::Center,
+                                    border: UiRect::all(Val::Px(1.5)),
+                                    ..default()
+                                },
+                                BorderRadius::all(Val::Px(6.0)),
+                                BackgroundColor(Color::srgba(0.12, 0.28, 0.45, 0.95)),
+                                BorderColor(Color::srgb(0.35, 0.85, 1.0)),
+                                LobbyButtonAction::CloseModal,
+                            ))
+                            .with_children(|btn| {
+                                btn.spawn((
+                                    Text::new("▶ RESUME MATCH"),
+                                    TextFont {
+                                        font_size: 14.0,
+                                        ..default()
+                                    },
+                                    TextColor(Color::WHITE),
+                                    FocusPolicy::Pass,
+                                ));
+                            });
+
+                        // Forfeit & Return to Landing Page Button
+                        actions
+                            .spawn((
+                                Button,
+                                Node {
+                                    width: Val::Percent(100.0),
+                                    padding: UiRect::axes(Val::Px(16.0), Val::Px(12.0)),
+                                    justify_content: JustifyContent::Center,
+                                    align_items: AlignItems::Center,
+                                    border: UiRect::all(Val::Px(1.5)),
+                                    ..default()
+                                },
+                                BorderRadius::all(Val::Px(6.0)),
+                                BackgroundColor(Color::srgba(0.40, 0.12, 0.12, 0.95)),
+                                BorderColor(Color::srgb(0.95, 0.30, 0.30)),
+                                LobbyButtonAction::ForfeitMatch,
+                            ))
+                            .with_children(|btn| {
+                                btn.spawn((
+                                    Text::new("🏳️ FORFEIT & QUIT TO LANDING PAGE"),
+                                    TextFont {
+                                        font_size: 14.0,
+                                        ..default()
+                                    },
+                                    TextColor(Color::srgb(1.0, 0.90, 0.90)),
+                                    FocusPolicy::Pass,
+                                ));
+                            });
                     });
             });
 
@@ -934,17 +732,11 @@ fn handle_lobby_button_interactions(
         (&Interaction, &mut BackgroundColor, &LobbyButtonAction),
         (Changed<Interaction>, With<Button>),
     >,
-    mut net_client: ResMut<NetClient>,
-    mut join_code_state: ResMut<JoinCodeInputState>,
     mut modal_query: Query<&mut Node, With<LobbyModalContainer>>,
+    mut net_client: ResMut<NetClient>,
+    mut next_state: ResMut<NextState<AppState>>,
 ) {
-    if net_client.is_changed() && net_client.status == NetStatus::InGame {
-        for mut node in &mut modal_query {
-            node.display = Display::None;
-        }
-    }
-
-    if keyboard.just_pressed(KeyCode::F1) || keyboard.just_pressed(KeyCode::Tab) {
+    if keyboard.just_pressed(KeyCode::F1) || keyboard.just_pressed(KeyCode::Tab) || keyboard.just_pressed(KeyCode::Escape) {
         for mut node in &mut modal_query {
             node.display = if node.display == Display::None {
                 Display::Flex
@@ -972,146 +764,35 @@ fn handle_lobby_button_interactions(
                             node.display = Display::None;
                         }
                     }
-                    LobbyButtonAction::SelectColor(color) => {
-                        net_client.my_color = *color;
-                        info!("🎨 Selected Faction Color: {:?}", color);
-                    }
-                    LobbyButtonAction::Find1v1 => {
-                        net_client.current_mode = GameMode::Multiplayer1v1;
-                        net_client.send(&ClientMessage::JoinLobby {
-                            player_name: net_client.player_name.clone(),
-                            mode: GameMode::Multiplayer1v1,
-                            room_code: None,
-                            faction_color: Some(net_client.my_color),
-                        });
-                        info!("⚔️ [Lobby] Searching for 1v1 Multiplayer match...");
-                    }
-                    LobbyButtonAction::CreatePrivate => {
-                        net_client.current_mode = GameMode::CustomPrivate;
-                        net_client.send(&ClientMessage::JoinLobby {
-                            player_name: net_client.player_name.clone(),
-                            mode: GameMode::CustomPrivate,
-                            room_code: None,
-                            faction_color: Some(net_client.my_color),
-                        });
-                        info!("🔒 [Lobby] Creating private 1v1 lobby...");
-                    }
-                    LobbyButtonAction::FocusJoinCode => {
-                        join_code_state.is_focused = true;
-                    }
-                    LobbyButtonAction::JoinPrivate => {
-                        if !join_code_state.code.is_empty() {
-                            net_client.current_mode = GameMode::CustomPrivate;
-                            net_client.send(&ClientMessage::JoinLobby {
-                                player_name: net_client.player_name.clone(),
-                                mode: GameMode::CustomPrivate,
-                                room_code: Some(join_code_state.code.trim().to_uppercase()),
-                                faction_color: Some(net_client.my_color),
-                            });
-                            info!("🔑 [Lobby] Joining private room with code: {}", join_code_state.code);
-                        }
-                    }
-                    LobbyButtonAction::CancelQueue => {
-                        net_client.send(&ClientMessage::CancelQueue);
-                        info!("🚪 [Lobby] Sent CancelQueue to server.");
-                    }
-                    LobbyButtonAction::PlaySolo => {
-                        net_client.current_mode = GameMode::SoloVsAi;
-                        net_client.send(&ClientMessage::JoinLobby {
-                            player_name: net_client.player_name.clone(),
-                            mode: GameMode::SoloVsAi,
-                            room_code: None,
-                            faction_color: Some(net_client.my_color),
-                        });
-                        info!("🤖 [Lobby] Started Solo vs AI practice match.");
+                    LobbyButtonAction::ForfeitMatch => {
+                        info!("🏳️ [GameMenu] Player forfeited match, returning to landing page.");
                         for mut node in &mut modal_query {
                             node.display = Display::None;
+                        }
+                        net_client.send(&ClientMessage::ForfeitMatch);
+                        net_client.status = NetStatus::Connected;
+                        next_state.set(AppState::Lobby);
+                        #[cfg(target_arch = "wasm32")]
+                        {
+                            let _ = js_sys::eval("if (window.__rts_return_to_lobby) { window.__rts_return_to_lobby(); }");
                         }
                     }
                 }
             }
             Interaction::Hovered => {
-                bg_color.0 = Color::srgba(0.25, 0.45, 0.65, 0.95);
+                bg_color.0 = match action {
+                    LobbyButtonAction::ForfeitMatch => Color::srgba(0.55, 0.18, 0.18, 0.95),
+                    LobbyButtonAction::CloseModal => Color::srgba(0.20, 0.40, 0.65, 0.95),
+                    LobbyButtonAction::ToggleModal => Color::srgba(0.20, 0.35, 0.50, 0.95),
+                };
             }
             Interaction::None => {
                 bg_color.0 = match action {
-                    LobbyButtonAction::Find1v1 => Color::srgba(0.15, 0.30, 0.45, 0.95),
-                    LobbyButtonAction::CancelQueue => Color::srgba(0.35, 0.15, 0.15, 0.95),
-                    LobbyButtonAction::CreatePrivate => Color::srgba(0.25, 0.20, 0.40, 0.95),
-                    LobbyButtonAction::FocusJoinCode | LobbyButtonAction::JoinPrivate => Color::srgba(0.20, 0.28, 0.35, 0.95),
-                    LobbyButtonAction::PlaySolo => Color::srgba(0.12, 0.28, 0.22, 0.95),
+                    LobbyButtonAction::ForfeitMatch => Color::srgba(0.40, 0.12, 0.12, 0.95),
+                    LobbyButtonAction::CloseModal => Color::srgba(0.12, 0.28, 0.45, 0.95),
                     LobbyButtonAction::ToggleModal => Color::srgba(0.12, 0.22, 0.32, 0.95),
-                    LobbyButtonAction::CloseModal => Color::srgba(0.20, 0.22, 0.26, 0.95),
-                    LobbyButtonAction::SelectColor(c) => c.to_color(),
                 };
             }
-        }
-    }
-}
-
-fn handle_join_code_keyboard_input(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mut join_code_state: ResMut<JoinCodeInputState>,
-    mut net_client: ResMut<NetClient>,
-    mut field_text_query: Query<&mut Text, With<JoinCodeFieldText>>,
-) {
-    if !join_code_state.is_focused {
-        return;
-    }
-
-    if keyboard.just_pressed(KeyCode::Backspace) {
-        join_code_state.code.pop();
-    }
-
-    let keys = [
-        (KeyCode::KeyA, 'A'), (KeyCode::KeyB, 'B'), (KeyCode::KeyC, 'C'), (KeyCode::KeyD, 'D'),
-        (KeyCode::KeyE, 'E'), (KeyCode::KeyF, 'F'), (KeyCode::KeyG, 'G'), (KeyCode::KeyH, 'H'),
-        (KeyCode::KeyI, 'I'), (KeyCode::KeyJ, 'J'), (KeyCode::KeyK, 'K'), (KeyCode::KeyL, 'L'),
-        (KeyCode::KeyM, 'M'), (KeyCode::KeyN, 'N'), (KeyCode::KeyO, 'O'), (KeyCode::KeyP, 'P'),
-        (KeyCode::KeyQ, 'Q'), (KeyCode::KeyR, 'R'), (KeyCode::KeyS, 'S'), (KeyCode::KeyT, 'T'),
-        (KeyCode::KeyU, 'U'), (KeyCode::KeyV, 'V'), (KeyCode::KeyW, 'W'), (KeyCode::KeyX, 'X'),
-        (KeyCode::KeyY, 'Y'), (KeyCode::KeyZ, 'Z'),
-        (KeyCode::Digit0, '0'), (KeyCode::Digit1, '1'), (KeyCode::Digit2, '2'), (KeyCode::Digit3, '3'),
-        (KeyCode::Digit4, '4'), (KeyCode::Digit5, '5'), (KeyCode::Digit6, '6'), (KeyCode::Digit7, '7'),
-        (KeyCode::Digit8, '8'), (KeyCode::Digit9, '9'),
-    ];
-
-    for (code, ch) in keys {
-        if keyboard.just_pressed(code) && join_code_state.code.len() < 4 {
-            join_code_state.code.push(ch);
-        }
-    }
-
-    if (keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::NumpadEnter))
-        && join_code_state.code.len() == 4 {
-            let code = join_code_state.code.clone();
-            net_client.current_mode = GameMode::CustomPrivate;
-            net_client.send(&ClientMessage::JoinLobby {
-                player_name: net_client.player_name.clone(),
-                mode: GameMode::CustomPrivate,
-                room_code: Some(code),
-                faction_color: Some(net_client.my_color),
-            });
-        }
-
-    for mut text in &mut field_text_query {
-        if join_code_state.code.is_empty() {
-            text.0 = "🔑 JOIN CODE: [ ---- ]".to_string();
-        } else {
-            text.0 = format!("🔑 JOIN CODE: [ {:4} ] (Enter)", join_code_state.code);
-        }
-    }
-}
-
-fn update_color_swatches_system(
-    net_client: Res<NetClient>,
-    mut swatch_query: Query<(&ColorSwatchBorder, &mut BorderColor)>,
-) {
-    for (swatch, mut border) in &mut swatch_query {
-        if swatch.0 == net_client.my_color {
-            *border = BorderColor(Color::srgb(1.0, 0.90, 0.20)); // Gold highlight for active choice
-        } else {
-            *border = BorderColor(Color::NONE);
         }
     }
 }
@@ -1460,19 +1141,19 @@ fn handle_play_again_button_interaction(
         (&Interaction, &mut BackgroundColor),
         (Changed<Interaction>, With<PlayAgainButton>),
     >,
+    mut net_client: ResMut<NetClient>,
+    mut next_state: ResMut<NextState<AppState>>,
 ) {
     for (interaction, mut bg_color) in &mut interaction_query {
         match *interaction {
             Interaction::Pressed => {
+                info!("🔄 Play Again / Return to lobby requested.");
+                net_client.send(&ClientMessage::ForfeitMatch);
+                net_client.status = NetStatus::Connected;
+                next_state.set(AppState::Lobby);
                 #[cfg(target_arch = "wasm32")]
                 {
-                    if let Some(win) = web_sys::window() {
-                        let _ = win.location().reload();
-                    }
-                }
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    info!("🔄 Play Again requested (Restart the client binary to replay).");
+                    let _ = js_sys::eval("if (window.__rts_return_to_lobby) { window.__rts_return_to_lobby(); }");
                 }
             }
             Interaction::Hovered => {
@@ -1490,19 +1171,19 @@ fn handle_return_to_landing_button_interaction(
         (&Interaction, &mut BackgroundColor),
         (Changed<Interaction>, With<ReturnToLandingButton>),
     >,
+    mut net_client: ResMut<NetClient>,
+    mut next_state: ResMut<NextState<AppState>>,
 ) {
     for (interaction, mut bg_color) in &mut interaction_query {
         match *interaction {
             Interaction::Pressed => {
+                info!("🏠 Return to Landing Page requested.");
+                net_client.send(&ClientMessage::ForfeitMatch);
+                net_client.status = NetStatus::Connected;
+                next_state.set(AppState::Lobby);
                 #[cfg(target_arch = "wasm32")]
                 {
-                    if let Some(win) = web_sys::window() {
-                        let _ = win.location().set_href("/");
-                    }
-                }
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    info!("🏠 Return to Landing Page requested.");
+                    let _ = js_sys::eval("if (window.__rts_return_to_lobby) { window.__rts_return_to_lobby(); }");
                 }
             }
             Interaction::Hovered => {

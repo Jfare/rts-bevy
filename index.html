@@ -950,6 +950,16 @@
                 showView('portal-view-main');
             };
 
+            window.__rts_return_to_lobby = function() {
+                stopQueueTimer();
+                clearInterval(countdownTimerInterval);
+                if (portalOverlay) {
+                    portalOverlay.classList.remove('hidden');
+                }
+                showView('portal-view-main');
+                fetchServerTelemetry();
+            };
+
             window.__rts_on_match_found = function(opponentName, opponentColor, countdownSecs) {
                 stopQueueTimer();
                 showView('portal-view-match-found');

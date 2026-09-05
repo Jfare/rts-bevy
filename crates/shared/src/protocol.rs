@@ -173,6 +173,7 @@ pub enum ClientMessage {
         target_position: Vec2,
     },
     CancelQueue,
+    ForfeitMatch,
     RequestStimpack {
         unit_net_ids: Vec<u32>,
     },
