@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use shared::components::{
-    BaseHQ, Building, Faction, MatchOutcome, MoveSpeed, MoveTarget, Radius, ResourceNode, SiegeTank,
+    AppState, BaseHQ, Building, Faction, MatchOutcome, MoveSpeed, MoveTarget, Radius, ResourceNode, SiegeTank,
     Soldier, SoldierState, Stimpack, TacticalStance, TankMode, Unit, Worker, WorkerState,
 };
 use shared::grid::NavGrid;
@@ -17,7 +17,8 @@ impl Plugin for UnitMovementPlugin {
                     unit_movement_system,
                     update_tactical_stances_and_abilities_system,
                     unit_separation_and_collision_system,
-                ),
+                )
+                    .run_if(in_state(AppState::InGame)),
             );
     }
 }
@@ -123,12 +124,11 @@ fn unit_movement_system(
         }
 
         // Final destination reached or cleanly settled against obstacle
-        if is_final_waypoint {
-            if dist <= 12.0 || (dist <= 32.0 && move_target.stall_timer > 0.20) || move_target.stall_timer > 0.50 {
+        if is_final_waypoint
+            && (dist <= 12.0 || (dist <= 32.0 && move_target.stall_timer > 0.20) || move_target.stall_timer > 0.50) {
                 commands.entity(entity).remove::<MoveTarget>();
                 continue;
             }
-        }
 
         let direction = delta.normalize_or_zero();
         let speed_mult = stim_opt

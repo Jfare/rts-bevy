@@ -29,7 +29,8 @@ impl Plugin for PlacementPlugin {
                     handle_placement_input,
                     update_placement_validation,
                     draw_placement_ghost,
-                ),
+                )
+                    .run_if(in_state(AppState::InGame)),
             );
     }
 }
@@ -71,13 +72,12 @@ fn handle_placement_input(
     }
 
     // 2. Cancel placement on Escape or Right-Click
-    if keyboard.just_pressed(KeyCode::Escape) || mouse_button.just_pressed(MouseButton::Right) {
-        if state.active_kind.is_some() {
+    if (keyboard.just_pressed(KeyCode::Escape) || mouse_button.just_pressed(MouseButton::Right))
+        && state.active_kind.is_some() {
             state.active_kind = None;
             info!("❌ [Build Mode] Placement cancelled");
             return;
         }
-    }
 
     let Some(building_kind) = state.active_kind else {
         return;

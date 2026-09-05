@@ -19,7 +19,8 @@ impl Plugin for MiningPlugin {
                 handle_mining_click_orders,
                 worker_mining_state_machine,
                 draw_mining_visuals,
-            ),
+            )
+                .run_if(in_state(AppState::InGame)),
         );
     }
 }

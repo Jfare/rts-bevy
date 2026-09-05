@@ -48,11 +48,10 @@ fn draw_units_system(
         let pos = transform.translation.truncate();
 
         // Shroud hostile units outside active friendly vision
-        if *faction != net_client.my_faction && *faction != Faction::Neutral {
-            if fog.get_state_at_world_pos(pos, config) != FogState::Visible {
+        if *faction != net_client.my_faction && *faction != Faction::Neutral
+            && fog.get_state_at_world_pos(pos, config) != FogState::Visible {
                 continue;
             }
-        }
         let r = radius.0;
         let rot = transform.rotation.to_euler(EulerRot::ZYX).0;
 
@@ -78,12 +77,11 @@ fn draw_units_system(
                 TacticalStance::HoldPosition => {
                     gizmos.circle_2d(pos, r + 4.0, Color::srgba(0.25, 0.65, 1.0, 0.75));
                 }
-                TacticalStance::Patrol { origin, target, .. } => {
-                    if selectable.is_selected {
+                TacticalStance::Patrol { origin, target, .. }
+                    if selectable.is_selected => {
                         gizmos.line_2d(*origin, *target, Color::srgba(0.35, 0.75, 1.0, 0.75));
                         gizmos.circle_2d(*target, 6.0, Color::srgba(0.35, 0.75, 1.0, 0.85));
                     }
-                }
                 _ => {}
             }
         }
@@ -364,11 +362,10 @@ fn draw_health_bars_system(
         let pos = transform.translation.truncate();
 
         // Shroud health bars of non-friendly entities in fog
-        if *faction != net_client.my_faction && *faction != Faction::Neutral {
-            if fog.get_state_at_world_pos(pos, config) != FogState::Visible {
+        if *faction != net_client.my_faction && *faction != Faction::Neutral
+            && fog.get_state_at_world_pos(pos, config) != FogState::Visible {
                 continue;
             }
-        }
 
         let bar_w = radius.0 * 2.2;
         let bar_h = 5.0;

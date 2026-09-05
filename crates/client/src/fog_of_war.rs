@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy::render::camera::OrthographicProjection;
 use bevy::window::PrimaryWindow;
-use shared::components::{Building, Faction, Unit, Worker};
+use shared::components::{AppState, Building, Faction, Unit, Worker};
 
 use shared::grid::WorldGridConfig;
 use crate::camera::RtsCamera;
@@ -89,7 +89,8 @@ impl Plugin for FogOfWarPlugin {
                     update_fog_of_war,
                     update_fog_unit_visibility,
                     draw_fog_of_war_overlay,
-                ),
+                )
+                    .run_if(in_state(AppState::InGame)),
             );
     }
 }

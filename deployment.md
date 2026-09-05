@@ -109,6 +109,36 @@ After the deployment workflow completes, visit:
 ---
 
 ## 🛠️ 6. Useful Server Management Commands
+## 🐳 6. Local Testing with Docker Desktop
+
+To test the container stack locally before deploying to UpCloud:
+
+```bash
+# 1. Compile release artifacts locally
+cargo build --release --bin server
+trunk build --release
+
+# 2. Stage the binary for Docker build
+mkdir -p bin && cp target/release/server bin/server
+
+# 3. Create .env with local port mappings (ports > 1024 for rootless Docker)
+cat << 'EOF' > .env
+WEB_PORT=8088
+SSL_PORT=8443
+RTS_DOMAIN=http://localhost
+EOF
+
+# 4. Start containers
+docker compose up -d --build
+
+# 5. Access locally
+# Web Client: http://localhost:8088
+# Server Health: http://localhost:8088/health
+```
+
+---
+
+## 🛠️ 7. Useful Server Management Commands
 
 If you need to inspect the server manually:
 

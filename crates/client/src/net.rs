@@ -127,8 +127,10 @@ impl Plugin for NetClientPlugin {
     fn build(&self, app: &mut App) {
         let (tx_cmds, rx_cmds) = crossbeam_channel::unbounded();
 
-        let mut net_client = NetClient::default();
-        net_client.tx_outgoing_cmds = tx_cmds;
+        let net_client = NetClient {
+            tx_outgoing_cmds: tx_cmds,
+            ..Default::default()
+        };
         app.insert_resource(net_client)
             .init_resource::<ServerTelemetry>();
 
@@ -158,6 +160,7 @@ fn poll_web_portal_launch_requests(
     mut net_client: ResMut<NetClient>,
     mut economy: ResMut<PlayerEconomy>,
     mut wave_ai_opt: Option<ResMut<bot_ai::WaveAiState>>,
+    mut next_state: ResMut<NextState<AppState>>,
     mut camera_query: Query<&mut Transform, (With<Camera2d>, Without<NetEntity>, Without<Unit>, Without<Building>, Without<ResourceNode>)>,
     cleanup_query: Query<Entity, Or<(With<NetEntity>, With<Unit>, With<Building>, With<ResourceNode>)>>,
 ) {
@@ -196,16 +199,16 @@ fn poll_web_portal_launch_requests(
                     } else if mode_str == "solo" {
                         info!("🤖 [Portal] Launching Solo vs AI match");
                         net_client.current_mode = GameMode::SoloVsAi;
-                        if let Some(ref mut wave_ai) = wave_ai_opt {
-                            wave_ai.is_active = true;
-                            wave_ai.time_until_next_wave = 40.0;
-                            wave_ai.current_wave = 0;
-                        }
                         if net_client.status == NetStatus::Connecting {
                             info!("⏳ [Portal] WebSocket connecting; buffering Solo vs AI match request.");
                             net_client.pending_mode_request = Some(GameMode::SoloVsAi);
                         } else if net_client.status == NetStatus::Disconnected {
                             info!("🤖 [Portal] Server offline; launching local standalone match.");
+                            if let Some(ref mut wave_ai) = wave_ai_opt {
+                                wave_ai.is_active = true;
+                                wave_ai.time_until_next_wave = 40.0;
+                                wave_ai.current_wave = 0;
+                            }
                             spawn_standalone_offline_match(
                                 &mut commands,
                                 &mut economy,
@@ -213,7 +216,11 @@ fn poll_web_portal_launch_requests(
                                 &mut camera_query,
                                 &cleanup_query,
                             );
+                            next_state.set(AppState::InGame);
                         } else {
+                            if let Some(ref mut wave_ai) = wave_ai_opt {
+                                wave_ai.is_active = false;
+                            }
                             net_client.send(&ClientMessage::JoinLobby {
                                 player_name: net_client.player_name.clone(),
                                 mode: GameMode::SoloVsAi,
@@ -260,6 +267,7 @@ fn poll_network_events(
     mut outcome_opt: Option<ResMut<MatchOutcome>>,
     mut chat_log_opt: Option<ResMut<ChatLog>>,
     mut countdown_opt: Option<ResMut<crate::ui::MatchCountdown>>,
+    mut next_state: ResMut<NextState<AppState>>,
     mut sound_events: EventWriter<SoundEffect>,
     mut particle_events: EventWriter<ParticleEvent>,
     cleanup_query: Query<Entity, Or<(With<NetEntity>, With<Unit>, With<Building>, With<ResourceNode>)>>,
@@ -289,8 +297,8 @@ fn poll_network_events(
         ws_conn.buffered_messages.push(msg);
     }
 
-    if net_client.status != NetStatus::Connecting && net_client.status != NetStatus::Disconnected {
-        if ws_conn.sender.is_some() && !ws_conn.buffered_messages.is_empty() {
+    if net_client.status != NetStatus::Connecting && net_client.status != NetStatus::Disconnected
+        && ws_conn.sender.is_some() && !ws_conn.buffered_messages.is_empty() {
             let messages = std::mem::take(&mut ws_conn.buffered_messages);
             if let Some(ref mut sender) = ws_conn.sender {
                 for msg in messages {
@@ -300,7 +308,6 @@ fn poll_network_events(
                 }
             }
         }
-    }
 
     // 2. Poll incoming network events from server
     let mut received_events = Vec::new();
@@ -338,6 +345,7 @@ fn poll_network_events(
                         &mut outcome_opt,
                         &mut chat_log_opt,
                         &mut countdown_opt,
+                        &mut next_state,
                         &mut sound_events,
                         &mut particle_events,
                         &cleanup_query,
@@ -370,6 +378,7 @@ fn handle_server_message(
     outcome_opt: &mut Option<ResMut<MatchOutcome>>,
     chat_log_opt: &mut Option<ResMut<ChatLog>>,
     countdown_opt: &mut Option<ResMut<crate::ui::MatchCountdown>>,
+    next_state: &mut ResMut<NextState<AppState>>,
     sound_events: &mut EventWriter<SoundEffect>,
     particle_events: &mut EventWriter<ParticleEvent>,
     cleanup_query: &Query<Entity, Or<(With<NetEntity>, With<Unit>, With<Building>, With<ResourceNode>)>>,
@@ -422,6 +431,7 @@ fn handle_server_message(
         } => {
             info!("⚔️ [NetClient] Match started! Initializing battlefield cameras.");
             net_client.status = NetStatus::InGame;
+            next_state.set(AppState::InGame);
 
             // Center camera on player spawn base
             let spawn_pos = if net_client.my_faction == Faction::Player1 {
@@ -697,7 +707,7 @@ fn handle_server_message(
             destinations,
             is_attack_move,
         } => {
-            for (net_id, dest) in unit_net_ids.into_iter().zip(destinations.into_iter()) {
+            for (net_id, dest) in unit_net_ids.into_iter().zip(destinations) {
                 for (entity, net_entity, _fac, tf, _hp, _worker, soldier_opt, tank_opt, move_target_opt, stance_opt, ..) in entity_query.iter_mut() {
                     if net_entity.net_id == net_id {
                         if let Some(mut soldier) = soldier_opt {
@@ -825,7 +835,7 @@ fn handle_server_message(
             unit_net_ids,
             destinations,
         } => {
-            for (net_id, dest) in unit_net_ids.into_iter().zip(destinations.into_iter()) {
+            for (net_id, dest) in unit_net_ids.into_iter().zip(destinations) {
                 for (entity, net_entity, _fac, tf, _hp, _worker, soldier_opt, _tank, move_target_opt, stance_opt, ..) in entity_query.iter_mut() {
                     if net_entity.net_id == net_id {
                         let unit_pos = tf.translation.truncate();
@@ -866,8 +876,8 @@ fn handle_server_message(
 
         ServerMessage::UnitsActivatedStimpack { unit_net_ids } => {
             for (entity, net_entity, _fac, tf, mut hp, _worker, _soldier, _tank, _mt, _stance, stim_opt, ..) in entity_query.iter_mut() {
-                if unit_net_ids.contains(&net_entity.net_id) {
-                    if hp.current > 20.0 {
+                if unit_net_ids.contains(&net_entity.net_id)
+                    && hp.current > 20.0 {
                         hp.take_damage(15.0);
                         let pos = tf.translation.truncate();
                         particle_events.send(ParticleEvent::StimpackVapor { pos });
@@ -882,7 +892,6 @@ fn handle_server_message(
                             });
                         }
                     }
-                }
             }
         }
 
@@ -1332,6 +1341,7 @@ fn handle_server_message(
         ServerMessage::QueueCancelled => {
             info!("🚪 [NetClient] Queue Cancelled acknowledged by server.");
             net_client.status = NetStatus::Connected;
+            next_state.set(AppState::Lobby);
             #[cfg(target_arch = "wasm32")]
             {
                 let _ = js_sys::eval("if (window.__rts_on_queue_cancelled) { window.__rts_on_queue_cancelled(); }");

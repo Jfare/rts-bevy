@@ -21,7 +21,8 @@ impl Plugin for CombatPlugin {
                     muzzle_flash_system,
                     death_and_elimination_system,
                     draw_combat_gizmos,
-                ),
+                )
+                    .run_if(in_state(AppState::InGame)),
             );
     }
 }
@@ -121,8 +122,8 @@ fn soldier_combat_system(
             if dist <= effective_range {
                 soldier.state = SoldierState::Attacking;
 
-                if !is_online {
-                    if soldier.attack_timer >= (soldier.attack_cooldown * cooldown_mult) {
+                if !is_online
+                    && soldier.attack_timer >= (soldier.attack_cooldown * cooldown_mult) {
                         soldier.attack_timer = 0.0;
                         sound_events.send(SoundEffect::Gunshot);
 
@@ -158,7 +159,6 @@ fn soldier_combat_system(
                             Transform::from_xyz(projectile_start.x, projectile_start.y, 3.5),
                         ));
                     }
-                }
             } else if !is_hold_pos {
                 soldier.state = SoldierState::ChasingTarget;
                 let speed_mult = stim_opt
@@ -326,8 +326,8 @@ fn turret_combat_system(
             let dir = (target_pos - turret_pos).normalize_or_zero();
             turret.barrel_angle = dir.y.atan2(dir.x);
 
-            if !is_online {
-                if turret.attack_timer >= turret.attack_cooldown {
+            if !is_online
+                && turret.attack_timer >= turret.attack_cooldown {
                     turret.attack_timer = 0.0;
                     sound_events.send(SoundEffect::Gunshot);
 
@@ -361,7 +361,6 @@ fn turret_combat_system(
                         Transform::from_xyz(muzzle_start.x, muzzle_start.y, 3.5),
                     ));
                 }
-            }
         }
     }
 }
@@ -461,8 +460,8 @@ fn siege_tank_combat_system(
             let effective_range = tank.attack_range + target_snap.radius;
 
             if dist <= effective_range {
-                if !is_online {
-                    if tank.attack_timer >= tank.attack_cooldown {
+                if !is_online
+                    && tank.attack_timer >= tank.attack_cooldown {
                         tank.attack_timer = 0.0;
                         sound_events.send(SoundEffect::SiegeTankShot);
 
@@ -506,7 +505,6 @@ fn siege_tank_combat_system(
                             Transform::from_xyz(muzzle_start.x, muzzle_start.y, 3.5),
                         ));
                     }
-                }
             } else if !is_hold_pos && tank.mode == TankMode::Tank {
                 let stop_dist = (effective_range * 0.90).max(20.0);
                 let travel_needed = (dist - stop_dist).max(0.0);

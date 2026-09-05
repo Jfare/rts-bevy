@@ -224,7 +224,7 @@ async fn handle_connection(
     let write_handle = tokio::spawn(async move {
         while let Some(msg) = rx_peer_out.recv().await {
             if let Ok(bytes) = encode_server_msg(&msg) {
-                if let Err(err) = ws_sender.send(Message::Binary(bytes.into())).await {
+                if let Err(err) = ws_sender.send(Message::Binary(bytes)).await {
                     eprintln!("⚠️ [WebSocket Server] Write error peer #{}: {}", peer_id, err);
                     break;
                 }

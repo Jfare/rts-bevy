@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy::render::camera::OrthographicProjection;
 use bevy::window::PrimaryWindow;
-use shared::components::{Building, Faction, Health, MoveTarget, ResourceNode, Selectable, Unit};
+use shared::components::{AppState, Building, Faction, Health, MoveTarget, ResourceNode, Selectable, Unit};
 use shared::grid::WorldGridConfig;
 use shared::protocol::ClientMessage;
 use crate::camera::RtsCamera;
@@ -13,7 +13,10 @@ pub struct MinimapPlugin;
 impl Plugin for MinimapPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MinimapState>()
-            .add_systems(Update, (draw_minimap_system, handle_minimap_input));
+            .add_systems(
+                Update,
+                (draw_minimap_system, handle_minimap_input).run_if(in_state(AppState::InGame)),
+            );
     }
 }
 
@@ -171,11 +174,10 @@ fn draw_minimap_system(
             continue;
         }
         let b_pos = b_tf.translation.truncate();
-        if *faction != net_client.my_faction && *faction != Faction::Neutral {
-            if fog.get_state_at_world_pos(b_pos, config) == FogState::Unexplored {
+        if *faction != net_client.my_faction && *faction != Faction::Neutral
+            && fog.get_state_at_world_pos(b_pos, config) == FogState::Unexplored {
                 continue;
             }
-        }
 
         let sc = world_to_minimap_screen(b_pos, config, &mm_rect);
         let wp = to_world(sc);
@@ -195,11 +197,10 @@ fn draw_minimap_system(
             continue;
         }
         let u_pos = u_tf.translation.truncate();
-        if *faction != net_client.my_faction && *faction != Faction::Neutral {
-            if fog.get_state_at_world_pos(u_pos, config) != FogState::Visible {
+        if *faction != net_client.my_faction && *faction != Faction::Neutral
+            && fog.get_state_at_world_pos(u_pos, config) != FogState::Visible {
                 continue;
             }
-        }
 
         let sc = world_to_minimap_screen(u_pos, config, &mm_rect);
         let wp = to_world(sc);

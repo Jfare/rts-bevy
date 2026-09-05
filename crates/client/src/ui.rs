@@ -1082,8 +1082,8 @@ fn handle_join_code_keyboard_input(
         }
     }
 
-    if keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::NumpadEnter) {
-        if join_code_state.code.len() == 4 {
+    if (keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::NumpadEnter))
+        && join_code_state.code.len() == 4 {
             let code = join_code_state.code.clone();
             net_client.current_mode = GameMode::CustomPrivate;
             net_client.send(&ClientMessage::JoinLobby {
@@ -1093,7 +1093,6 @@ fn handle_join_code_keyboard_input(
                 faction_color: Some(net_client.my_color),
             });
         }
-    }
 
     for mut text in &mut field_text_query {
         if join_code_state.code.is_empty() {

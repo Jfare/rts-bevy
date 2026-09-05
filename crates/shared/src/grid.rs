@@ -353,11 +353,10 @@ impl NavGrid {
                 }
 
                 // Prevent cutting through corners of blocked cardinal neighbors on diagonals
-                if dx != 0 && dy != 0 {
-                    if self.is_blocked(current.gx, uny) || self.is_blocked(unx, current.gy) {
+                if dx != 0 && dy != 0
+                    && (self.is_blocked(current.gx, uny) || self.is_blocked(unx, current.gy)) {
                         continue;
                     }
-                }
 
                 let next_cost = current.cost + step_cost * NAV_CELL_SIZE;
                 let next_idx = uny * NAV_GRID_DIM + unx;

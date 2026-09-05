@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use bevy::ui::FocusPolicy;
-use shared::components::Faction;
+use shared::components::{AppState, Faction};
 use shared::protocol::{ClientMessage, FactionColor};
 use crate::net::NetClient;
 
@@ -15,7 +15,8 @@ impl Plugin for ChatPlugin {
                 (
                     handle_chat_keyboard_input,
                     update_chat_display_system,
-                ),
+                )
+                    .run_if(in_state(AppState::InGame)),
             );
     }
 }
@@ -169,11 +170,10 @@ fn handle_chat_keyboard_input(
     }
 
     // Space
-    if keyboard.just_pressed(KeyCode::Space) {
-        if chat_log.current_input.len() < 120 {
+    if keyboard.just_pressed(KeyCode::Space)
+        && chat_log.current_input.len() < 120 {
             chat_log.current_input.push(' ');
         }
-    }
 
     let shift = keyboard.pressed(KeyCode::ShiftLeft) || keyboard.pressed(KeyCode::ShiftRight);
 
@@ -223,12 +223,11 @@ fn handle_chat_keyboard_input(
     ];
 
     for (code, lower, upper) in keys {
-        if keyboard.just_pressed(code) {
-            if chat_log.current_input.len() < 120 {
+        if keyboard.just_pressed(code)
+            && chat_log.current_input.len() < 120 {
                 let ch = if shift { upper } else { lower };
                 chat_log.current_input.push(ch);
             }
-        }
     }
 }
 

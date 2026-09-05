@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy::render::camera::OrthographicProjection;
 use bevy::window::PrimaryWindow;
 use shared::components::{
-    Faction, Health, MatchOutcome, MoveTarget, NetEntity, Radius, ResourceNode, Selectable,
+    AppState, Faction, Health, MatchOutcome, MoveTarget, NetEntity, Radius, ResourceNode, Selectable,
     SiegeTank, Soldier, SoldierState, Stimpack, TacticalStance, TankMode, Worker,
 };
 use shared::grid::{NavGrid, WorldGridConfig};
@@ -31,7 +31,8 @@ impl Plugin for CommandMarkerPlugin {
                 handle_right_click_orders,
                 handle_stance_and_ability_hotkeys,
                 update_and_draw_command_markers,
-            ),
+            )
+                .run_if(in_state(AppState::InGame)),
         );
     }
 }

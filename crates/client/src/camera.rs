@@ -2,6 +2,7 @@ use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
 use bevy::render::camera::OrthographicProjection;
 use bevy::window::PrimaryWindow;
+use shared::components::AppState;
 use shared::grid::WorldGridConfig;
 
 /// Component marker for the RTS 2D camera
@@ -32,7 +33,10 @@ pub struct RtsCameraPlugin;
 
 impl Plugin for RtsCameraPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (camera_pan_system, camera_zoom_system));
+        app.add_systems(
+            Update,
+            (camera_pan_system, camera_zoom_system).run_if(in_state(AppState::InGame)),
+        );
     }
 }
 

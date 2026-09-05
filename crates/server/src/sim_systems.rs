@@ -821,8 +821,7 @@ fn handle_incoming_network_events(
                             if net_entity.net_id == building_net_id
                                 && *faction == player_faction
                                 && b_room.0 == player_room
-                            {
-                                if economy.has_minerals(player_faction, unit_kind.mineral_cost())
+                                && economy.has_minerals(player_faction, unit_kind.mineral_cost())
                                     && economy.has_supply(player_faction, unit_kind.supply_cost())
                                     && prod.queue.len() < prod.max_queue_size
                                 {
@@ -852,7 +851,6 @@ fn handle_incoming_network_events(
                                         });
                                     }
                                 }
-                            }
                         }
                     }
                     shared::protocol::ClientMessage::RequestSetRallyPoint {
@@ -1618,13 +1616,12 @@ fn server_movement_system(
         }
 
         // Final arrival or stall clean removal
-        if is_final_waypoint {
-            if dist <= 12.0 || (dist <= 32.0 && move_target.stall_timer > 0.20) || move_target.stall_timer > 0.50 {
+        if is_final_waypoint
+            && (dist <= 12.0 || (dist <= 32.0 && move_target.stall_timer > 0.20) || move_target.stall_timer > 0.50) {
                 velocity.0 = Vec2::ZERO;
                 commands.entity(entity).remove::<MoveTarget>();
                 continue;
             }
-        }
 
         let dir = diff.normalize_or_zero();
         let speed_mult = stim_opt
@@ -3389,11 +3386,12 @@ mod tests {
         // Extract the generated 4-digit code
         let mut generated_code = String::new();
         while let Ok(ev) = rx_out.try_recv() {
-            if let OutgoingNetEvent::SendToPeer { msg, .. } = ev {
-                if let ServerMessage::LobbyJoined { room_code: Some(code), is_game_ready, .. } = msg {
-                    assert!(!is_game_ready, "Room should wait for opponent");
-                    generated_code = code;
-                }
+            if let OutgoingNetEvent::SendToPeer {
+                msg: ServerMessage::LobbyJoined { room_code: Some(code), is_game_ready, .. },
+                ..
+            } = ev {
+                assert!(!is_game_ready, "Room should wait for opponent");
+                generated_code = code;
             }
         }
         assert_eq!(generated_code.len(), 4, "Room code must be 4 characters");
@@ -3414,10 +3412,11 @@ mod tests {
         // Verify match started for both peers
         let mut started_peers = Vec::new();
         while let Ok(ev) = rx_out.try_recv() {
-            if let OutgoingNetEvent::SendToPeer { peer_id, msg } = ev {
-                if let ServerMessage::GameStarted { .. } = msg {
-                    started_peers.push(peer_id);
-                }
+            if let OutgoingNetEvent::SendToPeer {
+                peer_id,
+                msg: ServerMessage::GameStarted { .. },
+            } = ev {
+                started_peers.push(peer_id);
             }
         }
         assert_eq!(started_peers, vec![101, 102], "Both players must receive GameStarted");

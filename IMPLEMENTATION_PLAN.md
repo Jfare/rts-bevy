@@ -173,15 +173,43 @@ All in-game text, UI, HUD elements, unit cards, and commands are strictly in **E
   - Full English translation across all codebase docs, comments, UI text, guides, and deployment manuals.
 
 
-### 🗺️ Planned Session B11: Advanced Maps, Terrain Chokepoints & Destructibles
-- [ ] **Multi-Tile Terrain & Obstacle System**:
-  - Natural choke points, cliffs, ramps, and resource-rich valleys.
-  - Destructible debris rocks (can be destroyed to open flanking pathways).
-- [ ] **Map Selection**:
-  - Map 1: *The Crucible* (Symmetrical 1v1 tournament arena with narrow center bridge).
-  - Map 2: *Crystal Basin* (Open macro map with rich expansion mineral nodes).
+### ✅ Completed Session B11: Mirrored 1v1 Map Layout, Static Obstacles & Docker Desktop Support
+- [x] **Mirrored 1v1 Map ("Iron Meridian")** ([`crates/shared/src/map.rs`](file:///home/john/Godot/rts-bevy/crates/shared/src/map.rs)):
+  - 180° rotational point symmetry ((x, y) <-> (-x, -y)) between South Base (P1: `0, -1000`) and North Base (P2: `0, 1000`).
+  - Safe main mineral fields with dedicated, unobstructed line-of-sight mining routes between crystals and HQs.
+  - Natural expansions (`(±880, ∓750)`) and high-yield contested center-flank mineral nodes (`(±1250, ±50)`).
+  - Auto-mining starting units: Matches start with 1 Base HQ and 2 active SCVs auto-harvesting minerals.
+- [x] **Static Map Obstacles & Terrain Barriers**:
+  - `MapObstacle` component with `RockMonolith`, `CliffRidge`, and `BaseRampBluff` variants.
+  - Natural choke points flanking main base ramps.
+  - Static obstacles integrated into `NavGrid` at startup, preventing clipping and routing paths around terrain features.
+- [x] **Docker Local Development Environment**:
+  - Configurable port bindings (`WEB_PORT`, `SSL_PORT`) via `.env` file, enabling rootless Docker Desktop on Linux without port 80/443 permission issues.
+  - Production-parity Caddy reverse proxy routing WebSocket `/ws` and HTTP API endpoints seamlessly to the dedicated server container.
+
+---
+
+### ✅ Session B12: AppState State Machine & Strict Solo-Only Wave AI Isolation
+- [x] **Formal Bevy `AppState` Architecture** ([`crates/shared/src/components.rs`](file:///home/john/Godot/rts-bevy/crates/shared/src/components.rs), [`crates/client/src/main.rs`](file:///home/john/Godot/rts-bevy/crates/client/src/main.rs)):
+  - First-class Bevy 0.15 state machine (`AppState::Lobby` default, `AppState::InGame`).
+  - Gated all 11 gameplay simulation plugins to `.run_if(in_state(AppState::InGame))` (movement, combat, mining, placement, production, selection, command markers, camera, minimap, fog of war, match stats, chat, tactical pings).
+  - Eliminates engine ticking, camera edge-pan movement, and background hotkey capture while reading the landing page.
+- [x] **Strict AI Wave Isolation**:
+  - `WaveAiPlugin` strictly gated to Solo play only: completely disabled in 1v1 multiplayer matches.
+  - In online Solo vs AI matches, dedicated server authoritatively spawns waves; client-side wave spawner is deactivated to prevent duplicate entity spawning.
+  - Queue cancellation resets state cleanly to `AppState::Lobby`.
+
+---
+
+### 🗺️ Planned Session B13: Destructible Obstacles, Multi-Map Selection & Replay Mode
+- [ ] **Destructible Debris & Dynamic Chokepoints**:
+  - Collapsible rock formations and destructible barriers that players can attack to open tactical flanking avenues.
+- [ ] **Multi-Map Selection in Match Lobby**:
+  - Map 1: *Iron Meridian* (180° point-symmetric competitive arena with ramp chokepoints).
+  - Map 2: *Crystal Basin* (Open macro map with wide corridors and rich contested expansions).
 - [ ] **Replay & Spectator Mode**:
   - Record match command streams for post-game playback analysis.
+  - Command stream recording for post-game playback analysis and spectating active matches.
 
 ---
 
@@ -195,9 +223,17 @@ cargo test --workspace
 
 # 2. Run local web client (Wasm on port 8000):
 trunk serve --open
+# 2. Run with Docker Compose (Recommended):
+cargo build --release --bin server
+trunk build --release
+mkdir -p bin && cp target/release/server bin/server
+docker compose up -d --build
 
 # 3. Start local dedicated server:
 cargo run --bin server
+# 3. Native & Standalone Development:
+cargo run --bin server    # Dedicated server on port 8080
+trunk serve --open       # Web client on port 8000
 ```
 
 ### Production Deployment:

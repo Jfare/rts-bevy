@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy::render::camera::OrthographicProjection;
 use bevy::window::PrimaryWindow;
-use shared::components::{Faction, Radius, Selectable, SiegeTank, Soldier, Worker};
+use shared::components::{AppState, Faction, Radius, Selectable, SiegeTank, Soldier, Worker};
 use shared::grid::WorldGridConfig;
 use crate::audio_sfx::SoundEffect;
 use crate::fog_of_war::{FogOfWarGrid, FogState};
@@ -36,7 +36,10 @@ pub struct SelectionPlugin;
 impl Plugin for SelectionPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SelectionState>()
-            .add_systems(Update, (handle_selection_input, draw_selection_gizmos));
+            .add_systems(
+                Update,
+                (handle_selection_input, draw_selection_gizmos).run_if(in_state(AppState::InGame)),
+            );
     }
 }
 
@@ -136,8 +139,8 @@ fn handle_selection_input(
             // Pass 1: Select friendly units inside the box
             for (_, transform, _, faction, mut sel, soldier_opt, tank_opt, worker_opt) in &mut selectable_query {
                 let pos = transform.translation.truncate();
-                if pos.x >= min_x && pos.x <= max_x && pos.y >= min_y && pos.y <= max_y {
-                    if *faction == net_client.my_faction {
+                if pos.x >= min_x && pos.x <= max_x && pos.y >= min_y && pos.y <= max_y
+                    && *faction == net_client.my_faction {
                         sel.is_selected = true;
                         friendly_selected = true;
 
@@ -152,7 +155,6 @@ fn handle_selection_input(
                             sound_played = true;
                         }
                     }
-                }
             }
 
             // Pass 2: If no friendly units were inside, select any visible units/buildings inside for inspection
@@ -160,11 +162,10 @@ fn handle_selection_input(
                 for (_, transform, _, faction, mut sel, _, _, _) in &mut selectable_query {
                     let pos = transform.translation.truncate();
                     if pos.x >= min_x && pos.x <= max_x && pos.y >= min_y && pos.y <= max_y {
-                        if *faction != net_client.my_faction && *faction != Faction::Neutral {
-                            if fog.get_state_at_world_pos(pos, config) != FogState::Visible {
+                        if *faction != net_client.my_faction && *faction != Faction::Neutral
+                            && fog.get_state_at_world_pos(pos, config) != FogState::Visible {
                                 continue;
                             }
-                        }
                         sel.is_selected = true;
                     }
                 }
@@ -177,11 +178,10 @@ fn handle_selection_input(
             for (entity, transform, radius, faction, _, _, _, _) in &selectable_query {
                 let pos = transform.translation.truncate();
                 // Skip selecting shrouded enemies in unexplored or non-visible fog
-                if *faction != net_client.my_faction && *faction != Faction::Neutral {
-                    if fog.get_state_at_world_pos(pos, config) != FogState::Visible {
+                if *faction != net_client.my_faction && *faction != Faction::Neutral
+                    && fog.get_state_at_world_pos(pos, config) != FogState::Visible {
                         continue;
                     }
-                }
 
                 let dist = pos.distance(start_world);
                 if dist <= (radius.0 + 24.0) && dist < closest_dist {

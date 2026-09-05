@@ -29,20 +29,27 @@ echo "🧪 [1/5] Running workspace unit tests & security checks..."
 cargo test --workspace
 ./scripts/security_audit.sh
 
-# 2. Prepare remote directory
-echo "📁 [2/5] Preparing remote deployment directory at $REMOTE_DIR..."
+# 2. Build production artifacts locally (saves VPS CPU and memory)
+echo "📦 [2/5] Building WebAssembly client and dedicated Linux server..."
+trunk build --release
+cargo build --release --bin server
+mkdir -p bin
+cp target/release/server bin/server
+
+# 3. Prepare remote directory
+echo "📁 [3/5] Preparing remote deployment directory at $REMOTE_DIR..."
 ssh -o StrictHostKeyChecking=accept-new "$VPS_USER@$VPS_HOST" "mkdir -p $REMOTE_DIR"
 
-# 3. Synchronize project directory to VPS
-echo "📦 [3/5] Syncing project files to VPS..."
+# 4. Synchronize project directory to VPS (including dist and bin)
+echo "📦 [4/5] Syncing project files and pre-built artifacts to VPS..."
 rsync -avz --delete \
     --exclude 'target/' \
     --exclude '.git/' \
-    --exclude 'dist/' \
+    --exclude '.env' \
     ./ "$VPS_USER@$VPS_HOST:$REMOTE_DIR"
 
-# 4. Build & Run containers on VPS
-echo "🐳 [4/5] Building and launching Docker Compose containers on VPS..."
+# 5. Build & Run containers on VPS
+echo "🐳 [5/6] Building and launching Docker Compose containers on VPS..."
 ssh "$VPS_USER@$VPS_HOST" "bash -c '
     cd $REMOTE_DIR
     export RTS_DOMAIN=\"$DOMAIN\"
@@ -51,8 +58,8 @@ ssh "$VPS_USER@$VPS_HOST" "bash -c '
     docker compose up -d
 '"
 
-# 5. Verify deployment health
-echo "🩺 [5/5] Performing live telemetry health check..."
+# 6. Verify deployment health
+echo "🩺 [6/6] Performing live telemetry health check..."
 sleep 3
 ssh "$VPS_USER@$VPS_HOST" "bash -c '
     docker compose ps

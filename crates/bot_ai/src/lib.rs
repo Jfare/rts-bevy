@@ -20,7 +20,7 @@ impl Default for WaveAiState {
             time_until_next_wave: 40.0,
             initial_delay: 40.0,
             wave_interval: 45.0,
-            is_active: true,
+            is_active: false,
             ai_spawn_pos: shared::map::P2_BASE_POS,
             target_player_pos: shared::map::P1_BASE_POS,
         }
@@ -33,6 +33,7 @@ impl Plugin for WaveAiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<WaveAiState>()
             .add_systems(Update, wave_spawner_system);
+            .add_systems(Update, wave_spawner_system.run_if(in_state(AppState::InGame)));
     }
 }
 

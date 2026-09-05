@@ -22,7 +22,8 @@ impl Plugin for ProductionPlugin {
                 handle_production_hotkeys,
                 handle_rally_point_order,
                 draw_production_and_construction_visuals,
-            ),
+            )
+                .run_if(in_state(AppState::InGame)),
         );
     }
 }
@@ -219,8 +220,8 @@ fn handle_production_hotkeys(
     // Key 'V' for SCV Worker at Base HQ
     if keyboard.just_pressed(KeyCode::KeyV) {
         for (mut prod, building, faction, selectable, net_entity_opt, base_hq, _) in &mut prod_query {
-            if *faction == my_faction && selectable.is_selected && building.is_constructed && base_hq.is_some() {
-                if prod.queue.len() < prod.max_queue_size {
+            if *faction == my_faction && selectable.is_selected && building.is_constructed && base_hq.is_some()
+                && prod.queue.len() < prod.max_queue_size {
                     if !economy.has_minerals(*faction, 50) {
                         info!("⚠️ [Economy] Not enough minerals for SCV Worker (Requires 50 💎)!");
                         continue;
@@ -258,7 +259,6 @@ fn handle_production_hotkeys(
 
                     info!("⛏️ [Queue] SCV Worker queued! Queue size: {}", prod.queue.len());
                 }
-            }
         }
     }
 

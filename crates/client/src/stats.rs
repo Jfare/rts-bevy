@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use shared::components::AppState;
 
 /// Tracks real-time gameplay metrics and actions per minute (APM)
 #[derive(Resource, Debug)]
@@ -63,7 +64,8 @@ impl Plugin for StatsPlugin {
                 (
                     update_match_stats_system,
                     track_player_input_apm_system,
-                ),
+                )
+                    .run_if(in_state(AppState::InGame)),
             );
     }
 }

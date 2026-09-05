@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
+use shared::components::AppState;
 use shared::grid::WorldGridConfig;
 use shared::protocol::{ClientMessage, FactionColor, PingType};
 use crate::camera::RtsCamera;
@@ -16,7 +17,8 @@ impl Plugin for TacticalPingPlugin {
                 handle_tactical_ping_input,
                 draw_tactical_pings_world_system,
                 draw_tactical_pings_minimap_system,
-            ),
+            )
+                .run_if(in_state(AppState::InGame)),
         );
     }
 }

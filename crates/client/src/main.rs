@@ -1,3 +1,5 @@
+#![allow(clippy::type_complexity, clippy::too_many_arguments)]
+
 mod audio_sfx;
 mod camera;
 mod chat;
@@ -35,6 +37,7 @@ use placement::PlacementPlugin;
 use production::ProductionPlugin;
 use render_units::RenderUnitsPlugin;
 use selection::SelectionPlugin;
+use shared::components::AppState;
 use shared::economy::PlayerEconomy;
 use stats::StatsPlugin;
 use ui::RtsUiPlugin;
@@ -64,6 +67,7 @@ fn main() {
             })
             .set(ImagePlugin::default_nearest()),
     )
+    .init_state::<AppState>()
     .insert_resource(ClearColor(Color::srgb(0.04, 0.06, 0.08)))
     .insert_resource(economy)
     .add_plugins((

@@ -2,11 +2,24 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 // ─────────────────────────────────────────────────────────────────────────────
+// APPLICATION LIFECYCLE STATES
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[derive(States, Debug, Clone, Copy, Eq, PartialEq, Hash, Default, Reflect)]
+pub enum AppState {
+    #[default]
+    Lobby,
+    InGame,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // FACTION & IDENTITY
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Component, Reflect)]
+#[derive(Default)]
 pub enum Faction {
+    #[default]
     Player1,
     Player2,
     HostileAi,
@@ -31,11 +44,6 @@ impl Faction {
     }
 }
 
-impl Default for Faction {
-    fn default() -> Self {
-        Faction::Player1
-    }
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CORE ECS COMPONENTS

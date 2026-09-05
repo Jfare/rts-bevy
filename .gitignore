@@ -1,5 +1,6 @@
 # Rust compiler build artifacts & incremental caches
 /target/
+/bin/
 **/*.rs.bk
 *.pdb
 

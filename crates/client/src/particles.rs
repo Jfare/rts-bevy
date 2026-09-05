@@ -257,7 +257,7 @@ fn structure_damage_smoke_system(
 }
 
 fn rand_pseudo(seed: f32) -> f32 {
-    let x = (seed.sin() * 43758.5453).fract();
+    let x = (seed.sin() * 43_758.547).fract();
     x.abs()
 }
 
