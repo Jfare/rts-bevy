@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use shared::components::{
-    AppState, BaseHQ, Building, Faction, MatchOutcome, MoveSpeed, MoveTarget, Radius, ResourceNode, SiegeTank,
-    Soldier, SoldierState, Stimpack, TacticalStance, TankMode, Unit, Worker, WorkerState,
+    AppState, BaseHQ, Building, Faction, MatchOutcome, MeleeFighter, MoveSpeed, MoveTarget, Radius, ResourceNode,
+    Soldier, SoldierState, TacticalStance, Unit, Worker, WorkerState,
 };
 use shared::grid::NavGrid;
 
@@ -58,8 +58,7 @@ fn unit_movement_system(
         &mut Transform,
         &mut MoveTarget,
         &MoveSpeed,
-        Option<&Stimpack>,
-        Option<&SiegeTank>,
+        Option<&MeleeFighter>,
         Option<&Soldier>,
     )>,
 ) {
@@ -69,14 +68,7 @@ fn unit_movement_system(
 
     let dt = time.delta_secs();
 
-    for (entity, mut transform, mut move_target, move_speed, stim_opt, tank_opt, soldier_opt) in &mut query {
-        // Immobilize Siege Tanks when in Siege Mode or Transforming
-        if let Some(tank) = tank_opt {
-            if tank.mode != TankMode::Tank {
-                continue;
-            }
-        }
-
+    for (entity, mut transform, mut move_target, move_speed, melee_opt, soldier_opt) in &mut query {
         // If an attack-moving unit is currently engaging / fighting an enemy target, pause waypoint marching
         if move_target.is_attack_move {
             if let Some(soldier) = soldier_opt {
@@ -87,8 +79,11 @@ fn unit_movement_system(
                     continue;
                 }
             }
-            if let Some(tank) = tank_opt {
-                if tank.target.is_some() {
+            if let Some(melee) = melee_opt {
+                if melee.target.is_some()
+                    || melee.state == SoldierState::Attacking
+                    || melee.state == SoldierState::ChasingTarget
+                {
                     continue;
                 }
             }
@@ -131,11 +126,7 @@ fn unit_movement_system(
             }
 
         let direction = delta.normalize_or_zero();
-        let speed_mult = stim_opt
-            .map(|s| if s.is_active { 1.5 } else { 1.0 })
-            .unwrap_or(1.0);
-
-        let move_amount = (move_speed.0 * speed_mult * dt).min(dist);
+        let move_amount = (move_speed.0 * dt).min(dist);
         transform.translation.x += direction.x * move_amount;
         transform.translation.y += direction.y * move_amount;
 
@@ -149,13 +140,10 @@ fn unit_movement_system(
     }
 }
 
-/// Updates active ability durations (Stimpack, Siege Mode) and patrol cycling
+/// Updates tactical stances and patrol cycling
 fn update_tactical_stances_and_abilities_system(
     mut commands: Commands,
-    time: Res<Time>,
     nav_grid: Res<NavGrid>,
-    mut stim_query: Query<&mut Stimpack>,
-    mut tank_query: Query<&mut SiegeTank>,
     mut stance_query: Query<(
         Entity,
         &Transform,
@@ -164,49 +152,7 @@ fn update_tactical_stances_and_abilities_system(
         Option<&mut Soldier>,
     ), With<Unit>>,
 ) {
-    let dt = time.delta_secs();
-
-    // 1. Update Stimpack timers
-    for mut stim in &mut stim_query {
-        if stim.is_active {
-            stim.timer -= dt;
-            if stim.timer <= 0.0 {
-                stim.is_active = false;
-                stim.timer = 0.0;
-            }
-        }
-    }
-
-    // 2. Update Siege Tank transformation transitions
-    for mut tank in &mut tank_query {
-        match tank.mode {
-            TankMode::TransformingToSiege => {
-                tank.transform_timer -= dt;
-                if tank.transform_timer <= 0.0 {
-                    tank.mode = TankMode::Siege;
-                    tank.transform_timer = 0.0;
-                    tank.attack_range = 380.0;
-                    tank.attack_damage = 70.0;
-                    tank.attack_cooldown = 2.2;
-                    tank.splash_radius = 45.0;
-                }
-            }
-            TankMode::TransformingToTank => {
-                tank.transform_timer -= dt;
-                if tank.transform_timer <= 0.0 {
-                    tank.mode = TankMode::Tank;
-                    tank.transform_timer = 0.0;
-                    tank.attack_range = 240.0;
-                    tank.attack_damage = 35.0;
-                    tank.attack_cooldown = 1.6;
-                    tank.splash_radius = 0.0;
-                }
-            }
-            _ => {}
-        }
-    }
-
-    // 3. Update Patrol stance cycling when idle
+    // 1. Update Patrol stance cycling when idle
     for (entity, transform, mut stance, move_target_opt, mut soldier_opt) in &mut stance_query {
         if let TacticalStance::Patrol {
             origin,

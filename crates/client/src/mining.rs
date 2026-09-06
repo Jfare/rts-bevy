@@ -25,7 +25,7 @@ impl Plugin for MiningPlugin {
     }
 }
 
-/// Contextual right-click handler: If right-clicking a mineral node with SCV workers selected, start mining!
+/// Contextual right-click handler: If right-clicking a mineral node with workers selected, start mining!
 fn handle_mining_click_orders(
     mut commands: Commands,
     mouse_button: Res<ButtonInput<MouseButton>>,
@@ -103,7 +103,7 @@ fn handle_mining_click_orders(
     }
 }
 
-/// SCV Worker Mining State Machine
+/// Worker Mining State Machine
 fn worker_mining_state_machine(
     mut commands: Commands,
     time: Res<Time>,
@@ -349,7 +349,7 @@ fn draw_mining_visuals(
             }
         }
 
-        // 2. Draw Carried Mineral Diamond on SCV Worker
+        // 2. Draw Carried Mineral Diamond on Worker
         if worker.carried_minerals > 0 {
             let diamond_center = worker_pos + Vec2::new(0.0, 18.0);
             let diamond_col = Color::srgb(0.20, 0.95, 1.0);

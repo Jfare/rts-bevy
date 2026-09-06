@@ -62,7 +62,7 @@ pub fn server_solo_wave_spawner_system(
 
     for (room_id, wave_num, count, base_spawn, target_pos) in waves_to_spawn {
         info!(
-            "⚔️ [Server WaveAi] Room #{}: Wave {} Incoming! Spawning {} Hostile Marines",
+            "⚔️ [Server WaveAi] Room #{}: Wave {} Incoming! Spawning {} Hostile Units",
             room_id, wave_num, count
         );
 
@@ -76,24 +76,25 @@ pub fn server_solo_wave_spawner_system(
             let net_id = matchmaker.alloc_net_id();
             let waypoints = nav_grid.find_path(spawn_pos, target_pos);
 
-            commands.spawn((
+            let is_melee = i % 2 == 0;
+            let unit_kind = if is_melee {
+                UnitKind::MeleeFighter
+            } else {
+                UnitKind::RangedFighter
+            };
+
+            let mut unit_cmds = commands.spawn((
                 Unit {
-                    name: "Hostile Marine".to_string(),
-                    supply_cost: 2,
+                    name: if is_melee {
+                        "Hostile Melee Fighter".to_string()
+                    } else {
+                        "Hostile Ranged Fighter".to_string()
+                    },
+                    supply_cost: if is_melee { 1 } else { 2 },
                 },
-                Soldier {
-                    state: SoldierState::AttackMoving,
-                    attack_range: 150.0,
-                    aggro_radius: 240.0,
-                    attack_damage: 14.0,
-                    attack_cooldown: 0.9,
-                    ..default()
-                },
-                Stimpack::default(),
+                Health::new(unit_kind.max_health()),
                 TacticalStance::default(),
-                Health::new(120.0),
                 Radius(16.0),
-                MoveSpeed(175.0),
                 Velocity::default(),
                 Faction::HostileAi,
                 RoomId(room_id),
@@ -105,15 +106,41 @@ pub fn server_solo_wave_spawner_system(
                 Transform::from_xyz(spawn_pos.x, spawn_pos.y, 2.0),
             ));
 
+            if is_melee {
+                unit_cmds.insert((
+                    MeleeFighter {
+                        state: SoldierState::AttackMoving,
+                        attack_range: 32.0,
+                        aggro_radius: 240.0,
+                        attack_damage: 24.0,
+                        attack_cooldown: 0.75,
+                        ..default()
+                    },
+                    MoveSpeed(195.0),
+                ));
+            } else {
+                unit_cmds.insert((
+                    Soldier {
+                        state: SoldierState::AttackMoving,
+                        attack_range: 150.0,
+                        aggro_radius: 240.0,
+                        attack_damage: 14.0,
+                        attack_cooldown: 0.9,
+                        ..default()
+                    },
+                    MoveSpeed(175.0),
+                ));
+            }
+
             if !peers.is_empty() {
                 let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::BroadcastToPeers {
                     peer_ids: peers.clone(),
                     msg: ServerMessage::UnitSpawned {
                         net_id,
                         faction: Faction::HostileAi,
-                        unit_kind: UnitKind::Soldier,
+                        unit_kind,
                         position: spawn_pos,
-                        max_hp: 120.0,
+                        max_hp: unit_kind.max_health(),
                     },
                 });
             }

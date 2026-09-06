@@ -187,7 +187,7 @@ pub fn draw_combat_gizmos(
 
         let [r, g, b, _] = proj.faction.color_rgba();
         let color = if proj.splash_radius > 0.0 {
-            Color::srgb(1.0, 0.45, 0.15) // Heavy siege artillery
+            Color::srgb(1.0, 0.45, 0.15) // Explosive projectile
         } else {
             Color::srgb(r, g, b).lighter(0.3)
         };

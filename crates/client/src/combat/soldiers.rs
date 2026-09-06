@@ -5,7 +5,7 @@ use crate::net::{NetClient, NetStatus};
 use crate::particles::ParticleEvent;
 use super::TargetSnapshot;
 
-/// Marine Combat State Machine with Stimpack and Hold Position support
+/// Ranged Fighter Combat State Machine with Hold Position support
 pub fn soldier_combat_system(
     mut commands: Commands,
     time: Res<Time>,
@@ -23,7 +23,6 @@ pub fn soldier_combat_system(
             &Faction,
             &Radius,
             Option<&mut MoveTarget>,
-            Option<&Stimpack>,
             Option<&TacticalStance>,
         )>,
     )>,
@@ -48,7 +47,7 @@ pub fn soldier_combat_system(
         .collect();
 
     // 2. Update all soldiers using the snapshot
-    for (soldier_entity, mut soldier, mut soldier_transform, move_speed, faction, radius, move_target_opt, stim_opt, stance_opt) in
+    for (soldier_entity, mut soldier, mut soldier_transform, move_speed, faction, radius, move_target_opt, stance_opt) in
         &mut queries.p1()
     {
         soldier.attack_timer += dt;
@@ -88,11 +87,7 @@ pub fn soldier_combat_system(
             if dist <= effective_range {
                 soldier.state = SoldierState::Attacking;
 
-                let cooldown_mult = stim_opt
-                    .map(|s| if s.is_active { 0.60 } else { 1.0 })
-                    .unwrap_or(1.0);
-
-                if soldier.attack_timer >= (soldier.attack_cooldown * cooldown_mult) {
+                if soldier.attack_timer >= soldier.attack_cooldown {
                     soldier.attack_timer = 0.0;
 
                     // In online multiplayer, the dedicated server fires authoritative projectiles
@@ -135,12 +130,9 @@ pub fn soldier_combat_system(
                 soldier.state = SoldierState::HoldingPosition;
             } else {
                 soldier.state = SoldierState::ChasingTarget;
-                let speed_mult = stim_opt
-                    .map(|s| if s.is_active { 1.5 } else { 1.0 })
-                    .unwrap_or(1.0);
                 let stop_dist = (effective_range * 0.90).max(10.0);
                 let travel_needed = (dist - stop_dist).max(0.0);
-                let step = dir * (move_speed.0 * speed_mult * dt).min(travel_needed);
+                let step = dir * (move_speed.0 * dt).min(travel_needed);
                 soldier_transform.translation.x += step.x;
                 soldier_transform.translation.y += step.y;
             }
@@ -183,11 +175,7 @@ pub fn soldier_combat_system(
                 if dist <= effective_range {
                     soldier.state = SoldierState::Attacking;
 
-                    let cooldown_mult = stim_opt
-                        .map(|s| if s.is_active { 0.60 } else { 1.0 })
-                        .unwrap_or(1.0);
-
-                    if soldier.attack_timer >= (soldier.attack_cooldown * cooldown_mult) {
+                    if soldier.attack_timer >= soldier.attack_cooldown {
                         soldier.attack_timer = 0.0;
 
                         if !is_online {
@@ -229,12 +217,9 @@ pub fn soldier_combat_system(
                     soldier.state = SoldierState::HoldingPosition;
                 } else {
                     soldier.state = SoldierState::ChasingTarget;
-                    let speed_mult = stim_opt
-                        .map(|s| if s.is_active { 1.5 } else { 1.0 })
-                        .unwrap_or(1.0);
                     let stop_dist = (effective_range * 0.90).max(10.0);
                     let travel_needed = (dist - stop_dist).max(0.0);
-                    let step = dir * (move_speed.0 * speed_mult * dt).min(travel_needed);
+                    let step = dir * (move_speed.0 * dt).min(travel_needed);
                     soldier_transform.translation.x += step.x;
                     soldier_transform.translation.y += step.y;
                 }

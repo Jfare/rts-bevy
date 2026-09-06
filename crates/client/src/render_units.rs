@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use shared::components::{
-    Barracks, BaseHQ, Building, Faction, GunTurret, Health, Radius, ResourceNode, Selectable,
-    SiegeTank, Soldier, Stimpack, SupplyDepot, TacticalStance, TankMode, Unit, Worker,
+    Barracks, BaseHQ, Building, Faction, GunTurret, Health, MeleeFighter, Radius, ResourceNode,
+    Selectable, Soldier, SupplyDepot, TacticalStance, Unit, Worker,
 };
 use shared::grid::WorldGridConfig;
 use crate::fog_of_war::{FogOfWarGrid, FogState};
@@ -23,7 +23,7 @@ impl Plugin for RenderUnitsPlugin {
     }
 }
 
-/// Renders units (Workers, Soldiers, Siege Tanks) with faction colors, heading indicators, and weapons
+/// Renders units (Workers, Ranged Fighters, Melee Fighters) with faction colors, heading indicators, and weapons
 fn draw_units_system(
     mut gizmos: Gizmos,
     fog: Res<FogOfWarGrid>,
@@ -36,15 +36,14 @@ fn draw_units_system(
         &Selectable,
         Option<&Worker>,
         Option<&Soldier>,
-        Option<&SiegeTank>,
-        Option<&Stimpack>,
+        Option<&MeleeFighter>,
         Option<&TacticalStance>,
     ), With<Unit>>,
 ) {
     let default_cfg = WorldGridConfig::default();
     let config = grid_cfg.as_deref().unwrap_or(&default_cfg);
 
-    for (transform, radius, faction, selectable, worker_opt, soldier_opt, tank_opt, stim_opt, stance_opt) in &query {
+    for (transform, radius, faction, selectable, worker_opt, soldier_opt, melee_opt, stance_opt) in &query {
         let pos = transform.translation.truncate();
 
         // Shroud hostile units outside active friendly vision
@@ -63,15 +62,7 @@ fn draw_units_system(
         };
         let outline_color = body_color.lighter(0.25);
 
-        // 1. Stimpack Aura Glow
-        if let Some(stim) = stim_opt {
-            if stim.is_active {
-                gizmos.circle_2d(pos, r + 6.0, Color::srgba(1.0, 0.25, 0.15, 0.85));
-                gizmos.circle_2d(pos, r + 3.0, Color::srgba(1.0, 0.85, 0.20, 0.65));
-            }
-        }
-
-        // 2. Tactical Stance Indicators
+        // 1. Tactical Stance Indicators
         if let Some(stance) = stance_opt {
             match stance {
                 TacticalStance::HoldPosition => {
@@ -86,98 +77,96 @@ fn draw_units_system(
             }
         }
 
-        if let Some(tank) = tank_opt {
-            // ─────────────────────────────────────────────────────────────
-            // SIEGE TANK: Heavy Armored Tracked Combat Vehicle
-            // ─────────────────────────────────────────────────────────────
-            let forward = Vec2::new(rot.cos(), rot.sin());
-            let side = Vec2::new(-forward.y, forward.x);
+        // Body Circle for all units
+        gizmos.circle_2d(pos, r, body_color);
+        gizmos.circle_2d(pos, r, outline_color);
 
-            let is_siege = tank.mode == TankMode::Siege;
-            let is_transforming = tank.mode == TankMode::TransformingToSiege || tank.mode == TankMode::TransformingToTank;
+        // Heading Direction Pointer
+        let forward = Vec2::new(rot.cos(), rot.sin());
+        let right_side = Vec2::new(-forward.y, forward.x);
+        let tip = pos + forward * (r + 6.0);
+        let left = pos + forward * (r - 2.0) + right_side * 4.0;
+        let right = pos + forward * (r - 2.0) - right_side * 4.0;
 
-            // Stabilizer Support Legs in Siege Mode
-            if is_siege || is_transforming {
-                let strut_corners = [
-                    Vec2::new(-r * 1.2, -r * 1.1),
-                    Vec2::new(r * 1.2, -r * 1.1),
-                    Vec2::new(-r * 1.2, r * 1.1),
-                    Vec2::new(r * 1.2, r * 1.1),
-                ];
-                for strut in strut_corners {
-                    let pad_pos = pos + strut;
-                    gizmos.line_2d(pos + strut * 0.4, pad_pos, Color::srgb(0.70, 0.75, 0.80));
-                    gizmos.rect_2d(pad_pos, Vec2::splat(6.0), Color::srgb(0.95, 0.35, 0.20));
+        gizmos.line_2d(tip, left, Color::WHITE);
+        gizmos.line_2d(tip, right, Color::WHITE);
+        gizmos.line_2d(left, right, Color::WHITE);
+
+        // Ranged Fighter Rifle Barrel
+        if soldier_opt.is_some() {
+            let gun_tip = pos + forward * (r + 10.0);
+            let gun_base = pos + forward * (r + 2.0);
+            gizmos.line_2d(gun_base, gun_tip, Color::srgb(0.9, 0.9, 0.95));
+            gizmos.rect_2d(gun_tip, Vec2::splat(3.0), Color::srgb(0.7, 0.7, 0.8));
+        }
+
+        // Worker Welder Arms
+        if worker_opt.is_some() {
+            let arm_left = pos + forward * (r + 4.0) + right_side * 5.0;
+            let arm_right = pos + forward * (r + 4.0) - right_side * 5.0;
+            gizmos.circle_2d(arm_left, 2.5, Color::srgb(0.95, 0.75, 0.20));
+            gizmos.circle_2d(arm_right, 2.5, Color::srgb(0.95, 0.75, 0.20));
+        }
+
+        // Melee Fighter: Carried Sword & Dynamic Slash Swing Animation!
+        if let Some(melee) = melee_opt {
+            // Metallic shoulder pads / armor trim
+            let left_shoulder = pos + right_side * (r * 0.85);
+            let right_shoulder = pos - right_side * (r * 0.85);
+            gizmos.circle_2d(left_shoulder, 3.5, Color::srgb(0.85, 0.88, 0.92));
+            gizmos.circle_2d(right_shoulder, 3.5, Color::srgb(0.85, 0.88, 0.92));
+
+            // Dynamic sword strike when swinging, or resting sword at right hand when idle/moving
+            if melee.swing_timer > 0.0 {
+                // Swing progress from 0.0 (just started) to 1.0 (finished)
+                let swing_progress = 1.0 - (melee.swing_timer / 0.18).clamp(0.0, 1.0);
+                // Sword sweeps dynamically across from right (+50 deg) to forward-left (-65 deg)
+                let swing_angle = rot + 0.9 - swing_progress * 2.0;
+                let blade_dir = Vec2::new(swing_angle.cos(), swing_angle.sin());
+                let hilt_pos = pos + blade_dir * (r * 0.6);
+                let sword_tip = pos + blade_dir * (r + 20.0);
+
+                // Crossguard
+                let cross_dir = Vec2::new(-blade_dir.y, blade_dir.x);
+                gizmos.line_2d(
+                    hilt_pos + cross_dir * 5.0,
+                    hilt_pos - cross_dir * 5.0,
+                    Color::srgb(0.85, 0.70, 0.20),
+                );
+
+                // Gleaming sword blade
+                gizmos.line_2d(hilt_pos, sword_tip, Color::srgb(1.0, 1.0, 1.0));
+
+                // Bright slashing energy arc in front of the unit
+                let arc_radius = r + 18.0;
+                let arc_segments = 6;
+                let start_a = rot - 1.1;
+                let end_a = rot + 0.9;
+                let step = (end_a - start_a) / (arc_segments as f32);
+                for s in 0..arc_segments {
+                    let a1 = start_a + (s as f32) * step;
+                    let a2 = start_a + ((s + 1) as f32) * step;
+                    let p1 = pos + Vec2::new(a1.cos(), a1.sin()) * arc_radius;
+                    let p2 = pos + Vec2::new(a2.cos(), a2.sin()) * arc_radius;
+                    let alpha = 0.85 * (1.0 - swing_progress);
+                    gizmos.line_2d(p1, p2, Color::srgba(0.40, 0.85, 1.0, alpha));
                 }
-            }
 
-            // Left and Right Caterpillar Treads
-            let tread_w = r * 0.45;
-            let tread_l = r * 1.8;
-            let left_tread = pos + side * (r * 0.7);
-            let right_tread = pos - side * (r * 0.7);
-            let tread_col = Color::srgb(0.20, 0.22, 0.25);
-
-            gizmos.rect_2d(left_tread, Vec2::new(tread_l, tread_w), tread_col);
-            gizmos.rect_2d(right_tread, Vec2::new(tread_l, tread_w), tread_col);
-
-            // Heavy Armored Hull Chassis
-            gizmos.rect_2d(pos, Vec2::new(r * 1.5, r * 1.2), body_color);
-            gizmos.rect_2d(pos, Vec2::new(r * 1.5, r * 1.2), outline_color);
-
-            // Rotating Artillery Turret Box
-            let t_angle = tank.turret_angle;
-            let t_fwd = Vec2::new(t_angle.cos(), t_angle.sin());
-
-            gizmos.circle_2d(pos, r * 0.55, Color::srgb(0.15, 0.18, 0.22));
-            gizmos.circle_2d(pos, r * 0.55, outline_color);
-
-            if is_siege {
-                // Extended Heavy Siege Cannon with Massive Muzzle Brake
-                let barrel_base = pos + t_fwd * (r * 0.3);
-                let barrel_tip = pos + t_fwd * (r * 2.2);
-                gizmos.line_2d(barrel_base, barrel_tip, Color::srgb(1.0, 0.95, 0.90));
-                gizmos.rect_2d(barrel_tip, Vec2::new(8.0, 10.0), Color::srgb(0.95, 0.35, 0.20));
+                // Impact flash at sword tip
+                gizmos.circle_2d(sword_tip, 4.0, Color::srgba(1.0, 0.95, 0.80, 0.9));
             } else {
-                // Standard Tank Cannon
-                let barrel_base = pos + t_fwd * (r * 0.3);
-                let barrel_tip = pos + t_fwd * (r * 1.6);
-                gizmos.line_2d(barrel_base, barrel_tip, Color::srgb(0.92, 0.95, 0.98));
-                gizmos.rect_2d(barrel_tip, Vec2::new(5.0, 7.0), Color::srgb(0.35, 0.40, 0.45));
-            }
-
-            // Transforming animation ring
-            if is_transforming {
-                gizmos.circle_2d(pos, r * 1.6, Color::srgba(0.95, 0.75, 0.20, 0.85));
-            }
-        } else {
-            // Body Circle for infantry/worker
-            gizmos.circle_2d(pos, r, body_color);
-            gizmos.circle_2d(pos, r, outline_color);
-
-            // Heading Direction Pointer
-            let forward = Vec2::new(rot.cos(), rot.sin());
-            let tip = pos + forward * (r + 6.0);
-            let left = pos + forward * (r - 2.0) + Vec2::new(-forward.y, forward.x) * 4.0;
-            let right = pos + forward * (r - 2.0) - Vec2::new(-forward.y, forward.x) * 4.0;
-
-            gizmos.line_2d(tip, left, Color::WHITE);
-            gizmos.line_2d(tip, right, Color::WHITE);
-            gizmos.line_2d(left, right, Color::WHITE);
-
-            // Marine Rifle Barrel
-            if soldier_opt.is_some() {
-                let gun_tip = pos + forward * (r + 10.0);
-                let gun_base = pos + forward * (r + 2.0);
-                gizmos.line_2d(gun_base, gun_tip, Color::srgb(0.9, 0.9, 0.95));
-            }
-
-            // SCV Welder Arms
-            if worker_opt.is_some() {
-                let arm_left = pos + forward * (r + 4.0) + Vec2::new(-forward.y, forward.x) * 5.0;
-                let arm_right = pos + forward * (r + 4.0) - Vec2::new(-forward.y, forward.x) * 5.0;
-                gizmos.circle_2d(arm_left, 2.5, Color::srgb(0.95, 0.75, 0.20));
-                gizmos.circle_2d(arm_right, 2.5, Color::srgb(0.95, 0.75, 0.20));
+                // Idle / marching sword carried at ready position
+                let sword_base = pos - right_side * (r * 0.6) + forward * 2.0;
+                let sword_tip = sword_base + forward * (r + 8.0) - right_side * 4.0;
+                // Crossguard
+                let hilt_mid = sword_base + forward * 4.0;
+                gizmos.line_2d(
+                    hilt_mid + right_side * 3.0,
+                    hilt_mid - right_side * 3.0,
+                    Color::srgb(0.85, 0.70, 0.20),
+                );
+                // Blade
+                gizmos.line_2d(sword_base, sword_tip, Color::srgb(0.90, 0.92, 0.98));
             }
         }
     }

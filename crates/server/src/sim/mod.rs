@@ -18,7 +18,7 @@ pub mod waves;
 #[cfg(test)]
 mod tests;
 
-pub use combat::{server_combat_system, server_siege_tank_combat_system, server_turret_combat_system};
+pub use combat::{server_combat_system, server_melee_fighter_combat_system, server_turret_combat_system};
 pub use mining::server_mining_system;
 pub use movement::{
     server_abilities_and_stances_system, server_movement_system,
@@ -58,7 +58,7 @@ impl Plugin for ServerSimulationPlugin {
                     update_server_nav_grid_system,
                     server_combat_system,
                     server_turret_combat_system,
-                    server_siege_tank_combat_system,
+                    server_melee_fighter_combat_system,
                     server_movement_system,
                     server_abilities_and_stances_system,
                     server_unit_separation_and_collision_system,

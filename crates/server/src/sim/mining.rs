@@ -4,7 +4,7 @@ use shared::economy::PlayerEconomy;
 
 use crate::session::Matchmaker;
 
-/// SCV mining and resource dropoff loop
+/// Worker mining and resource dropoff loop
 pub fn server_mining_system(
     mut commands: Commands,
     time: Res<Time>,

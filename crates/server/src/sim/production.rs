@@ -56,12 +56,12 @@ pub fn server_production_system(
                         prod.current_timer = 0.0;
                         let finished_unit = prod.queue.remove(0);
 
-                        let unit_kind = if finished_unit.name.contains("SCV") {
+                        let unit_kind = if finished_unit.name.contains("Worker") || finished_unit.name.contains("SCV") {
                             UnitKind::Worker
-                        } else if finished_unit.name.contains("Tank") {
-                            UnitKind::Tank
+                        } else if finished_unit.name.contains("Melee") {
+                            UnitKind::MeleeFighter
                         } else {
-                            UnitKind::Soldier
+                            UnitKind::RangedFighter
                         };
 
                         let net_id = matchmaker.alloc_net_id();
@@ -95,7 +95,7 @@ pub fn server_production_system(
                                     Velocity::default(),
                                 ));
                             }
-                            UnitKind::Soldier => {
+                            UnitKind::RangedFighter => {
                                 unit_cmds.insert((
                                     Soldier {
                                         state: SoldierState::MovingToGround,
@@ -105,19 +105,18 @@ pub fn server_production_system(
                                         attack_cooldown: 0.85,
                                         ..default()
                                     },
-                                    Stimpack::default(),
                                     TacticalStance::default(),
                                     Radius(16.0),
                                     MoveSpeed(180.0),
                                     Velocity::default(),
                                 ));
                             }
-                            UnitKind::Tank => {
+                            UnitKind::MeleeFighter => {
                                 unit_cmds.insert((
-                                    SiegeTank::default(),
+                                    MeleeFighter::default(),
                                     TacticalStance::default(),
-                                    Radius(22.0),
-                                    MoveSpeed(140.0),
+                                    Radius(16.0),
+                                    MoveSpeed(195.0),
                                     Velocity::default(),
                                 ));
                             }

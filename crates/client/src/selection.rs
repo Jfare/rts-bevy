@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy::render::camera::OrthographicProjection;
 use bevy::window::PrimaryWindow;
-use shared::components::{AppState, Faction, Radius, Selectable, SiegeTank, Soldier, Worker};
+use shared::components::{AppState, Faction, MeleeFighter, Radius, Selectable, Soldier, Worker};
 use shared::grid::WorldGridConfig;
 use crate::audio_sfx::SoundEffect;
 use crate::fog_of_war::{FogOfWarGrid, FogState};
@@ -61,7 +61,7 @@ fn handle_selection_input(
         &Faction,
         &mut Selectable,
         Option<&Soldier>,
-        Option<&SiegeTank>,
+        Option<&MeleeFighter>,
         Option<&Worker>,
     )>,
 ) {
@@ -137,7 +137,7 @@ fn handle_selection_input(
             let mut sound_played = false;
 
             // Pass 1: Select friendly units inside the box
-            for (_, transform, _, faction, mut sel, soldier_opt, tank_opt, worker_opt) in &mut selectable_query {
+            for (_, transform, _, faction, mut sel, soldier_opt, melee_opt, worker_opt) in &mut selectable_query {
                 let pos = transform.translation.truncate();
                 if pos.x >= min_x && pos.x <= max_x && pos.y >= min_y && pos.y <= max_y
                     && *faction == net_client.my_faction {
@@ -145,8 +145,8 @@ fn handle_selection_input(
                         friendly_selected = true;
 
                         if !sound_played {
-                            if tank_opt.is_some() {
-                                sound_events.send(SoundEffect::TankSelect);
+                            if melee_opt.is_some() {
+                                sound_events.send(SoundEffect::MeleeSelect);
                             } else if soldier_opt.is_some() {
                                 sound_events.send(SoundEffect::MarineSelect);
                             } else if worker_opt.is_some() {
@@ -191,13 +191,13 @@ fn handle_selection_input(
             }
 
             if let Some(target_entity) = closest_entity {
-                if let Ok((_, _, _, faction, mut sel, soldier_opt, tank_opt, worker_opt)) = selectable_query.get_mut(target_entity) {
+                if let Ok((_, _, _, faction, mut sel, soldier_opt, melee_opt, worker_opt)) = selectable_query.get_mut(target_entity) {
                     let new_state = if shift_held { !sel.is_selected } else { true };
                     sel.is_selected = new_state;
 
                     if new_state && *faction == net_client.my_faction {
-                        if tank_opt.is_some() {
-                            sound_events.send(SoundEffect::TankSelect);
+                        if melee_opt.is_some() {
+                            sound_events.send(SoundEffect::MeleeSelect);
                         } else if soldier_opt.is_some() {
                             sound_events.send(SoundEffect::MarineSelect);
                         } else if worker_opt.is_some() {

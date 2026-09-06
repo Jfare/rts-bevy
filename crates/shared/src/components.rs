@@ -189,7 +189,7 @@ pub struct Selectable {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// WORKER (SCV) STATS & STATE MACHINE
+// WORKER STATS & STATE MACHINE
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, Reflect)]
@@ -232,7 +232,7 @@ impl Default for Worker {
 
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SOLDIER (MARINE) STATS & COMBAT STATE MACHINE
+// RANGED FIGHTER STATS & COMBAT STATE MACHINE
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, Reflect)]
@@ -247,26 +247,8 @@ pub enum SoldierState {
     Attacking,
 }
 
-/// Marine Stimpack ability (+50% move/attack speed for 6s at cost of 15 HP)
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Component, Reflect)]
-pub struct Stimpack {
-    pub is_active: bool,
-    pub timer: f32,
-    pub duration: f32,
-}
-
-impl Default for Stimpack {
-    fn default() -> Self {
-        Self {
-            is_active: false,
-            timer: 0.0,
-            duration: 6.0,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Component, Reflect)]
-pub struct Soldier {
+pub struct RangedFighter {
     pub state: SoldierState,
     pub attack_range: f32,
     pub aggro_radius: f32,
@@ -281,7 +263,10 @@ pub struct Soldier {
     pub patrol_heading_to_b: bool,
 }
 
-impl Default for Soldier {
+/// Type alias for backward compatibility with previous Soldier definitions
+pub type Soldier = RangedFighter;
+
+impl Default for RangedFighter {
     fn default() -> Self {
         Self {
             state: SoldierState::Idle,
@@ -324,41 +309,41 @@ impl Default for GunTurret {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, Reflect)]
-pub enum TankMode {
-    #[default]
-    Tank,
-    TransformingToSiege,
-    Siege,
-    TransformingToTank,
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// MELEE FIGHTER STATS & COMBAT STATE MACHINE
+// ─────────────────────────────────────────────────────────────────────────────
 
-/// Heavy armored Siege Tank with Siege Mode capability
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Component, Reflect)]
-pub struct SiegeTank {
-    pub mode: TankMode,
-    pub transform_timer: f32,
+#[derive(Debug, Clone, PartialEq, Component, Reflect)]
+pub struct MeleeFighter {
+    pub state: SoldierState,
     pub attack_range: f32,
+    pub aggro_radius: f32,
     pub attack_damage: f32,
     pub attack_cooldown: f32,
     pub attack_timer: f32,
-    pub splash_radius: f32,
+    pub swing_timer: f32,
+    pub scan_timer: f32,
     pub target: Option<Entity>,
-    pub turret_angle: f32,
+    pub patrol_point_a: Vec2,
+    pub patrol_point_b: Vec2,
+    pub patrol_heading_to_b: bool,
 }
 
-impl Default for SiegeTank {
+impl Default for MeleeFighter {
     fn default() -> Self {
         Self {
-            mode: TankMode::Tank,
-            transform_timer: 0.0,
-            attack_range: 240.0,
-            attack_damage: 35.0,
-            attack_cooldown: 1.6,
+            state: SoldierState::Idle,
+            attack_range: 32.0,
+            aggro_radius: 220.0,
+            attack_damage: 24.0,
+            attack_cooldown: 0.75,
             attack_timer: 0.0,
-            splash_radius: 0.0,
+            swing_timer: 0.0,
+            scan_timer: 0.0,
             target: None,
-            turret_angle: 0.0,
+            patrol_point_a: Vec2::ZERO,
+            patrol_point_b: Vec2::ZERO,
+            patrol_heading_to_b: true,
         }
     }
 }
@@ -530,26 +515,12 @@ mod tests {
     }
 
     #[test]
-    fn test_stimpack_defaults() {
-        let stim = Stimpack::default();
-        assert!(!stim.is_active);
-        assert_eq!(stim.duration, 6.0);
-    }
-
-    #[test]
-    fn test_siege_tank_modes() {
-        let mut tank = SiegeTank::default();
-        assert_eq!(tank.mode, TankMode::Tank);
-        assert_eq!(tank.attack_range, 240.0);
-
-        tank.mode = TankMode::Siege;
-        tank.attack_range = 380.0;
-        tank.attack_damage = 70.0;
-        tank.splash_radius = 45.0;
-
-        assert_eq!(tank.mode, TankMode::Siege);
-        assert_eq!(tank.attack_range, 380.0);
-        assert_eq!(tank.splash_radius, 45.0);
+    fn test_melee_fighter_defaults() {
+        let melee = MeleeFighter::default();
+        assert_eq!(melee.state, SoldierState::Idle);
+        assert_eq!(melee.attack_range, 32.0);
+        assert_eq!(melee.attack_damage, 24.0);
+        assert_eq!(melee.attack_cooldown, 0.75);
     }
 }
 

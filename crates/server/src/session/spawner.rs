@@ -90,13 +90,13 @@ pub fn spawn_match_entities(
         });
     }
 
-    // P1 Starting SCVs (2 workers auto-harvesting at start)
+    // P1 Starting Workers (2 workers auto-harvesting at start)
     for &pos in shared::map::P1_STARTER_WORKERS.iter() {
         let scv_id = matchmaker.alloc_net_id();
 
         commands.spawn((
             Unit {
-                name: "SCV Worker".to_string(),
+                name: "Worker".to_string(),
                 supply_cost: 1,
             },
             Worker {
@@ -207,13 +207,13 @@ pub fn spawn_match_entities(
         });
     }
 
-    // P2 Starting SCVs (2 workers auto-harvesting at start)
+    // P2 Starting Workers (2 workers auto-harvesting at start)
     for &pos in shared::map::P2_STARTER_WORKERS.iter() {
         let scv_id = matchmaker.alloc_net_id();
 
         commands.spawn((
             Unit {
-                name: "SCV Worker".to_string(),
+                name: "Worker".to_string(),
                 supply_cost: 1,
             },
             Worker {

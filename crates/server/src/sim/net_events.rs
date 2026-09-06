@@ -26,8 +26,7 @@ pub fn handle_incoming_network_events(
         Option<&mut MoveTarget>,
         Option<&mut Soldier>,
         Option<&mut Worker>,
-        Option<&mut Stimpack>,
-        Option<&mut SiegeTank>,
+        Option<&mut MeleeFighter>,
         Option<&mut Health>,
         Option<&mut TacticalStance>,
     ), Without<ResourceNode>>,
@@ -224,7 +223,7 @@ pub fn handle_incoming_network_events(
                             };
                             let dest = target_position + formation_offset;
 
-                            for (e, tf, net_entity, faction, unit_room, move_target_opt, soldier_opt, worker_opt, _, tank_opt, _, stance_opt) in
+                            for (e, tf, net_entity, faction, unit_room, move_target_opt, soldier_opt, worker_opt, melee_opt, _, stance_opt) in
                                 &mut unit_query
                             {
                                 if net_entity.net_id == u_net_id
@@ -239,8 +238,13 @@ pub fn handle_incoming_network_events(
                                             SoldierState::MovingToGround
                                         };
                                     }
-                                    if let Some(mut tank) = tank_opt {
-                                        tank.target = None;
+                                    if let Some(mut melee) = melee_opt {
+                                        melee.target = None;
+                                        melee.state = if is_attack_move {
+                                            SoldierState::AttackMoving
+                                        } else {
+                                            SoldierState::MovingToGround
+                                        };
                                     }
                                     if let Some(mut worker) = worker_opt {
                                         worker.state = WorkerState::Idle;
@@ -314,7 +318,7 @@ pub fn handle_incoming_network_events(
                             };
                             let dest = target_position + formation_offset;
 
-                            for (e, tf, net_entity, faction, unit_room, move_target_opt, soldier_opt, _, _, _, _, stance_opt) in
+                            for (e, tf, net_entity, faction, unit_room, move_target_opt, soldier_opt, _, _, _, stance_opt) in
                                 &mut unit_query
                             {
                                 if net_entity.net_id == u_net_id
@@ -391,14 +395,14 @@ pub fn handle_incoming_network_events(
                         let peers = matchmaker.get_room_peers(player_room);
                         let target_entity = unit_query
                             .iter()
-                            .find(|(_, _, net_entity, _, unit_room, _, _, _, _, _, _, _)| {
+                            .find(|(_, _, net_entity, _, unit_room, ..)| {
                                 net_entity.net_id == target_net_id && unit_room.0 == player_room
                             })
-                            .map(|(e, _, _, _, _, _, _, _, _, _, _, _)| e);
+                            .map(|(e, ..)| e);
 
                         if let Some(target) = target_entity {
                             let mut valid_net_ids = Vec::new();
-                            for (e, _, net_entity, faction, unit_room, _, soldier_opt, _, _, tank_opt, _, _) in
+                            for (e, _, net_entity, faction, unit_room, _, soldier_opt, _, melee_opt, _, _) in
                                 &mut unit_query
                             {
                                 if unit_net_ids.contains(&net_entity.net_id)
@@ -410,8 +414,9 @@ pub fn handle_incoming_network_events(
                                         soldier.target = Some(target);
                                         soldier.state = SoldierState::ChasingTarget;
                                     }
-                                    if let Some(mut tank) = tank_opt {
-                                        tank.target = Some(target);
+                                    if let Some(mut melee) = melee_opt {
+                                        melee.target = Some(target);
+                                        melee.state = SoldierState::ChasingTarget;
                                     }
                                     valid_net_ids.push(net_entity.net_id);
                                 }
@@ -453,7 +458,7 @@ pub fn handle_incoming_network_events(
 
                         if let Some(node_e) = target_node {
                             let mut valid_net_ids = Vec::new();
-                            for (e, _, net_entity, faction, unit_room, _, _, worker_opt, _, _, _, _) in
+                            for (e, _, net_entity, faction, unit_room, _, _, worker_opt, ..) in
                                 &mut unit_query
                             {
                                 if worker_net_ids.contains(&net_entity.net_id)
@@ -496,7 +501,7 @@ pub fn handle_incoming_network_events(
 
                         let peers = matchmaker.get_room_peers(player_room);
                         let mut valid_net_ids = Vec::new();
-                        for (e, _, net_entity, faction, unit_room, _, soldier_opt, worker_opt, _, mut tank_opt, _, stance_opt) in
+                        for (e, _, net_entity, faction, unit_room, _, soldier_opt, worker_opt, melee_opt, _, stance_opt) in
                             &mut unit_query
                         {
                             if unit_net_ids.contains(&net_entity.net_id)
@@ -508,8 +513,9 @@ pub fn handle_incoming_network_events(
                                     soldier.target = None;
                                     soldier.state = SoldierState::Idle;
                                 }
-                                if let Some(ref mut tank) = tank_opt {
-                                    tank.target = None;
+                                if let Some(mut melee) = melee_opt {
+                                    melee.target = None;
+                                    melee.state = SoldierState::Idle;
                                 }
                                 if let Some(mut worker) = worker_opt {
                                     worker.state = WorkerState::Idle;
@@ -544,7 +550,7 @@ pub fn handle_incoming_network_events(
 
                         let peers = matchmaker.get_room_peers(player_room);
                         let mut valid_net_ids = Vec::new();
-                        for (e, _, net_entity, faction, unit_room, _, soldier_opt, _, _, mut tank_opt, _, stance_opt) in
+                        for (e, _, net_entity, faction, unit_room, _, soldier_opt, _, mut melee_opt, _, stance_opt) in
                             &mut unit_query
                         {
                             if unit_net_ids.contains(&net_entity.net_id)
@@ -556,8 +562,9 @@ pub fn handle_incoming_network_events(
                                     soldier.target = None;
                                     soldier.state = SoldierState::HoldingPosition;
                                 }
-                                if let Some(ref mut tank) = tank_opt {
-                                    tank.target = None;
+                                if let Some(ref mut melee) = melee_opt {
+                                    melee.target = None;
+                                    melee.state = SoldierState::HoldingPosition;
                                 }
                                 if let Some(mut stance) = stance_opt {
                                     *stance = TacticalStance::HoldPosition;
@@ -572,104 +579,6 @@ pub fn handle_incoming_network_events(
                             let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::BroadcastToPeers {
                                 peer_ids: peers,
                                 msg: ServerMessage::UnitsOrderedHoldPosition {
-                                    unit_net_ids: valid_net_ids,
-                                },
-                            });
-                        }
-                    }
-                    shared::protocol::ClientMessage::RequestStimpack { unit_net_ids } => {
-                        let player_faction = matchmaker
-                            .players
-                            .get(&peer_id)
-                            .map(|p| p.faction)
-                            .unwrap_or(Faction::Player1);
-                        let player_room = matchmaker
-                            .players
-                            .get(&peer_id)
-                            .map(|p| p.room_id)
-                            .unwrap_or(0);
-
-                        let peers = matchmaker.get_room_peers(player_room);
-                        let mut valid_net_ids = Vec::new();
-                        for (e, _, net_entity, faction, unit_room, _, _, _, stim_opt, _, health_opt, _) in
-                            &mut unit_query
-                        {
-                            if unit_net_ids.contains(&net_entity.net_id)
-                                && *faction == player_faction
-                                && unit_room.0 == player_room
-                            {
-                                if let Some(mut health) = health_opt {
-                                    if health.current > 20.0 {
-                                        health.take_damage(15.0);
-                                        if let Some(mut stim) = stim_opt {
-                                            stim.is_active = true;
-                                            stim.timer = 6.0;
-                                        } else {
-                                            commands.entity(e).insert(Stimpack {
-                                                is_active: true,
-                                                timer: 6.0,
-                                                duration: 6.0,
-                                            });
-                                        }
-                                        valid_net_ids.push(net_entity.net_id);
-                                    }
-                                }
-                            }
-                        }
-
-                        if !peers.is_empty() && !valid_net_ids.is_empty() {
-                            let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::BroadcastToPeers {
-                                peer_ids: peers,
-                                msg: ServerMessage::UnitsActivatedStimpack {
-                                    unit_net_ids: valid_net_ids,
-                                },
-                            });
-                        }
-                    }
-                    shared::protocol::ClientMessage::RequestToggleSiegeMode { unit_net_ids } => {
-                        let player_faction = matchmaker
-                            .players
-                            .get(&peer_id)
-                            .map(|p| p.faction)
-                            .unwrap_or(Faction::Player1);
-                        let player_room = matchmaker
-                            .players
-                            .get(&peer_id)
-                            .map(|p| p.room_id)
-                            .unwrap_or(0);
-
-                        let peers = matchmaker.get_room_peers(player_room);
-                        let mut valid_net_ids = Vec::new();
-                        for (e, _, net_entity, faction, unit_room, _, _, _, _, tank_opt, _, _) in
-                            &mut unit_query
-                        {
-                            if unit_net_ids.contains(&net_entity.net_id)
-                                && *faction == player_faction
-                                && unit_room.0 == player_room
-                            {
-                                if let Some(mut tank) = tank_opt {
-                                    match tank.mode {
-                                        TankMode::Tank => {
-                                            tank.mode = TankMode::TransformingToSiege;
-                                            tank.transform_timer = 1.0;
-                                            commands.entity(e).remove::<MoveTarget>();
-                                            valid_net_ids.push(net_entity.net_id);
-                                        }
-                                        TankMode::Siege => {
-                                            tank.mode = TankMode::TransformingToTank;
-                                            tank.transform_timer = 1.0;
-                                            valid_net_ids.push(net_entity.net_id);
-                                        }
-                                        _ => {}
-                                    }
-                                }
-                            }
-                        }
-
-                        if !peers.is_empty() && !valid_net_ids.is_empty() {
-                            let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::BroadcastToPeers {
-                                peer_ids: peers,
-                                msg: ServerMessage::UnitsToggledSiegeMode {
                                     unit_net_ids: valid_net_ids,
                                 },
                             });

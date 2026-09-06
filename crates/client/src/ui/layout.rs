@@ -396,7 +396,7 @@ pub fn setup_hud(mut commands: Commands) {
                             FocusPolicy::Pass,
                         ));
                         guide.spawn((
-                            Text::new("• Select Units: Left-Click / Drag Selection Box\n• Issue Orders: Right-Click (Move / Attack / Harvest)\n• Unit Tactics: [S] Stop | [H] Hold Position\n• Unit Abilities: [T] Stimpack | [E] Siege Mode\n• Structures: [B] Build Menu (HQ, Barracks, Supply Depot, Turret)\n• Game Menu: [Tab] / [F1] / [Esc]"),
+                            Text::new("• Select Units: Left-Click / Drag Selection Box\n• Issue Orders: Right-Click (Move / Attack / Harvest)\n• Unit Tactics: [S] Stop | [H] Hold Position\n• Production: [V] Worker | [R] Ranged | [F] Melee\n• Structures: [B] Build Menu (HQ, Barracks, Supply Depot, Turret)\n• Game Menu: [Tab] / [F1] / [Esc]"),
                             TextFont {
                                 font_size: 11.5,
                                 ..default()
@@ -609,7 +609,7 @@ pub fn setup_hud(mut commands: Commands) {
                             FocusPolicy::Pass,
                         ));
                         legend.spawn((
-                            Text::new("HQ: [V] SCV (50 💎) | Barracks: [M] Marine (100 💎) [T] Tank (200 💎)"),
+                            Text::new("HQ: [V]/[W] Worker (50 💎) | Barracks: [R] Ranged Fighter (100 💎) [F] Melee Fighter (75 💎)"),
                             TextFont {
                                 font_size: 11.0,
                                 ..default()

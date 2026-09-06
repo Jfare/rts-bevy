@@ -10,13 +10,13 @@ A high-performance, competitive 2D Real-Time Strategy game written in **Rust** u
 - **WebAssembly & WebGL 2.0**: Zero-plugin browser deployment optimized for desktop Chrome, Firefox, and Edge.
 - **Competitively Mirrored 1v1 Map ("Iron Meridian")**: 180° point-symmetric terrain with cliff ridges, ramp choke bluffs, natural expansions, and contested mineral deposits.
 - **A\* Pathfinding & Steering**: 64×64 navigation grid with 8-directional movement, obstacle avoidance, nearest-walkable fallback, and line-of-sight shortcutting.
-- **Dynamic Economy & Production**: Contextual SCV mineral mining with cyan pulsating lasers, supply mechanics, rally points, and structured production queues.
+- **Dynamic Economy & Production**: Contextual Worker mineral mining with cyan pulsating lasers, supply mechanics, rally points, and structured production queues.
 - **Tech Tree & Abilities**:
-  - **Marine**: Automatic aggro scanning, rapid tracer fire, and **Stimpack (`T`)** (+50% speed / +50% fire rate for 6s at the cost of 15 HP).
-  - **Siege Tank**: Mobile tracked tank with transformable **Siege Mode (`E`)** (long-range stationary artillery with splash damage).
+  - **Ranged Fighter**: Automatic aggro scanning, rapid tracer fire, and steady kinetic firepower.
+  - **Melee Fighter**: Close-range sword combat unit with dynamic slashing visual animations, contact sparks, and blade impact audio.
   - **Gun Turret**: Stationary automated perimeter defense requiring an active Barracks.
 - **Tactical Stances**: Stop (`S`), Hold Position (`H`), Patrol (`P`), and Attack-Move (`A`).
-- **Real-Time Soundscape & FX**: Procedural Web Audio synthesizer sound effects and particle emitters for muzzle flashes, tracer rounds, and explosions.
+- **Real-Time Soundscape & FX**: Procedural Web Audio synthesizer sound effects (gunfire, sword slashes, orders) and particle emitters for muzzle flashes, tracer rounds, and explosions.
 - **Tactical Multiplayer Features**: Real-time in-game chat (`Enter`), terrain/minimap pings (`Alt + Click`), custom 4-digit room codes, and post-match scoreboard analytics.
 
 ---
@@ -49,9 +49,8 @@ rts-bevy/
 | **Issue Orders** | Right-Click (Move / Attack / Harvest minerals) |
 | **Stop / Hold Position**| `S` (Stop), `H` (Hold Position) |
 | **Patrol / Attack-Move** | `P` (Patrol), `A` (Attack-Move) |
-| **Abilities** | `T` (Marine Stimpack), `E` (Tank Siege Mode) |
 | **Build Menu** | `B` (Barracks: 150💎, Supply Depot: 100💎, Gun Turret: 125💎, Base HQ: 400💎) |
-| **Train Units** | `V` (SCV Worker at HQ), `M` (Marine at Barracks), `E` (Siege Tank at Barracks) |
+| **Train Units** | `V` / `W` (Worker at HQ), `R` / `M` (Ranged Fighter at Barracks), `F` (Melee Fighter at Barracks) |
 | **Tactical Ping** | `Alt + Left Click` on terrain or minimap |
 | **Chat** | `Enter` to open/send chat, `Esc` to cancel |
 | **Menu / Lobby** | `Tab` or `F1` |

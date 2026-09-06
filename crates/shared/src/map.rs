@@ -57,7 +57,7 @@ pub const CONTESTED_EAST_MINERALS: [Vec2; 2] = [
 // ─────────────────────────────────────────────────────────────────────────────
 // STATIC MAP OBSTACLES (ROCKS, CLIFF BLUFFS, CHOKEPOINTS)
 // All obstacles are placed BEHIND minerals or flanking chokepoints, leaving
-// 100% clear lines for SCV mining between HQs and mineral nodes.
+// 100% clear lines for Worker mining between HQs and mineral nodes.
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Reflect)]

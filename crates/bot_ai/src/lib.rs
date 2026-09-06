@@ -89,7 +89,7 @@ fn wave_spawner_system(
         };
 
         info!(
-            "⚔️ [WaveAi] ⚠️ Wave {} Incoming! Spawning {} Hostile Marines attacking player base!",
+            "⚔️ [WaveAi] ⚠️ Wave {} Incoming! Spawning {} Hostile Units attacking player base!",
             ai_state.current_wave, count
         );
 
@@ -103,25 +103,20 @@ fn wave_spawner_system(
             let spawn_pos = base_spawn + offset;
 
             let net_id = 9000 + ai_state.current_wave * 100 + i;
+            let is_melee = i % 2 == 0;
 
-            commands.spawn((
+            let mut unit_cmds = commands.spawn((
                 Unit {
-                    name: "Hostile Marine".to_string(),
-                    supply_cost: 2,
+                    name: if is_melee {
+                        "Hostile Melee Fighter".to_string()
+                    } else {
+                        "Hostile Ranged Fighter".to_string()
+                    },
+                    supply_cost: if is_melee { 1 } else { 2 },
                 },
-                Soldier {
-                    state: SoldierState::AttackMoving,
-                    attack_range: 150.0,
-                    aggro_radius: 240.0,
-                    attack_damage: 14.0,
-                    attack_cooldown: 0.9,
-                    ..default()
-                },
-                Stimpack::default(),
+                Health::new(if is_melee { 150.0 } else { 120.0 }),
                 TacticalStance::default(),
-                Health::new(120.0),
                 Radius(16.0),
-                MoveSpeed(175.0),
                 Velocity::default(),
                 Faction::HostileAi,
                 Selectable::default(),
@@ -132,6 +127,32 @@ fn wave_spawner_system(
                 MoveTarget::new(target_pos, true),
                 Transform::from_xyz(spawn_pos.x, spawn_pos.y, 2.0),
             ));
+
+            if is_melee {
+                unit_cmds.insert((
+                    MeleeFighter {
+                        state: SoldierState::AttackMoving,
+                        attack_range: 32.0,
+                        aggro_radius: 240.0,
+                        attack_damage: 24.0,
+                        attack_cooldown: 0.75,
+                        ..default()
+                    },
+                    MoveSpeed(195.0),
+                ));
+            } else {
+                unit_cmds.insert((
+                    Soldier {
+                        state: SoldierState::AttackMoving,
+                        attack_range: 150.0,
+                        aggro_radius: 240.0,
+                        attack_damage: 14.0,
+                        attack_cooldown: 0.9,
+                        ..default()
+                    },
+                    MoveSpeed(175.0),
+                ));
+            }
         }
     }
 }

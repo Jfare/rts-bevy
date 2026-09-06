@@ -44,7 +44,6 @@ pub fn server_combat_system(
             &mut Transform,
             &MoveSpeed,
             &mut Soldier,
-            Option<&Stimpack>,
             Option<&mut MoveTarget>,
         )>,
         Query<(Entity, &mut Health)>,
@@ -71,7 +70,7 @@ pub fn server_combat_system(
     // 2. Iterate through soldiers and execute aggro, chasing, and weapon firing
     let mut damages_to_apply: Vec<(Entity, u32, f32, Faction, u32, u32, u32)> = Vec::new();
 
-    for (s_entity, attacker_net, attacker_faction, attacker_room, mut attacker_tf, move_speed, mut soldier, stim_opt, move_target_opt) in
+    for (s_entity, attacker_net, attacker_faction, attacker_room, mut attacker_tf, move_speed, mut soldier, move_target_opt) in
         &mut queries.p1()
     {
         let is_room_active = matchmaker.rooms.get(&attacker_room.0).map(|r| r.is_active && r.countdown_timer <= 0.0).unwrap_or(true);
@@ -140,12 +139,9 @@ pub fn server_combat_system(
                 }
             } else if soldier.state != SoldierState::HoldingPosition {
                 soldier.state = SoldierState::ChasingTarget;
-                let speed_mult = stim_opt
-                    .map(|s| if s.is_active { 1.5 } else { 1.0 })
-                    .unwrap_or(1.0);
                 let stop_dist = (effective_range * 0.90).max(10.0);
                 let travel_needed = (dist - stop_dist).max(0.0);
-                let step = dir * (move_speed.0 * speed_mult * dt).min(travel_needed);
+                let step = dir * (move_speed.0 * dt).min(travel_needed);
                 attacker_tf.translation.x += step.x;
                 attacker_tf.translation.y += step.y;
             }
@@ -212,12 +208,9 @@ pub fn server_combat_system(
                     }
                 } else if soldier.state != SoldierState::HoldingPosition {
                     soldier.state = SoldierState::ChasingTarget;
-                    let speed_mult = stim_opt
-                        .map(|s| if s.is_active { 1.5 } else { 1.0 })
-                        .unwrap_or(1.0);
                     let stop_dist = (effective_range * 0.90).max(10.0);
                     let travel_needed = (dist - stop_dist).max(0.0);
-                    let step = dir * (move_speed.0 * speed_mult * dt).min(travel_needed);
+                    let step = dir * (move_speed.0 * dt).min(travel_needed);
                     attacker_tf.translation.x += step.x;
                     attacker_tf.translation.y += step.y;
                 }
@@ -427,8 +420,8 @@ pub fn server_turret_combat_system(
     }
 }
 
-/// Dedicated Server Siege Tank Combat & Artillery System
-pub fn server_siege_tank_combat_system(
+/// Dedicated Server Melee Fighter Combat System
+pub fn server_melee_fighter_combat_system(
     mut commands: Commands,
     time: Res<Time>,
     net_channels: Res<ServerNetworkChannels>,
@@ -452,7 +445,7 @@ pub fn server_siege_tank_combat_system(
             &RoomId,
             &mut Transform,
             &MoveSpeed,
-            &mut SiegeTank,
+            &mut MeleeFighter,
             Option<&mut MoveTarget>,
         )>,
         Query<(Entity, &mut Health)>,
@@ -477,91 +470,90 @@ pub fn server_siege_tank_combat_system(
 
     let mut damages_to_apply = Vec::new();
 
-    for (tank_ent, tank_net, tank_faction, tank_room, mut tank_tf, move_speed, mut tank, move_target_opt) in
+    for (_melee_ent, melee_net, melee_faction, melee_room, mut melee_tf, move_speed, mut melee, move_target_opt) in
         &mut queries.p1()
     {
-        let is_room_active = matchmaker.rooms.get(&tank_room.0).map(|r| r.is_active && r.countdown_timer <= 0.0).unwrap_or(true);
+        let is_room_active = matchmaker.rooms.get(&melee_room.0).map(|r| r.is_active && r.countdown_timer <= 0.0).unwrap_or(true);
         if !is_room_active {
             continue;
         }
 
-        tank.attack_timer += dt;
-        let tank_pos = tank_tf.translation.truncate();
-        let is_siege = tank.mode == TankMode::Siege;
+        melee.attack_timer += dt;
+        let melee_pos = melee_tf.translation.truncate();
         let is_attack_move = move_target_opt.as_ref().map(|m| m.is_attack_move).unwrap_or(false);
 
-        // If tank is in mobile mode and has a pure ground move order, ignore combat and move!
-        if move_target_opt.is_some() && !is_attack_move && tank.mode == TankMode::Tank {
-            tank.target = None;
+        if move_target_opt.is_some() && !is_attack_move {
+            melee.target = None;
+            melee.state = SoldierState::MovingToGround;
             continue;
         }
 
-        let target_valid = tank.target.and_then(|t_ent| {
+        let target_valid = melee.target.and_then(|t_ent| {
             targets
                 .iter()
-                .find(|t| t.entity == t_ent && !t.is_dead && t.room_id == tank_room.0 && tank_faction.is_hostile_to(&t.faction))
+                .find(|t| t.entity == t_ent && !t.is_dead && t.room_id == melee_room.0 && melee_faction.is_hostile_to(&t.faction))
         });
 
         if let Some(target_snap) = target_valid {
             let target_pos = target_snap.pos;
-            let dist = target_pos.distance(tank_pos);
-            let effective_range = tank.attack_range + target_snap.radius;
-            let dir = (target_pos - tank_pos).normalize_or_zero();
-            tank.turret_angle = dir.y.atan2(dir.x);
+            let dist = target_pos.distance(melee_pos);
+            let effective_range = melee.attack_range + 16.0 + target_snap.radius;
+            let dir = (target_pos - melee_pos).normalize_or_zero();
+
+            if dir.length_squared() > 0.001 {
+                let angle = dir.y.atan2(dir.x);
+                melee_tf.rotation = Quat::from_rotation_z(angle);
+            }
 
             if dist <= effective_range {
-                if tank.attack_timer >= tank.attack_cooldown {
-                    tank.attack_timer = 0.0;
+                melee.state = SoldierState::Attacking;
+                if melee.attack_timer >= melee.attack_cooldown {
+                    melee.attack_timer = 0.0;
                     damages_to_apply.push((
                         target_snap.entity,
                         target_snap.net_id,
-                        tank.attack_damage,
-                        *tank_faction,
-                        tank_room.0,
-                        tank_net.net_id,
+                        melee.attack_damage,
+                        *melee_faction,
+                        melee_room.0,
+                        melee_net.net_id,
                         target_snap.supply_cost,
                     ));
 
-                    let peers = matchmaker.get_room_peers(tank_room.0);
+                    let peers = matchmaker.get_room_peers(melee_room.0);
                     if !peers.is_empty() {
                         let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::BroadcastToPeers {
                             peer_ids: peers,
                             msg: ServerMessage::ProjectileFired {
-                                attacker_net_id: tank_net.net_id,
+                                attacker_net_id: melee_net.net_id,
                                 target_net_id: target_snap.net_id,
-                                origin: tank_pos + dir * (if is_siege { 36.0 } else { 26.0 }),
+                                origin: melee_pos + dir * 18.0,
                                 target_pos,
-                                damage: tank.attack_damage,
+                                damage: melee.attack_damage,
                             },
                         });
                     }
                 }
-            } else if tank.mode == TankMode::Tank {
-                let stop_dist = (effective_range * 0.90).max(20.0);
+            } else if melee.state != SoldierState::HoldingPosition {
+                melee.state = SoldierState::ChasingTarget;
+                let stop_dist = (effective_range * 0.85).max(10.0);
                 let travel_needed = (dist - stop_dist).max(0.0);
                 let step = dir * (move_speed.0 * dt).min(travel_needed);
-                tank_tf.translation.x += step.x;
-                tank_tf.translation.y += step.y;
-                let angle = dir.y.atan2(dir.x);
-                tank_tf.rotation = Quat::from_rotation_z(angle);
-            } else if is_siege {
-                tank.target = None;
+                melee_tf.translation.x += step.x;
+                melee_tf.translation.y += step.y;
             }
         } else {
-            // Target dead or none: scan for enemies in room
-            tank.target = None;
-
+            melee.target = None;
             let max_scan_range = if is_attack_move {
-                (tank.attack_range * 1.25).max(300.0)
+                (melee.aggro_radius * 1.35).max(300.0)
             } else {
-                tank.attack_range
+                melee.aggro_radius
             };
 
             let mut closest = None;
             let mut min_d = max_scan_range;
             for t in &targets {
-                if t.entity != tank_ent && t.room_id == tank_room.0 && tank_faction.is_hostile_to(&t.faction) && !t.is_dead {
-                    let d = t.pos.distance(tank_pos);
+                if t.room_id == melee_room.0 && melee_faction.is_hostile_to(&t.faction) && !t.is_dead {
+                    let d = t.pos.distance(melee_pos);
                     let effective_range = max_scan_range + t.radius;
                     if d <= effective_range && d < min_d {
                         min_d = d;
@@ -570,36 +562,11 @@ pub fn server_siege_tank_combat_system(
                 }
             }
             if let Some(t) = closest {
-                tank.target = Some(t.entity);
-                let dir = (t.pos - tank_pos).normalize_or_zero();
-                tank.turret_angle = dir.y.atan2(dir.x);
-
-                if tank.attack_timer >= tank.attack_cooldown {
-                    tank.attack_timer = 0.0;
-                    damages_to_apply.push((
-                        t.entity,
-                        t.net_id,
-                        tank.attack_damage,
-                        *tank_faction,
-                        tank_room.0,
-                        tank_net.net_id,
-                        t.supply_cost,
-                    ));
-
-                    let peers = matchmaker.get_room_peers(tank_room.0);
-                    if !peers.is_empty() {
-                        let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::BroadcastToPeers {
-                            peer_ids: peers,
-                            msg: ServerMessage::ProjectileFired {
-                                attacker_net_id: tank_net.net_id,
-                                target_net_id: t.net_id,
-                                origin: tank_pos + dir * (if is_siege { 36.0 } else { 26.0 }),
-                                target_pos: t.pos,
-                                damage: tank.attack_damage,
-                            },
-                        });
-                    }
-                }
+                melee.target = Some(t.entity);
+            } else if is_attack_move {
+                melee.state = SoldierState::AttackMoving;
+            } else if melee.state != SoldierState::HoldingPosition {
+                melee.state = SoldierState::Idle;
             }
         }
     }

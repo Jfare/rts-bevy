@@ -25,9 +25,7 @@ pub struct Shockwave {
 pub enum ParticleEvent {
     Explosion { pos: Vec2, is_heavy: bool },
     Sparks { pos: Vec2, dir: Vec2, count: usize },
-    StimpackVapor { pos: Vec2 },
     MuzzleSmoke { pos: Vec2, dir: Vec2 },
-    Shockwave { pos: Vec2, radius: f32, color: Color },
 }
 
 pub struct ParticlesPlugin;
@@ -134,25 +132,6 @@ fn handle_particle_events(
                     ));
                 }
             }
-            ParticleEvent::StimpackVapor { pos } => {
-                for i in 0..12 {
-                    let angle = (i as f32 / 12.0) * std::f32::consts::TAU;
-                    let speed = 35.0 + (i as f32 % 3.0) * 15.0;
-                    commands.spawn((
-                        Particle {
-                            velocity: Vec2::new(angle.cos() * speed, angle.sin() * speed + 20.0),
-                            drag: 0.92,
-                            lifetime: 0.0,
-                            max_lifetime: 0.45,
-                            start_size: 4.0,
-                            end_size: 9.0,
-                            start_color: Color::srgba(0.2, 0.95, 0.95, 0.85),
-                            end_color: Color::srgba(0.1, 0.5, 0.9, 0.0),
-                        },
-                        Transform::from_xyz(pos.x, pos.y, 3.8),
-                    ));
-                }
-            }
             ParticleEvent::MuzzleSmoke { pos, dir } => {
                 for i in 0..3 {
                     let speed = 20.0 + (i as f32 * 10.0);
@@ -170,17 +149,6 @@ fn handle_particle_events(
                         Transform::from_xyz(pos.x, pos.y, 3.8),
                     ));
                 }
-            }
-            ParticleEvent::Shockwave { pos, radius, color } => {
-                commands.spawn((
-                    Shockwave {
-                        lifetime: 0.0,
-                        max_lifetime: 0.35,
-                        max_radius: radius,
-                        color,
-                    },
-                    Transform::from_xyz(pos.x, pos.y, 3.7),
-                ));
             }
         }
     }

@@ -6,48 +6,49 @@ use crate::grid::BuildingKind;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Reflect)]
 pub enum UnitKind {
     Worker,
-    Soldier,
-    Tank,
+    #[serde(alias = "Soldier")]
+    RangedFighter,
+    MeleeFighter,
 }
 
 impl UnitKind {
     pub fn name(&self) -> &'static str {
         match self {
-            UnitKind::Worker => "SCV Worker",
-            UnitKind::Soldier => "Marine Soldier",
-            UnitKind::Tank => "Siege Tank",
+            UnitKind::Worker => "Worker",
+            UnitKind::RangedFighter => "Ranged Fighter",
+            UnitKind::MeleeFighter => "Melee Fighter",
         }
     }
 
     pub fn mineral_cost(&self) -> u32 {
         match self {
             UnitKind::Worker => 50,
-            UnitKind::Soldier => 100,
-            UnitKind::Tank => 200,
+            UnitKind::RangedFighter => 100,
+            UnitKind::MeleeFighter => 75,
         }
     }
 
     pub fn supply_cost(&self) -> u32 {
         match self {
             UnitKind::Worker => 1,
-            UnitKind::Soldier => 2,
-            UnitKind::Tank => 3,
+            UnitKind::RangedFighter => 2,
+            UnitKind::MeleeFighter => 1,
         }
     }
 
     pub fn train_duration(&self) -> f32 {
         match self {
             UnitKind::Worker => 3.0,
-            UnitKind::Soldier => 4.0,
-            UnitKind::Tank => 5.0,
+            UnitKind::RangedFighter => 4.0,
+            UnitKind::MeleeFighter => 3.5,
         }
     }
 
     pub fn max_health(&self) -> f32 {
         match self {
             UnitKind::Worker => 80.0,
-            UnitKind::Soldier => 120.0,
-            UnitKind::Tank => 220.0,
+            UnitKind::RangedFighter => 120.0,
+            UnitKind::MeleeFighter => 150.0,
         }
     }
 }
@@ -174,12 +175,6 @@ pub enum ClientMessage {
     },
     CancelQueue,
     ForfeitMatch,
-    RequestStimpack {
-        unit_net_ids: Vec<u32>,
-    },
-    RequestToggleSiegeMode {
-        unit_net_ids: Vec<u32>,
-    },
     SendChatMessage {
         text: String,
     },
@@ -308,12 +303,6 @@ pub enum ServerMessage {
     UnitsOrderedPatrol {
         unit_net_ids: Vec<u32>,
         destinations: Vec<Vec2>,
-    },
-    UnitsActivatedStimpack {
-        unit_net_ids: Vec<u32>,
-    },
-    UnitsToggledSiegeMode {
-        unit_net_ids: Vec<u32>,
     },
     ProjectileFired {
         attacker_net_id: u32,

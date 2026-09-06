@@ -4,16 +4,14 @@ use bevy::prelude::*;
 #[allow(dead_code)]
 pub enum SoundEffect {
     Gunshot,
-    SiegeTankShot,
+    SwordSlash,
     Explosion,
     LaserMining,
-    Stimpack,
-    SiegeModeToggle,
     BuildPlaced,
     UnitTrained,
     OrderIssued,
     MarineSelect,
-    TankSelect,
+    MeleeSelect,
     WorkerSelect,
     BaseUnderAttack,
     SupplyBlocked,
@@ -73,34 +71,23 @@ fn play_synth_audio_wasm(sfx: SoundEffect) {
             })()
             "#
         }
-        SoundEffect::SiegeTankShot => {
+        SoundEffect::SwordSlash => {
             r#"
             (function() {
                 try {
                     const ctx = window._rts_audio_ctx || (window._rts_audio_ctx = new (window.AudioContext || window.webkitAudioContext)());
                     if (ctx.state === 'suspended') ctx.resume();
                     const osc = ctx.createOscillator();
-                    const sub = ctx.createOscillator();
                     const gain = ctx.createGain();
-                    const subGain = ctx.createGain();
-                    osc.type = 'sawtooth';
-                    osc.frequency.setValueAtTime(240, ctx.currentTime);
-                    osc.frequency.exponentialRampToValueAtTime(30, ctx.currentTime + 0.35);
-                    gain.gain.setValueAtTime(0.35, ctx.currentTime);
-                    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
-                    sub.type = 'sine';
-                    sub.frequency.setValueAtTime(90, ctx.currentTime);
-                    sub.frequency.exponentialRampToValueAtTime(20, ctx.currentTime + 0.45);
-                    subGain.gain.setValueAtTime(0.40, ctx.currentTime);
-                    subGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.45);
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(650, ctx.currentTime);
+                    osc.frequency.exponentialRampToValueAtTime(110, ctx.currentTime + 0.12);
+                    gain.gain.setValueAtTime(0.24, ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
                     osc.connect(gain);
-                    sub.connect(subGain);
                     gain.connect(ctx.destination);
-                    subGain.connect(ctx.destination);
                     osc.start();
-                    sub.start();
-                    osc.stop(ctx.currentTime + 0.36);
-                    sub.stop(ctx.currentTime + 0.46);
+                    osc.stop(ctx.currentTime + 0.13);
                 } catch (e) {}
             })()
             "#
@@ -150,48 +137,6 @@ fn play_synth_audio_wasm(sfx: SoundEffect) {
                     gain.connect(ctx.destination);
                     osc.start();
                     osc.stop(ctx.currentTime + 0.06);
-                } catch (e) {}
-            })()
-            "#
-        }
-        SoundEffect::Stimpack => {
-            r#"
-            (function() {
-                try {
-                    const ctx = window._rts_audio_ctx || (window._rts_audio_ctx = new (window.AudioContext || window.webkitAudioContext)());
-                    if (ctx.state === 'suspended') ctx.resume();
-                    const osc = ctx.createOscillator();
-                    const gain = ctx.createGain();
-                    osc.type = 'triangle';
-                    osc.frequency.setValueAtTime(400, ctx.currentTime);
-                    osc.frequency.linearRampToValueAtTime(1800, ctx.currentTime + 0.12);
-                    gain.gain.setValueAtTime(0.20, ctx.currentTime);
-                    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.14);
-                    osc.connect(gain);
-                    gain.connect(ctx.destination);
-                    osc.start();
-                    osc.stop(ctx.currentTime + 0.15);
-                } catch (e) {}
-            })()
-            "#
-        }
-        SoundEffect::SiegeModeToggle => {
-            r#"
-            (function() {
-                try {
-                    const ctx = window._rts_audio_ctx || (window._rts_audio_ctx = new (window.AudioContext || window.webkitAudioContext)());
-                    if (ctx.state === 'suspended') ctx.resume();
-                    const osc = ctx.createOscillator();
-                    const gain = ctx.createGain();
-                    osc.type = 'sawtooth';
-                    osc.frequency.setValueAtTime(120, ctx.currentTime);
-                    osc.frequency.linearRampToValueAtTime(320, ctx.currentTime + 0.20);
-                    gain.gain.setValueAtTime(0.18, ctx.currentTime);
-                    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.22);
-                    osc.connect(gain);
-                    gain.connect(ctx.destination);
-                    osc.start();
-                    osc.stop(ctx.currentTime + 0.23);
                 } catch (e) {}
             })()
             "#
@@ -279,7 +224,7 @@ fn play_synth_audio_wasm(sfx: SoundEffect) {
             })()
             "#
         }
-        SoundEffect::TankSelect => {
+        SoundEffect::MeleeSelect => {
             r#"
             (function() {
                 try {

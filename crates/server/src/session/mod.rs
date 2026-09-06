@@ -168,6 +168,7 @@ impl Matchmaker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::session::spawner::spawn_match_entities;
 
     #[test]
     fn test_spawn_match_entities_attaches_room_id() {
@@ -207,7 +208,7 @@ mod tests {
 
         assert_eq!(r1_count, states_r1.len());
         assert_eq!(r2_count, states_r2.len());
-        assert_eq!(r1_count, 20, "Room 1 should spawn 20 entities (HQs, SCVs, Main & Expansion Minerals)");
+        assert_eq!(r1_count, 20, "Room 1 should spawn 20 entities (HQs, Workers, Main & Expansion Minerals)");
     }
 
     #[test]

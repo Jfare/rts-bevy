@@ -27,13 +27,10 @@ pub fn update_server_nav_grid_system(
     }
 }
 
-/// Server ability timers (Stimpack, Siege Mode transitions) and Patrol cycling
+/// Server ability timers and Patrol cycling
 pub fn server_abilities_and_stances_system(
     mut commands: Commands,
-    time: Res<Time>,
     nav_grid: Res<NavGrid>,
-    mut stim_query: Query<&mut Stimpack>,
-    mut tank_query: Query<&mut SiegeTank>,
     mut stance_query: Query<(
         Entity,
         &Transform,
@@ -42,49 +39,7 @@ pub fn server_abilities_and_stances_system(
         Option<&mut Soldier>,
     ), With<Unit>>,
 ) {
-    let dt = time.delta_secs();
-
-    // 1. Stimpack timers
-    for mut stim in &mut stim_query {
-        if stim.is_active {
-            stim.timer -= dt;
-            if stim.timer <= 0.0 {
-                stim.is_active = false;
-                stim.timer = 0.0;
-            }
-        }
-    }
-
-    // 2. Siege Tank transformations
-    for mut tank in &mut tank_query {
-        match tank.mode {
-            TankMode::TransformingToSiege => {
-                tank.transform_timer -= dt;
-                if tank.transform_timer <= 0.0 {
-                    tank.mode = TankMode::Siege;
-                    tank.transform_timer = 0.0;
-                    tank.attack_range = 380.0;
-                    tank.attack_damage = 70.0;
-                    tank.attack_cooldown = 2.2;
-                    tank.splash_radius = 45.0;
-                }
-            }
-            TankMode::TransformingToTank => {
-                tank.transform_timer -= dt;
-                if tank.transform_timer <= 0.0 {
-                    tank.mode = TankMode::Tank;
-                    tank.transform_timer = 0.0;
-                    tank.attack_range = 240.0;
-                    tank.attack_damage = 35.0;
-                    tank.attack_cooldown = 1.6;
-                    tank.splash_radius = 0.0;
-                }
-            }
-            _ => {}
-        }
-    }
-
-    // 3. Patrol cycle
+    // 1. Patrol cycle
     for (entity, transform, mut stance, move_target_opt, mut soldier_opt) in &mut stance_query {
         if let TacticalStance::Patrol {
             origin,
@@ -135,24 +90,16 @@ pub fn server_movement_system(
         &mut Velocity,
         &mut MoveTarget,
         &RoomId,
-        Option<&Stimpack>,
-        Option<&SiegeTank>,
+        Option<&MeleeFighter>,
         Option<&Soldier>,
     )>,
 ) {
     let dt = time.delta_secs();
-    for (entity, mut transform, speed, mut velocity, mut move_target, room_id, stim_opt, tank_opt, soldier_opt) in &mut query {
+    for (entity, mut transform, speed, mut velocity, mut move_target, room_id, melee_opt, soldier_opt) in &mut query {
         let is_room_active = matchmaker.rooms.get(&room_id.0).map(|r| r.is_active && r.countdown_timer <= 0.0).unwrap_or(true);
         if !is_room_active {
             velocity.0 = Vec2::ZERO;
             continue;
-        }
-
-        if let Some(tank) = tank_opt {
-            if tank.mode != TankMode::Tank {
-                velocity.0 = Vec2::ZERO;
-                continue;
-            }
         }
 
         // If an attack-moving unit is currently fighting/engaging an enemy, pause marching
@@ -166,8 +113,11 @@ pub fn server_movement_system(
                     continue;
                 }
             }
-            if let Some(tank) = tank_opt {
-                if tank.target.is_some() {
+            if let Some(melee) = melee_opt {
+                if melee.target.is_some()
+                    || melee.state == SoldierState::Attacking
+                    || melee.state == SoldierState::ChasingTarget
+                {
                     velocity.0 = Vec2::ZERO;
                     continue;
                 }
@@ -212,10 +162,7 @@ pub fn server_movement_system(
             }
 
         let dir = diff.normalize_or_zero();
-        let speed_mult = stim_opt
-            .map(|s| if s.is_active { 1.5 } else { 1.0 })
-            .unwrap_or(1.0);
-        velocity.0 = dir * speed.0 * speed_mult;
+        velocity.0 = dir * speed.0;
         transform.translation.x += velocity.0.x * dt;
         transform.translation.y += velocity.0.y * dt;
 

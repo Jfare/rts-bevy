@@ -115,14 +115,14 @@ fn production_queue_system(
             let rally_waypoints = nav_grid.find_path(spawn_pos, prod.rally_point);
 
             // Spawn the unit based on name
-            let is_worker = completed_unit.name.contains("SCV");
-            let is_tank = completed_unit.name.contains("Tank");
+            let is_worker = completed_unit.name.contains("Worker") || completed_unit.name.contains("SCV");
+            let is_melee = completed_unit.name.contains("Melee");
             let net_id = 5000 + (building_entity.index() % 1000) * 10 + (prod.queue.len() as u32);
 
             if is_worker {
                 commands.spawn((
                     Unit {
-                        name: "SCV Worker".to_string(),
+                        name: "Worker".to_string(),
                         supply_cost: 1,
                     },
                     Worker::default(),
@@ -140,17 +140,17 @@ fn production_queue_system(
                     MoveTarget::with_waypoints(prod.rally_point, false, rally_waypoints),
                     Transform::from_xyz(spawn_pos.x, spawn_pos.y, 2.0),
                 ));
-            } else if is_tank {
+            } else if is_melee {
                 commands.spawn((
                     Unit {
-                        name: "Siege Tank".to_string(),
-                        supply_cost: 3,
+                        name: "Melee Fighter".to_string(),
+                        supply_cost: 1,
                     },
-                    SiegeTank::default(),
+                    MeleeFighter::default(),
                     TacticalStance::default(),
-                    Health::new(220.0),
-                    Radius(22.0),
-                    MoveSpeed(140.0),
+                    Health::new(150.0),
+                    Radius(16.0),
+                    MoveSpeed(195.0),
                     Velocity::default(),
                     *faction,
                     Selectable::default(),
@@ -164,11 +164,10 @@ fn production_queue_system(
             } else {
                 commands.spawn((
                     Unit {
-                        name: "Marine Soldier".to_string(),
+                        name: "Ranged Fighter".to_string(),
                         supply_cost: 2,
                     },
                     Soldier::default(),
-                    Stimpack::default(),
                     TacticalStance::default(),
                     Health::new(120.0),
                     Radius(16.0),
@@ -217,19 +216,19 @@ fn handle_production_hotkeys(
 
     let my_faction = net_client.my_faction;
 
-    // Key 'V' for SCV Worker at Base HQ
-    if keyboard.just_pressed(KeyCode::KeyV) {
+    // Key 'V' or 'W' for Worker at Base HQ
+    if keyboard.just_pressed(KeyCode::KeyV) || keyboard.just_pressed(KeyCode::KeyW) {
         for (mut prod, building, faction, selectable, net_entity_opt, base_hq, _) in &mut prod_query {
             if *faction == my_faction && selectable.is_selected && building.is_constructed && base_hq.is_some()
                 && prod.queue.len() < prod.max_queue_size {
                     if !economy.has_minerals(*faction, 50) {
-                        info!("⚠️ [Economy] Not enough minerals for SCV Worker (Requires 50 💎)!");
+                        info!("⚠️ [Economy] Not enough minerals for Worker (Requires 50 💎)!");
                         continue;
                     }
 
                     if !economy.has_supply(*faction, 1) {
                         sound_events.send(SoundEffect::SupplyBlocked);
-                        info!("⚠️ [Economy] Not enough supply for SCV Worker (Requires 1 ⚡) - Build a Supply Depot [P]!");
+                        info!("⚠️ [Economy] Not enough supply for Worker (Requires 1 ⚡) - Build a Supply Depot [P]!");
                         continue;
                     }
 
@@ -242,7 +241,7 @@ fn handle_production_hotkeys(
                     sound_events.send(SoundEffect::UnitTrained);
 
                     prod.queue.push(QueuedUnit {
-                        name: "SCV Worker".to_string(),
+                        name: "Worker".to_string(),
                         mineral_cost: 50,
                         supply_cost: 1,
                         build_duration: 3.0,
@@ -257,13 +256,13 @@ fn handle_production_hotkeys(
                         }
                     }
 
-                    info!("⛏️ [Queue] SCV Worker queued! Queue size: {}", prod.queue.len());
+                    info!("⛏️ [Queue] Worker queued! Queue size: {}", prod.queue.len());
                 }
         }
     }
 
-    // Key 'M' for Marine at Barracks
-    if keyboard.just_pressed(KeyCode::KeyM) {
+    // Key 'R' or 'M' for Ranged Fighter at Barracks
+    if keyboard.just_pressed(KeyCode::KeyR) || keyboard.just_pressed(KeyCode::KeyM) {
         for (mut prod, building, faction, selectable, net_entity_opt, _, barracks) in &mut prod_query {
             if *faction == my_faction && selectable.is_selected && building.is_constructed && barracks.is_some() {
                 if prod.queue.len() >= prod.max_queue_size {
@@ -272,13 +271,13 @@ fn handle_production_hotkeys(
                 }
 
                 if !economy.has_minerals(*faction, 100) {
-                    info!("⚠️ [Economy] Not enough minerals for Marine (Requires 100 💎)!");
+                    info!("⚠️ [Economy] Not enough minerals for Ranged Fighter (Requires 100 💎)!");
                     continue;
                 }
 
                 if !economy.has_supply(*faction, 2) {
                     sound_events.send(SoundEffect::SupplyBlocked);
-                    info!("⚠️ [Economy] Not enough supply for Marine (Requires 2 ⚡) - Build a Supply Depot [P]!");
+                    info!("⚠️ [Economy] Not enough supply for Ranged Fighter (Requires 2 ⚡) - Build a Supply Depot [P]!");
                     continue;
                 }
 
@@ -291,7 +290,7 @@ fn handle_production_hotkeys(
                 sound_events.send(SoundEffect::UnitTrained);
 
                 prod.queue.push(QueuedUnit {
-                    name: "Marine Soldier".to_string(),
+                    name: "Ranged Fighter".to_string(),
                     mineral_cost: 100,
                     supply_cost: 2,
                     build_duration: 4.0,
@@ -301,18 +300,18 @@ fn handle_production_hotkeys(
                     if net_client.status != NetStatus::Disconnected {
                         net_client.send(&ClientMessage::RequestTrainUnit {
                             building_net_id: net.net_id,
-                            unit_kind: UnitKind::Soldier,
+                            unit_kind: UnitKind::RangedFighter,
                         });
                     }
                 }
 
-                info!("🔫 [Queue] Marine Soldier queued! Queue size: {}", prod.queue.len());
+                info!("🏹 [Queue] Ranged Fighter queued! Queue size: {}", prod.queue.len());
             }
         }
     }
 
-    // Key 'T', 'S', or 'K' for Siege Tank at Barracks
-    if keyboard.just_pressed(KeyCode::KeyT) || keyboard.just_pressed(KeyCode::KeyS) || keyboard.just_pressed(KeyCode::KeyK) {
+    // Key 'F' for Melee Fighter at Barracks
+    if keyboard.just_pressed(KeyCode::KeyF) {
         for (mut prod, building, faction, selectable, net_entity_opt, _, barracks) in &mut prod_query {
             if *faction == my_faction && selectable.is_selected && building.is_constructed && barracks.is_some() {
                 if prod.queue.len() >= prod.max_queue_size {
@@ -320,42 +319,42 @@ fn handle_production_hotkeys(
                     continue;
                 }
 
-                if !economy.has_minerals(*faction, 200) {
-                    info!("⚠️ [Economy] Not enough minerals for Siege Tank (Requires 200 💎)!");
+                if !economy.has_minerals(*faction, 75) {
+                    info!("⚠️ [Economy] Not enough minerals for Melee Fighter (Requires 75 💎)!");
                     continue;
                 }
 
-                if !economy.has_supply(*faction, 3) {
+                if !economy.has_supply(*faction, 1) {
                     sound_events.send(SoundEffect::SupplyBlocked);
-                    info!("⚠️ [Economy] Not enough supply for Siege Tank (Requires 3 ⚡) - Build a Supply Depot [P]!");
+                    info!("⚠️ [Economy] Not enough supply for Melee Fighter (Requires 1 ⚡) - Build a Supply Depot [P]!");
                     continue;
                 }
 
-                economy.spend_minerals(*faction, 200);
-                economy.register_supply(*faction, 3);
+                economy.spend_minerals(*faction, 75);
+                economy.register_supply(*faction, 1);
                 if *faction == Faction::Player1 {
-                    stats.minerals_spent += 200;
+                    stats.minerals_spent += 75;
                     stats.units_trained += 1;
                 }
                 sound_events.send(SoundEffect::UnitTrained);
 
                 prod.queue.push(QueuedUnit {
-                    name: "Siege Tank".to_string(),
-                    mineral_cost: 200,
-                    supply_cost: 3,
-                    build_duration: 5.0,
+                    name: "Melee Fighter".to_string(),
+                    mineral_cost: 75,
+                    supply_cost: 1,
+                    build_duration: 3.5,
                 });
 
                 if let Some(net) = net_entity_opt {
                     if net_client.status != NetStatus::Disconnected {
                         net_client.send(&ClientMessage::RequestTrainUnit {
                             building_net_id: net.net_id,
-                            unit_kind: UnitKind::Tank,
+                            unit_kind: UnitKind::MeleeFighter,
                         });
                     }
                 }
 
-                info!("🛡️ [Queue] Siege Tank queued! Queue size: {}", prod.queue.len());
+                info!("⚔️ [Queue] Melee Fighter queued! Queue size: {}", prod.queue.len());
             }
         }
     }

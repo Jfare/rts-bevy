@@ -2,8 +2,8 @@ use bevy::prelude::*;
 use bevy::render::camera::OrthographicProjection;
 use bevy::window::PrimaryWindow;
 use shared::components::{
-    AppState, Faction, Health, MatchOutcome, MoveTarget, NetEntity, Radius, ResourceNode, Selectable,
-    SiegeTank, Soldier, SoldierState, Stimpack, TacticalStance, TankMode, Worker,
+    AppState, Faction, Health, MatchOutcome, MeleeFighter, MoveTarget, NetEntity, Radius, ResourceNode, Selectable,
+    Soldier, SoldierState, TacticalStance, Worker,
 };
 use shared::grid::{NavGrid, WorldGridConfig};
 use shared::protocol::ClientMessage;
@@ -61,7 +61,7 @@ fn handle_right_click_orders(
         Option<&mut TacticalStance>,
         Option<&Worker>,
         Option<&mut Soldier>,
-        Option<&mut SiegeTank>,
+        Option<&mut MeleeFighter>,
     )>,
 ) {
     if outcome_opt.as_deref() == Some(&MatchOutcome::Victory) || outcome_opt.as_deref() == Some(&MatchOutcome::Defeat) {
@@ -170,15 +170,16 @@ fn handle_right_click_orders(
         }
 
         // Set attack target and remove ground MoveTarget so unit chases/attacks the target
-        for (entity, _, faction, selectable, _, _, _, _, soldier_opt, tank_opt) in &mut unit_query {
+        for (entity, _, faction, selectable, _, _, _, _, soldier_opt, melee_opt) in &mut unit_query {
             if *faction == net_client.my_faction && selectable.is_selected {
                 commands.entity(entity).remove::<MoveTarget>();
                 if let Some(mut soldier) = soldier_opt {
                     soldier.target = Some(target_entity);
                     soldier.state = SoldierState::ChasingTarget;
                 }
-                if let Some(mut tank) = tank_opt {
-                    tank.target = Some(target_entity);
+                if let Some(mut melee) = melee_opt {
+                    melee.target = Some(target_entity);
+                    melee.state = SoldierState::ChasingTarget;
                 }
             }
         }
@@ -212,14 +213,15 @@ fn handle_right_click_orders(
         let destination = target_world_pos + formation_offset;
         let waypoints = nav_grid.find_path(*unit_pos, destination);
 
-        if let Ok((_, _, _, _, _, move_target_opt, stance_opt, _, soldier_opt, tank_opt)) = unit_query.get_mut(*entity) {
+        if let Ok((_, _, _, _, _, move_target_opt, stance_opt, _, soldier_opt, melee_opt)) = unit_query.get_mut(*entity) {
             // Ground Move cancels any current attack target immediately!
             if let Some(mut soldier) = soldier_opt {
                 soldier.target = None;
                 soldier.state = SoldierState::MovingToGround;
             }
-            if let Some(mut tank) = tank_opt {
-                tank.target = None;
+            if let Some(mut melee) = melee_opt {
+                melee.target = None;
+                melee.state = SoldierState::MovingToGround;
             }
 
             if let Some(mut stance) = stance_opt {
@@ -253,16 +255,13 @@ fn handle_right_click_orders(
     ));
 }
 
-use crate::particles::ParticleEvent;
-
-/// Handles tactical stance hotkeys (Stop [S], Hold [H], Stimpack [T], Siege Mode [E])
+/// Handles tactical stance hotkeys (Stop [S], Hold [H])
 fn handle_stance_and_ability_hotkeys(
     mut commands: Commands,
     keyboard: Res<ButtonInput<KeyCode>>,
     net_client: Res<NetClient>,
     outcome_opt: Option<Res<MatchOutcome>>,
     mut sound_events: EventWriter<SoundEffect>,
-    mut particle_events: EventWriter<ParticleEvent>,
     mut unit_query: Query<(
         Entity,
         &Transform,
@@ -271,8 +270,7 @@ fn handle_stance_and_ability_hotkeys(
         Option<&NetEntity>,
         Option<&mut Health>,
         Option<&mut Soldier>,
-        Option<&mut Stimpack>,
-        Option<&mut SiegeTank>,
+        Option<&mut MeleeFighter>,
         Option<&mut TacticalStance>,
     )>,
 ) {
@@ -285,15 +283,16 @@ fn handle_stance_and_ability_hotkeys(
     // 1. [S] Key: Stop Order
     if keyboard.just_pressed(KeyCode::KeyS) {
         let mut net_ids = Vec::new();
-        for (entity, _, faction, selectable, net_opt, _, mut soldier_opt, _, mut tank_opt, mut stance_opt) in &mut unit_query {
+        for (entity, _, faction, selectable, net_opt, _, mut soldier_opt, mut melee_opt, mut stance_opt) in &mut unit_query {
             if *faction == my_faction && selectable.is_selected {
                 commands.entity(entity).remove::<MoveTarget>();
                 if let Some(ref mut soldier) = soldier_opt {
                     soldier.state = SoldierState::Idle;
                     soldier.target = None;
                 }
-                if let Some(ref mut tank) = tank_opt {
-                    tank.target = None;
+                if let Some(ref mut melee) = melee_opt {
+                    melee.state = SoldierState::Idle;
+                    melee.target = None;
                 }
                 if let Some(ref mut stance) = stance_opt {
                     **stance = TacticalStance::Aggressive;
@@ -313,15 +312,16 @@ fn handle_stance_and_ability_hotkeys(
     // 2. [H] Key: Hold Position Order
     if keyboard.just_pressed(KeyCode::KeyH) {
         let mut net_ids = Vec::new();
-        for (entity, _, faction, selectable, net_opt, _, mut soldier_opt, _, mut tank_opt, mut stance_opt) in &mut unit_query {
+        for (entity, _, faction, selectable, net_opt, _, mut soldier_opt, mut melee_opt, mut stance_opt) in &mut unit_query {
             if *faction == my_faction && selectable.is_selected {
                 commands.entity(entity).remove::<MoveTarget>();
                 if let Some(ref mut soldier) = soldier_opt {
                     soldier.state = SoldierState::HoldingPosition;
                     soldier.target = None;
                 }
-                if let Some(ref mut tank) = tank_opt {
-                    tank.target = None;
+                if let Some(ref mut melee) = melee_opt {
+                    melee.state = SoldierState::HoldingPosition;
+                    melee.target = None;
                 }
                 if let Some(ref mut stance) = stance_opt {
                     **stance = TacticalStance::HoldPosition;
@@ -338,91 +338,6 @@ fn handle_stance_and_ability_hotkeys(
         }
         sound_events.send(SoundEffect::OrderIssued);
         info!("🛡️ [Stance] Hold Position command issued to selected units");
-    }
-
-    // 3. [T] Key: Marine Stimpack Ability
-    if keyboard.just_pressed(KeyCode::KeyT) {
-        let mut net_ids = Vec::new();
-        for (entity, tf, faction, selectable, net_opt, health_opt, soldier_opt, stim_opt, _, _) in &mut unit_query {
-            if *faction == my_faction && selectable.is_selected && soldier_opt.is_some() {
-                if let Some(mut health) = health_opt {
-                    if health.current > 20.0 {
-                        health.take_damage(15.0);
-                        let pos = tf.translation.truncate();
-                        particle_events.send(ParticleEvent::StimpackVapor { pos });
-
-                        if let Some(mut stim) = stim_opt {
-                            stim.is_active = true;
-                            stim.timer = stim.duration;
-                        } else {
-                            commands.entity(entity).insert(Stimpack {
-                                is_active: true,
-                                timer: 6.0,
-                                duration: 6.0,
-                            });
-                        }
-                        if let Some(net) = net_opt {
-                            net_ids.push(net.net_id);
-                        }
-                    }
-                }
-            }
-        }
-        if !net_ids.is_empty() {
-            sound_events.send(SoundEffect::Stimpack);
-            info!("💉 [Ability] Stimpack activated on {} Marines!", net_ids.len());
-            if net_client.status != NetStatus::Disconnected {
-                net_client.send(&ClientMessage::RequestStimpack { unit_net_ids: net_ids });
-            }
-        }
-    }
-
-    // 4. [E] Key: Toggle Siege Tank Mode
-    if keyboard.just_pressed(KeyCode::KeyE) {
-        let mut net_ids = Vec::new();
-        for (entity, tf, faction, selectable, net_opt, _, _, _, tank_opt, _) in &mut unit_query {
-            if *faction == my_faction && selectable.is_selected {
-                if let Some(mut tank) = tank_opt {
-                    let pos = tf.translation.truncate();
-                    match tank.mode {
-                        TankMode::Tank => {
-                            tank.mode = TankMode::TransformingToSiege;
-                            tank.transform_timer = 1.0;
-                            commands.entity(entity).remove::<MoveTarget>();
-                            particle_events.send(ParticleEvent::Shockwave {
-                                pos,
-                                radius: 45.0,
-                                color: Color::srgba(1.0, 0.6, 0.2, 0.8),
-                            });
-                            if let Some(net) = net_opt {
-                                net_ids.push(net.net_id);
-                            }
-                            info!("🛡️ [Siege Tank] Transforming to Siege Mode...");
-                        }
-                        TankMode::Siege => {
-                            tank.mode = TankMode::TransformingToTank;
-                            tank.transform_timer = 1.0;
-                            particle_events.send(ParticleEvent::Shockwave {
-                                pos,
-                                radius: 30.0,
-                                color: Color::srgba(0.4, 0.8, 1.0, 0.8),
-                            });
-                            if let Some(net) = net_opt {
-                                net_ids.push(net.net_id);
-                            }
-                            info!("🛡️ [Siege Tank] Transforming to Mobile Tank Mode...");
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        }
-        if !net_ids.is_empty() {
-            sound_events.send(SoundEffect::SiegeModeToggle);
-            if net_client.status != NetStatus::Disconnected {
-                net_client.send(&ClientMessage::RequestToggleSiegeMode { unit_net_ids: net_ids });
-            }
-        }
     }
 }
 

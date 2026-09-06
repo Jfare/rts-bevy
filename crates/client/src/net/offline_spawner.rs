@@ -81,10 +81,10 @@ pub fn spawn_standalone_offline_match(
         }
     }
 
-    // Spawn P1 SCVs (2 workers auto-harvesting at start)
+    // Spawn P1 Workers (2 workers auto-harvesting at start)
     for (i, &pos) in shared::map::P1_STARTER_WORKERS.iter().enumerate() {
         commands.spawn((
-            Unit { name: "SCV Worker".to_string(), supply_cost: 1 },
+            Unit { name: "Worker".to_string(), supply_cost: 1 },
             Worker {
                 state: WorkerState::MovingToResource,
                 target_node: p1_primary_mineral_e,
@@ -133,10 +133,10 @@ pub fn spawn_standalone_offline_match(
         }
     }
 
-    // Spawn Hostile AI SCVs (2 workers auto-harvesting at start)
+    // Spawn Hostile AI Workers (2 workers auto-harvesting at start)
     for (i, &pos) in shared::map::P2_STARTER_WORKERS.iter().enumerate() {
         commands.spawn((
-            Unit { name: "SCV Worker".to_string(), supply_cost: 1 },
+            Unit { name: "Worker".to_string(), supply_cost: 1 },
             Worker {
                 state: WorkerState::MovingToResource,
                 target_node: ai_primary_mineral_e,

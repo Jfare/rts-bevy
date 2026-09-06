@@ -1,16 +1,16 @@
+pub mod melee_fighters;
 pub mod projectiles;
-pub mod siege_tanks;
 pub mod soldiers;
 pub mod turrets;
 
 use bevy::prelude::*;
 use shared::components::{AppState, Faction, MatchOutcome};
 
+pub use melee_fighters::melee_fighter_combat_system;
 pub use projectiles::{
     death_and_elimination_system, draw_combat_gizmos, muzzle_flash_system,
     projectile_movement_and_impact_system,
 };
-pub use siege_tanks::siege_tank_combat_system;
 pub use soldiers::soldier_combat_system;
 pub use turrets::turret_combat_system;
 
@@ -33,7 +33,7 @@ impl Plugin for CombatPlugin {
                 (
                     soldier_combat_system,
                     turret_combat_system,
-                    siege_tank_combat_system,
+                    melee_fighter_combat_system,
                     projectile_movement_and_impact_system,
                     muzzle_flash_system,
                     death_and_elimination_system,

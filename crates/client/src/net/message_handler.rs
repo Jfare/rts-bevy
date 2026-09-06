@@ -37,10 +37,9 @@ pub fn handle_server_message(
         &mut Health,
         Option<&mut Worker>,
         Option<&mut Soldier>,
-        Option<&mut SiegeTank>,
+        Option<&mut MeleeFighter>,
         Option<&mut MoveTarget>,
         Option<&mut TacticalStance>,
-        Option<&mut Stimpack>,
         Option<&Radius>,
         Option<&mut GunTurret>,
         Option<&mut ProductionBuilding>,
@@ -250,7 +249,7 @@ pub fn handle_server_message(
                             Velocity::default(),
                         ));
                     }
-                    UnitKind::Soldier => {
+                    UnitKind::RangedFighter => {
                         u_cmds.insert((
                             Soldier {
                                 state: SoldierState::Idle,
@@ -265,11 +264,11 @@ pub fn handle_server_message(
                             Velocity::default(),
                         ));
                     }
-                    UnitKind::Tank => {
+                    UnitKind::MeleeFighter => {
                         u_cmds.insert((
-                            SiegeTank::default(),
-                            Radius(22.0),
-                            MoveSpeed(140.0),
+                            MeleeFighter::default(),
+                            Radius(16.0),
+                            MoveSpeed(195.0),
                             Velocity::default(),
                         ));
                     }
@@ -353,7 +352,7 @@ pub fn handle_server_message(
             is_attack_move,
         } => {
             for (net_id, dest) in unit_net_ids.into_iter().zip(destinations) {
-                for (entity, net_entity, _fac, tf, _hp, _worker, soldier_opt, tank_opt, move_target_opt, stance_opt, ..) in entity_query.iter_mut() {
+                for (entity, net_entity, _fac, tf, _hp, _worker, soldier_opt, melee_opt, move_target_opt, stance_opt, ..) in entity_query.iter_mut() {
                     if net_entity.net_id == net_id {
                         if let Some(mut soldier) = soldier_opt {
                             soldier.target = None;
@@ -363,8 +362,13 @@ pub fn handle_server_message(
                                 SoldierState::MovingToGround
                             };
                         }
-                        if let Some(mut tank) = tank_opt {
-                            tank.target = None;
+                        if let Some(mut melee) = melee_opt {
+                            melee.target = None;
+                            melee.state = if is_attack_move {
+                                SoldierState::AttackMoving
+                            } else {
+                                SoldierState::MovingToGround
+                            };
                         }
                         if let Some(mut stance) = stance_opt {
                             *stance = TacticalStance::Aggressive;
@@ -397,15 +401,16 @@ pub fn handle_server_message(
                 .map(|(e, ..)| e);
 
             if let Some(target_e) = target_entity {
-                for (entity, net_entity, _fac, _tf, _hp, _worker, soldier_opt, tank_opt, ..) in entity_query.iter_mut() {
+                for (entity, net_entity, _fac, _tf, _hp, _worker, soldier_opt, melee_opt, ..) in entity_query.iter_mut() {
                     if unit_net_ids.contains(&net_entity.net_id) {
                         commands.entity(entity).remove::<MoveTarget>();
                         if let Some(mut soldier) = soldier_opt {
                             soldier.target = Some(target_e);
                             soldier.state = SoldierState::ChasingTarget;
                         }
-                        if let Some(mut tank) = tank_opt {
-                            tank.target = Some(target_e);
+                        if let Some(mut melee) = melee_opt {
+                            melee.target = Some(target_e);
+                            melee.state = SoldierState::ChasingTarget;
                         }
                     }
                 }
@@ -436,15 +441,16 @@ pub fn handle_server_message(
         }
 
         ServerMessage::UnitsOrderedStop { unit_net_ids } => {
-            for (entity, net_entity, _fac, _tf, _hp, worker_opt, soldier_opt, mut tank_opt, _, stance_opt, ..) in entity_query.iter_mut() {
+            for (entity, net_entity, _fac, _tf, _hp, worker_opt, soldier_opt, mut melee_opt, _, stance_opt, ..) in entity_query.iter_mut() {
                 if unit_net_ids.contains(&net_entity.net_id) {
                     commands.entity(entity).remove::<MoveTarget>();
                     if let Some(mut soldier) = soldier_opt {
                         soldier.target = None;
                         soldier.state = SoldierState::Idle;
                     }
-                    if let Some(ref mut tank) = tank_opt {
-                        tank.target = None;
+                    if let Some(ref mut melee) = melee_opt {
+                        melee.target = None;
+                        melee.state = SoldierState::Idle;
                     }
                     if let Some(mut worker) = worker_opt {
                         worker.state = WorkerState::Idle;
@@ -457,15 +463,16 @@ pub fn handle_server_message(
         }
 
         ServerMessage::UnitsOrderedHoldPosition { unit_net_ids } => {
-            for (entity, net_entity, _fac, _tf, _hp, _worker, soldier_opt, mut tank_opt, _, stance_opt, ..) in entity_query.iter_mut() {
+            for (entity, net_entity, _fac, _tf, _hp, _worker, soldier_opt, mut melee_opt, _, stance_opt, ..) in entity_query.iter_mut() {
                 if unit_net_ids.contains(&net_entity.net_id) {
                     commands.entity(entity).remove::<MoveTarget>();
                     if let Some(mut soldier) = soldier_opt {
                         soldier.target = None;
                         soldier.state = SoldierState::HoldingPosition;
                     }
-                    if let Some(ref mut tank) = tank_opt {
-                        tank.target = None;
+                    if let Some(ref mut melee) = melee_opt {
+                        melee.target = None;
+                        melee.state = SoldierState::HoldingPosition;
                     }
                     if let Some(mut stance) = stance_opt {
                         *stance = TacticalStance::HoldPosition;
@@ -481,7 +488,7 @@ pub fn handle_server_message(
             destinations,
         } => {
             for (net_id, dest) in unit_net_ids.into_iter().zip(destinations) {
-                for (entity, net_entity, _fac, tf, _hp, _worker, soldier_opt, _tank, move_target_opt, stance_opt, ..) in entity_query.iter_mut() {
+                for (entity, net_entity, _fac, tf, _hp, _worker, soldier_opt, _melee, move_target_opt, stance_opt, ..) in entity_query.iter_mut() {
                     if net_entity.net_id == net_id {
                         let unit_pos = tf.translation.truncate();
                         let waypoints = nav_grid.find_path(unit_pos, dest);
@@ -514,59 +521,6 @@ pub fn handle_server_message(
                             commands.entity(entity).insert(MoveTarget::with_waypoints(dest, true, waypoints));
                         }
                         break;
-                    }
-                }
-            }
-        }
-
-        ServerMessage::UnitsActivatedStimpack { unit_net_ids } => {
-            for (entity, net_entity, _fac, tf, mut hp, _worker, _soldier, _tank, _mt, _stance, stim_opt, ..) in entity_query.iter_mut() {
-                if unit_net_ids.contains(&net_entity.net_id)
-                    && hp.current > 20.0 {
-                        hp.take_damage(15.0);
-                        let pos = tf.translation.truncate();
-                        particle_events.send(ParticleEvent::StimpackVapor { pos });
-                        if let Some(mut stim) = stim_opt {
-                            stim.is_active = true;
-                            stim.timer = 6.0;
-                        } else {
-                            commands.entity(entity).insert(Stimpack {
-                                is_active: true,
-                                timer: 6.0,
-                                duration: 6.0,
-                            });
-                        }
-                    }
-            }
-        }
-
-        ServerMessage::UnitsToggledSiegeMode { unit_net_ids } => {
-            for (entity, net_entity, _fac, tf, _hp, _worker, _soldier, tank_opt, ..) in entity_query.iter_mut() {
-                if unit_net_ids.contains(&net_entity.net_id) {
-                    if let Some(mut tank) = tank_opt {
-                        let pos = tf.translation.truncate();
-                        match tank.mode {
-                            TankMode::Tank => {
-                                tank.mode = TankMode::TransformingToSiege;
-                                tank.transform_timer = 1.0;
-                                commands.entity(entity).remove::<MoveTarget>();
-                                particle_events.send(ParticleEvent::Shockwave {
-                                    pos,
-                                    radius: 45.0,
-                                    color: Color::srgba(1.0, 0.6, 0.2, 0.8),
-                                });
-                            }
-                            TankMode::Siege => {
-                                tank.mode = TankMode::TransformingToTank;
-                                tank.transform_timer = 1.0;
-                                particle_events.send(ParticleEvent::Shockwave {
-                                    pos,
-                                    radius: 30.0,
-                                    color: Color::srgba(0.4, 0.8, 1.0, 0.8),
-                                });
-                            }
-                            _ => {}
-                        }
                     }
                 }
             }
@@ -665,7 +619,7 @@ pub fn handle_server_message(
                         Velocity::default(),
                     ));
                 }
-                UnitKind::Soldier => {
+                UnitKind::RangedFighter => {
                     unit_cmds.insert((
                         Soldier {
                             state: SoldierState::Idle,
@@ -675,19 +629,18 @@ pub fn handle_server_message(
                             attack_cooldown: 0.85,
                             ..default()
                         },
-                        Stimpack::default(),
                         TacticalStance::default(),
                         Radius(16.0),
                         MoveSpeed(180.0),
                         Velocity::default(),
                     ));
                 }
-                UnitKind::Tank => {
+                UnitKind::MeleeFighter => {
                     unit_cmds.insert((
-                        SiegeTank::default(),
+                        MeleeFighter::default(),
                         TacticalStance::default(),
-                        Radius(22.0),
-                        MoveSpeed(140.0),
+                        Radius(16.0),
+                        MoveSpeed(195.0),
                         Velocity::default(),
                     ));
                 }
@@ -699,7 +652,7 @@ pub fn handle_server_message(
             queue_count,
             current_progress,
         } => {
-            for (_e, net_entity, _fac, _tf, _hp, _worker, _soldier, _tank, _move, _stance, _stim, _rad, _turret, mut prod_opt) in entity_query.iter_mut() {
+            for (_e, net_entity, _fac, _tf, _hp, _worker, _soldier, _melee, _move, _stance, _rad, _turret, mut prod_opt) in entity_query.iter_mut() {
                 if net_entity.net_id == building_net_id {
                     if let Some(ref mut prod) = prod_opt {
                         while prod.queue.len() > queue_count {
@@ -732,7 +685,7 @@ pub fn handle_server_message(
 
             // Find attacker on client to ensure muzzle origin and barrel orientation are visually accurate
             let mut attacker_found = false;
-            for (_e, net_entity, fac, mut tf, _hp, _worker, soldier_opt, mut tank_opt, _, _, _, rad_opt, mut turret_opt, ..) in entity_query.iter_mut() {
+            for (_e, net_entity, fac, mut tf, _hp, _worker, soldier_opt, mut melee_opt, _, _, rad_opt, mut turret_opt, ..) in entity_query.iter_mut() {
                 if net_entity.net_id == attacker_net_id {
                     attacker_found = true;
                     let attacker_pos = tf.translation.truncate();
@@ -742,8 +695,17 @@ pub fn handle_server_message(
                     let attacker_fac = *fac;
                     let rad = rad_opt.map(|r| r.0).unwrap_or(16.0);
 
-                    let is_siege = tank_opt.as_ref().map(|t| t.mode == TankMode::Siege).unwrap_or(false);
-                    let is_tank = tank_opt.is_some();
+                    // If attacker is a Melee Fighter: trigger dynamic sword swing animation, sparks, and sword slash audio!
+                    if let Some(ref mut melee) = melee_opt {
+                        if dir.length_squared() > 0.001 {
+                            tf.rotation = Quat::from_rotation_z(angle);
+                        }
+                        melee.swing_timer = 0.18;
+                        sound_events.send(SoundEffect::SwordSlash);
+                        particle_events.send(ParticleEvent::Sparks { pos: target_client_pos, dir, count: 6 });
+                        break;
+                    }
+
                     let is_turret = turret_opt.is_some();
 
                     // Orient attacker / turret towards target
@@ -751,19 +713,13 @@ pub fn handle_server_message(
                         if soldier_opt.is_some() {
                             tf.rotation = Quat::from_rotation_z(angle);
                         }
-                        if let Some(ref mut tank) = tank_opt {
-                            tank.turret_angle = angle;
-                        }
                         if let Some(ref mut turret) = turret_opt {
                             turret.barrel_angle = angle;
                         }
                     }
 
                     // Calculate muzzle start point aligned with visual barrel
-                    let muzzle_start = if is_tank {
-                        let muzzle_dist = if is_siege { rad * 2.2 } else { rad * 1.6 };
-                        attacker_pos + dir * muzzle_dist
-                    } else if is_turret {
+                    let muzzle_start = if is_turret {
                         attacker_pos + dir * 28.0
                     } else {
                         attacker_pos + dir * (rad + 8.0)
@@ -771,7 +727,7 @@ pub fn handle_server_message(
 
                     let to_target = target_client_pos - muzzle_start;
                     let dist = to_target.length();
-                    let speed = if is_siege { 600.0 } else if is_turret { 850.0 } else { 780.0 };
+                    let speed = if is_turret { 850.0 } else { 780.0 };
                     let lifetime = if dist > 0.0 { dist / speed } else { 0.1 };
 
                     commands.spawn((
@@ -781,7 +737,7 @@ pub fn handle_server_message(
                             target_pos: target_client_pos,
                             speed,
                             damage,
-                            splash_radius: if is_siege { 45.0 } else { 0.0 },
+                            splash_radius: 0.0,
                             faction: attacker_fac,
                             lifetime: 0.0,
                             max_lifetime: lifetime,
@@ -792,8 +748,8 @@ pub fn handle_server_message(
                     commands.spawn((
                         MuzzleFlash {
                             lifetime: 0.0,
-                            max_lifetime: if is_siege { 0.16 } else { 0.08 },
-                            color: if is_siege { Color::srgb(1.0, 0.4, 0.1) } else { Color::srgb(1.0, 0.9, 0.3) },
+                            max_lifetime: 0.08,
+                            color: Color::srgb(1.0, 0.9, 0.3),
                         },
                         Transform::from_xyz(muzzle_start.x, muzzle_start.y, 3.5),
                     ));
@@ -803,16 +759,7 @@ pub fn handle_server_message(
                         dir,
                     });
 
-                    if is_siege {
-                        particle_events.send(ParticleEvent::Shockwave {
-                            pos: muzzle_start,
-                            radius: 25.0,
-                            color: Color::srgba(1.0, 0.6, 0.2, 0.8),
-                        });
-                        sound_events.send(SoundEffect::SiegeTankShot);
-                    } else {
-                        sound_events.send(SoundEffect::Gunshot);
-                    }
+                    sound_events.send(SoundEffect::Gunshot);
                     break;
                 }
             }
@@ -847,11 +794,7 @@ pub fn handle_server_message(
                     Transform::from_xyz(origin.x, origin.y, 3.1),
                 ));
 
-                if damage >= 30.0 {
-                    sound_events.send(SoundEffect::SiegeTankShot);
-                } else {
-                    sound_events.send(SoundEffect::Gunshot);
-                }
+                sound_events.send(SoundEffect::Gunshot);
             }
         }
         ServerMessage::EntityDamaged {
