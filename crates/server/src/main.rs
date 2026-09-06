@@ -1,13 +1,13 @@
 #![allow(clippy::type_complexity, clippy::too_many_arguments)]
 
-mod game_session;
 mod net_server;
-mod sim_systems;
+mod session;
+mod sim;
 
 use bevy::app::ScheduleRunnerPlugin;
 use bevy::prelude::*;
 use net_server::ServerNetworkPlugin;
-use sim_systems::ServerSimulationPlugin;
+use sim::ServerSimulationPlugin;
 use std::time::Duration;
 
 fn main() {
