@@ -2,11 +2,11 @@ use bevy::prelude::*;
 use bevy::ui::FocusPolicy;
 
 use super::{
-    ApmText, BuildMenuText, CountdownNumberText, CountdownOverlayContainer, CountdownSubText,
-    LobbyButtonAction, LobbyModalContainer, LobbyStatusText, MatchBannerContainer,
-    MatchBannerText, MatchStatsSummaryText, MineralsText, NetworkStatusText,
-    PlayAgainButton, ProductionQueueText, ReturnToLandingButton, SelectionDetailsText,
-    SelectionTitleText, SupplyText,
+    spawn_command_card_ui, ApmText, CountdownNumberText, CountdownOverlayContainer,
+    CountdownSubText, LobbyButtonAction, LobbyModalContainer, LobbyStatusText,
+    MatchBannerContainer, MatchBannerText, MatchStatsSummaryText, MineralsText,
+    NetworkStatusText, PlayAgainButton, ProductionQueueText, ReturnToLandingButton,
+    SelectionDetailsText, SelectionTitleText, SupplyText,
 };
 
 pub fn setup_hud(mut commands: Commands) {
@@ -572,52 +572,8 @@ pub fn setup_hud(mut commands: Commands) {
                         ));
                     });
 
-                // Right Panel: Build Commands & Shortcuts
-                bottom_row
-                    .spawn((
-                        Node {
-                            padding: UiRect::all(Val::Px(12.0)),
-                            border: UiRect::all(Val::Px(1.0)),
-                            flex_direction: FlexDirection::Column,
-                            row_gap: Val::Px(4.0),
-                            align_items: AlignItems::FlexEnd,
-                            ..default()
-                        },
-                        BorderRadius::all(Val::Px(4.0)),
-                        BackgroundColor(Color::srgba(0.06, 0.08, 0.12, 0.90)),
-                        BorderColor(Color::srgba(0.20, 0.35, 0.45, 0.85)),
-                        FocusPolicy::Pass,
-                    ))
-                    .with_children(|legend| {
-                        legend.spawn((
-                            Text::new("COMMAND & BUILD MENU"),
-                            TextFont {
-                                font_size: 13.0,
-                                ..default()
-                            },
-                            TextColor(Color::srgb(0.35, 0.82, 1.0)),
-                            FocusPolicy::Pass,
-                        ));
-                        legend.spawn((
-                            Text::new("[B] Barracks (150 💎) | [U] Turret (125 💎) | [P] Depot (100 💎) | [H] HQ (400 💎)"),
-                            TextFont {
-                                font_size: 12.0,
-                                ..default()
-                            },
-                            TextColor(Color::srgb(0.95, 0.85, 0.35)),
-                            BuildMenuText,
-                            FocusPolicy::Pass,
-                        ));
-                        legend.spawn((
-                            Text::new("HQ: [V]/[W] Worker (50 💎) | Barracks: [R] Ranged Fighter (100 💎) [F] Melee Fighter (75 💎)"),
-                            TextFont {
-                                font_size: 11.0,
-                                ..default()
-                            },
-                            TextColor(Color::srgb(0.70, 0.78, 0.85)),
-                            FocusPolicy::Pass,
-                        ));
-                    });
+                // Right Panel: Interactive Context-Sensitive Command Card
+                spawn_command_card_ui(bottom_row);
             });
         });
 }

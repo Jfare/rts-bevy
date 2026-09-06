@@ -270,6 +270,7 @@ fn handle_minimap_input(
     mut minimap_state: ResMut<MinimapState>,
     grid_cfg: Option<Res<WorldGridConfig>>,
     net_client: Res<NetClient>,
+    mut attack_move_pending: ResMut<crate::ui::AttackMovePending>,
     mut unit_query: Query<(Entity, &Faction, &Selectable, &mut MoveTarget, Option<&NetEntity>), (With<Unit>, Without<Building>)>,
 ) {
     let Ok(window) = window_query.get_single() else {
@@ -310,7 +311,8 @@ fn handle_minimap_input(
     // 2. Right-Click: Issue Squad Move / Attack Order via Minimap
     if mouse_button.just_pressed(MouseButton::Right) && is_inside {
         let target_world_pos = minimap_screen_to_world(cursor_pos, config, &mm_rect);
-        let is_attack_move = keyboard.pressed(KeyCode::KeyA);
+        let is_attack_move = keyboard.pressed(KeyCode::KeyA) || attack_move_pending.0;
+        attack_move_pending.0 = false;
         let my_faction = net_client.my_faction;
 
         let mut unit_net_ids = Vec::new();

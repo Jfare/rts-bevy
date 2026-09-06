@@ -11,6 +11,7 @@ use crate::audio_sfx::SoundEffect;
 use crate::fog_of_war::{FogOfWarGrid, FogState};
 use crate::net::{NetClient, NetStatus};
 use crate::selection::screen_to_world_2d;
+use crate::ui::AttackMovePending;
 
 /// Visual expanding and fading marker at ground destination when right-clicking
 #[derive(Component)]
@@ -41,8 +42,10 @@ impl Plugin for CommandMarkerPlugin {
 fn handle_right_click_orders(
     mut commands: Commands,
     mouse_button: Res<ButtonInput<MouseButton>>,
+    keyboard: Res<ButtonInput<KeyCode>>,
     net_client: Res<NetClient>,
     outcome_opt: Option<Res<MatchOutcome>>,
+    mut attack_move_pending: ResMut<AttackMovePending>,
     nav_grid: Res<NavGrid>,
     grid_cfg: Option<Res<WorldGridConfig>>,
     fog: Res<FogOfWarGrid>,
@@ -189,12 +192,15 @@ fn handle_right_click_orders(
 
     sound_events.send(SoundEffect::OrderIssued);
 
-    // Send networked command if online (pure Ground Move)
+    let is_attack_move = keyboard.pressed(KeyCode::KeyA) || attack_move_pending.0;
+    attack_move_pending.0 = false;
+
+    // Send networked command if online
     if net_client.status != NetStatus::Disconnected && !selected_net_ids.is_empty() {
         net_client.send(&ClientMessage::RequestMove {
             unit_net_ids: selected_net_ids,
             target_position: target_world_pos,
-            is_attack_move: false,
+            is_attack_move,
         });
     }
 
@@ -217,11 +223,19 @@ fn handle_right_click_orders(
             // Ground Move cancels any current attack target immediately!
             if let Some(mut soldier) = soldier_opt {
                 soldier.target = None;
-                soldier.state = SoldierState::MovingToGround;
+                soldier.state = if is_attack_move {
+                    SoldierState::AttackMoving
+                } else {
+                    SoldierState::MovingToGround
+                };
             }
             if let Some(mut melee) = melee_opt {
                 melee.target = None;
-                melee.state = SoldierState::MovingToGround;
+                melee.state = if is_attack_move {
+                    SoldierState::AttackMoving
+                } else {
+                    SoldierState::MovingToGround
+                };
             }
 
             if let Some(mut stance) = stance_opt {
@@ -230,26 +244,32 @@ fn handle_right_click_orders(
 
             if let Some(mut existing_target) = move_target_opt {
                 existing_target.destination = destination;
-                existing_target.is_attack_move = false;
+                existing_target.is_attack_move = is_attack_move;
                 existing_target.waypoints = waypoints;
                 existing_target.current_waypoint_idx = 0;
             } else {
                 commands.entity(*entity).insert(MoveTarget::with_waypoints(
                     destination,
-                    false,
+                    is_attack_move,
                     waypoints,
                 ));
             }
         }
     }
 
-    // 3. Spawn visual tactical pulse marker (Bright green for ground move)
+    // 3. Spawn visual tactical pulse marker
+    let marker_color = if is_attack_move {
+        Color::srgba(0.95, 0.45, 0.20, 0.95) // Orange/Red for Attack-Move
+    } else {
+        Color::srgba(0.25, 0.95, 0.45, 0.95) // Bright green for Move
+    };
+
     commands.spawn((
         CommandMarker {
             lifetime: 0.0,
             max_lifetime: 0.45,
             initial_radius: 20.0,
-            color: Color::srgba(0.25, 0.95, 0.45, 0.95), // Bright green for Move
+            color: marker_color,
         },
         Transform::from_xyz(target_world_pos.x, target_world_pos.y, 1.0),
     ));
@@ -261,6 +281,7 @@ fn handle_stance_and_ability_hotkeys(
     keyboard: Res<ButtonInput<KeyCode>>,
     net_client: Res<NetClient>,
     outcome_opt: Option<Res<MatchOutcome>>,
+    mut attack_move_pending: ResMut<AttackMovePending>,
     mut sound_events: EventWriter<SoundEffect>,
     mut unit_query: Query<(
         Entity,
@@ -280,8 +301,13 @@ fn handle_stance_and_ability_hotkeys(
 
     let my_faction = net_client.my_faction;
 
+    if keyboard.just_pressed(KeyCode::Escape) {
+        attack_move_pending.0 = false;
+    }
+
     // 1. [S] Key: Stop Order
     if keyboard.just_pressed(KeyCode::KeyS) {
+        attack_move_pending.0 = false;
         let mut net_ids = Vec::new();
         for (entity, _, faction, selectable, net_opt, _, mut soldier_opt, mut melee_opt, mut stance_opt) in &mut unit_query {
             if *faction == my_faction && selectable.is_selected {
@@ -311,6 +337,7 @@ fn handle_stance_and_ability_hotkeys(
 
     // 2. [H] Key: Hold Position Order
     if keyboard.just_pressed(KeyCode::KeyH) {
+        attack_move_pending.0 = false;
         let mut net_ids = Vec::new();
         for (entity, _, faction, selectable, net_opt, _, mut soldier_opt, mut melee_opt, mut stance_opt) in &mut unit_query {
             if *faction == my_faction && selectable.is_selected {
@@ -338,6 +365,12 @@ fn handle_stance_and_ability_hotkeys(
         }
         sound_events.send(SoundEffect::OrderIssued);
         info!("🛡️ [Stance] Hold Position command issued to selected units");
+    }
+
+    // 3. [A] Key: Toggle Attack-Move order mode
+    if keyboard.just_pressed(KeyCode::KeyA) {
+        attack_move_pending.0 = !attack_move_pending.0;
+        info!("⚔️ [Stance] Attack-Move armed: {}", attack_move_pending.0);
     }
 }
 

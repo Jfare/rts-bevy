@@ -1,3 +1,4 @@
+pub mod command_card;
 pub mod countdown;
 pub mod hud_systems;
 pub mod layout;
@@ -8,6 +9,11 @@ use bevy::prelude::*;
 use shared::components::AppState;
 use shared::protocol::FactionColor;
 
+pub use command_card::{
+    handle_command_card_interactions_system, spawn_command_card_ui,
+    update_attack_move_visuals_system, update_command_card_visibility_system,
+    AttackMovePending,
+};
 pub use countdown::update_match_countdown_system;
 pub use hud_systems::{
     update_command_card_text, update_hud_economy_text, update_hud_network_status,
@@ -27,6 +33,7 @@ pub struct RtsUiPlugin;
 impl Plugin for RtsUiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MatchCountdown>()
+            .init_resource::<AttackMovePending>()
             .add_systems(Startup, setup_hud)
             .add_systems(OnEnter(AppState::InGame), close_menu_on_game_start)
             .add_systems(
@@ -36,6 +43,9 @@ impl Plugin for RtsUiPlugin {
                     update_hud_network_status,
                     update_selection_info_text,
                     update_command_card_text,
+                    update_command_card_visibility_system,
+                    handle_command_card_interactions_system,
+                    update_attack_move_visuals_system,
                     update_match_outcome_banner,
                     update_match_countdown_system,
                     handle_lobby_button_interactions,
