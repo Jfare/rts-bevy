@@ -1,6 +1,5 @@
 use bevy::prelude::*;
 use shared::components::*;
-use shared::economy::PlayerEconomy;
 use shared::grid::NavGrid;
 use shared::protocol::{ServerMessage, UnitKind};
 
@@ -13,7 +12,6 @@ pub fn server_production_system(
     time: Res<Time>,
     net_channels: Res<ServerNetworkChannels>,
     mut matchmaker: ResMut<Matchmaker>,
-    mut economy: ResMut<PlayerEconomy>,
     nav_grid: Res<NavGrid>,
     mut buildings: Query<(
         Entity,
@@ -40,7 +38,9 @@ pub fn server_production_system(
             if building.build_timer >= building.build_duration {
                 building.is_constructed = true;
                 if let Some(depot) = supply_depot_opt {
-                    economy.add_max_supply(*faction, depot.supply_provided);
+                    if let Some(room) = matchmaker.rooms.get_mut(&room_id.0) {
+                        room.economy.add_max_supply(*faction, depot.supply_provided);
+                    }
                 }
             }
         }

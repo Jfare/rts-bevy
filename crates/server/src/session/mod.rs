@@ -2,6 +2,7 @@ pub mod spawner;
 
 use bevy::prelude::*;
 use shared::components::*;
+use shared::economy::PlayerEconomy;
 use shared::protocol::{FactionColor, GameMode};
 use std::collections::HashMap;
 
@@ -28,6 +29,41 @@ pub struct Room {
     pub countdown_timer: f32,
     pub current_wave: u32,
     pub time_until_next_wave: f32,
+    pub economy: PlayerEconomy,
+}
+
+impl Room {
+    pub fn new(
+        room_id: u32,
+        room_code: Option<String>,
+        mode: GameMode,
+        p1_peer: Option<u64>,
+        p2_peer: Option<u64>,
+    ) -> Self {
+        let mut economy = PlayerEconomy::new();
+        // 2 starting workers for Player 1 = 2 supply
+        economy.register_supply(Faction::Player1, 2);
+        let p2_faction = match mode {
+            GameMode::SoloVsAi => Faction::HostileAi,
+            GameMode::Multiplayer1v1 | GameMode::CustomPrivate => Faction::Player2,
+        };
+        // 2 starting workers for Player 2 / AI = 2 supply
+        economy.register_supply(p2_faction, 2);
+
+        Self {
+            room_id,
+            room_code,
+            mode,
+            p1_peer,
+            p2_peer,
+            is_active: true,
+            match_time: 0.0,
+            countdown_timer: 0.0,
+            current_wave: 0,
+            time_until_next_wave: 40.0,
+            economy,
+        }
+    }
 }
 
 pub const MAX_ACTIVE_PVP_MATCHES: usize = 10;
@@ -238,18 +274,7 @@ mod tests {
         );
         matchmaker.rooms.insert(
             1,
-            Room {
-                room_id: 1,
-                room_code: None,
-                mode: GameMode::Multiplayer1v1,
-                p1_peer: Some(101),
-                p2_peer: Some(102),
-                is_active: true,
-                match_time: 0.0,
-                countdown_timer: 0.0,
-                current_wave: 0,
-                time_until_next_wave: 40.0,
-            },
+            Room::new(1, None, GameMode::Multiplayer1v1, Some(101), Some(102)),
         );
 
         // Set up Room 2 (Solo: peer 201)
@@ -265,18 +290,7 @@ mod tests {
         );
         matchmaker.rooms.insert(
             2,
-            Room {
-                room_id: 2,
-                room_code: None,
-                mode: GameMode::SoloVsAi,
-                p1_peer: Some(201),
-                p2_peer: None,
-                is_active: true,
-                match_time: 0.0,
-                countdown_timer: 0.0,
-                current_wave: 0,
-                time_until_next_wave: 40.0,
-            },
+            Room::new(2, None, GameMode::SoloVsAi, Some(201), None),
         );
 
         // Verify lookups
@@ -303,18 +317,7 @@ mod tests {
         // Add 1v1 match and Solo match
         matchmaker.rooms.insert(
             1,
-            Room {
-                room_id: 1,
-                room_code: None,
-                mode: GameMode::Multiplayer1v1,
-                p1_peer: Some(101),
-                p2_peer: Some(102),
-                is_active: true,
-                match_time: 0.0,
-                countdown_timer: 0.0,
-                current_wave: 0,
-                time_until_next_wave: 40.0,
-            },
+            Room::new(1, None, GameMode::Multiplayer1v1, Some(101), Some(102)),
         );
         matchmaker.players.insert(
             101,
@@ -339,18 +342,7 @@ mod tests {
 
         matchmaker.rooms.insert(
             2,
-            Room {
-                room_id: 2,
-                room_code: None,
-                mode: GameMode::SoloVsAi,
-                p1_peer: Some(201),
-                p2_peer: None,
-                is_active: true,
-                match_time: 0.0,
-                countdown_timer: 0.0,
-                current_wave: 0,
-                time_until_next_wave: 40.0,
-            },
+            Room::new(2, None, GameMode::SoloVsAi, Some(201), None),
         );
         matchmaker.players.insert(
             201,

@@ -1,6 +1,5 @@
 use bevy::prelude::*;
 use shared::components::*;
-use shared::economy::PlayerEconomy;
 use shared::protocol::{FactionColor, GameMode, ServerMessage};
 
 use crate::net_server::{OutgoingNetEvent, ServerNetworkChannels};
@@ -11,7 +10,6 @@ pub fn handle_join_lobby(
     commands: &mut Commands,
     net_channels: &Res<ServerNetworkChannels>,
     matchmaker: &mut ResMut<Matchmaker>,
-    economy: &mut ResMut<PlayerEconomy>,
     peer_id: u64,
     player_name: String,
     mode: GameMode,
@@ -46,21 +44,13 @@ pub fn handle_join_lobby(
                 },
             );
 
-            matchmaker.rooms.insert(
-                room_id,
-                Room {
-                    room_id,
-                    room_code: None,
-                    mode,
-                    p1_peer: Some(peer_id),
-                    p2_peer: None,
-                    is_active: true,
-                    match_time: 0.0,
-                    countdown_timer: 0.0,
-                    current_wave: 0,
-                    time_until_next_wave: 40.0,
-                },
-            );
+            let room = Room::new(room_id, None, mode, Some(peer_id), None);
+            let (p1_cur_sup, p1_max_sup) = room.economy.get_supply(Faction::Player1);
+            let (ai_cur_sup, ai_max_sup) = room.economy.get_supply(Faction::HostileAi);
+            let p1_minerals = room.economy.get_minerals(Faction::Player1);
+            let p2_minerals = room.economy.get_minerals(Faction::HostileAi);
+
+            matchmaker.rooms.insert(room_id, room);
 
             let initial_entities = spawn_match_entities(
                 commands,
@@ -70,9 +60,6 @@ pub fn handle_join_lobby(
                 peer_id,
                 None,
             );
-
-            let (p1_cur_sup, p1_max_sup) = economy.get_supply(Faction::Player1);
-            let (ai_cur_sup, ai_max_sup) = economy.get_supply(Faction::HostileAi);
 
             let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::SendToPeer {
                 peer_id,
@@ -98,10 +85,10 @@ pub fn handle_join_lobby(
                 peer_id,
                 msg: ServerMessage::InitialWorldState {
                     entities: initial_entities,
-                    p1_minerals: economy.get_minerals(Faction::Player1),
+                    p1_minerals,
                     p1_supply: p1_cur_sup,
                     p1_max_supply: p1_max_sup,
-                    p2_minerals: economy.get_minerals(Faction::HostileAi),
+                    p2_minerals,
                     p2_supply: ai_cur_sup,
                     p2_max_supply: ai_max_sup,
                 },
@@ -184,21 +171,15 @@ pub fn handle_join_lobby(
                     },
                 );
 
-                matchmaker.rooms.insert(
-                    room_id,
-                    Room {
-                        room_id,
-                        room_code: None,
-                        mode,
-                        p1_peer: Some(waiting_p1),
-                        p2_peer: Some(peer_id),
-                        is_active: true,
-                        match_time: 0.0,
-                        countdown_timer: 3.0,
-                        current_wave: 0,
-                        time_until_next_wave: 40.0,
-                    },
-                );
+                let mut room = Room::new(room_id, None, mode, Some(waiting_p1), Some(peer_id));
+                room.countdown_timer = 3.0;
+
+                let (p1_cur_sup, p1_max_sup) = room.economy.get_supply(Faction::Player1);
+                let (p2_cur_sup, p2_max_sup) = room.economy.get_supply(Faction::Player2);
+                let p1_minerals = room.economy.get_minerals(Faction::Player1);
+                let p2_minerals = room.economy.get_minerals(Faction::Player2);
+
+                matchmaker.rooms.insert(room_id, room);
 
                 let initial_entities = spawn_match_entities(
                     commands,
@@ -208,9 +189,6 @@ pub fn handle_join_lobby(
                     waiting_p1,
                     Some(peer_id),
                 );
-
-                let (p1_cur_sup, p1_max_sup) = economy.get_supply(Faction::Player1);
-                let (p2_cur_sup, p2_max_sup) = economy.get_supply(Faction::Player2);
 
                 for (p_id, faction, opp_name, opp_color) in [
                     (waiting_p1, Faction::Player1, player_name.clone(), p2_color),
@@ -249,10 +227,10 @@ pub fn handle_join_lobby(
                         peer_id: p_id,
                         msg: ServerMessage::InitialWorldState {
                             entities: initial_entities.clone(),
-                            p1_minerals: economy.get_minerals(Faction::Player1),
+                            p1_minerals,
                             p1_supply: p1_cur_sup,
                             p1_max_supply: p1_max_sup,
-                            p2_minerals: economy.get_minerals(Faction::Player2),
+                            p2_minerals,
                             p2_supply: p2_cur_sup,
                             p2_max_supply: p2_max_sup,
                         },
@@ -367,8 +345,19 @@ pub fn handle_join_lobby(
                         Some(peer_id),
                     );
 
-                    let (p1_cur_sup, p1_max_sup) = economy.get_supply(Faction::Player1);
-                    let (p2_cur_sup, p2_max_sup) = economy.get_supply(Faction::Player2);
+                    let (p1_cur_sup, p1_max_sup, p1_minerals, p2_cur_sup, p2_max_sup, p2_minerals) = {
+                        let room = matchmaker.rooms.get(&target_room_id).unwrap();
+                        let (p1_c, p1_m) = room.economy.get_supply(Faction::Player1);
+                        let (p2_c, p2_m) = room.economy.get_supply(Faction::Player2);
+                        (
+                            p1_c,
+                            p1_m,
+                            room.economy.get_minerals(Faction::Player1),
+                            p2_c,
+                            p2_m,
+                            room.economy.get_minerals(Faction::Player2),
+                        )
+                    };
 
                     for (p_id, faction, opp_name, opp_color) in [
                         (waiting_p1, Faction::Player1, player_name.clone(), p2_color),
@@ -407,10 +396,10 @@ pub fn handle_join_lobby(
                             peer_id: p_id,
                             msg: ServerMessage::InitialWorldState {
                                 entities: initial_entities.clone(),
-                                p1_minerals: economy.get_minerals(Faction::Player1),
+                                p1_minerals,
                                 p1_supply: p1_cur_sup,
                                 p1_max_supply: p1_max_sup,
-                                p2_minerals: economy.get_minerals(Faction::Player2),
+                                p2_minerals,
                                 p2_supply: p2_cur_sup,
                                 p2_max_supply: p2_max_sup,
                             },
@@ -466,21 +455,16 @@ pub fn handle_join_lobby(
                     },
                 );
 
-                matchmaker.rooms.insert(
+                let mut room = Room::new(
                     room_id,
-                    Room {
-                        room_id,
-                        room_code: Some(generated_code.clone()),
-                        mode: GameMode::CustomPrivate,
-                        p1_peer: Some(peer_id),
-                        p2_peer: None,
-                        is_active: false,
-                        match_time: 0.0,
-                        countdown_timer: 0.0,
-                        current_wave: 0,
-                        time_until_next_wave: 40.0,
-                    },
+                    Some(generated_code.clone()),
+                    GameMode::CustomPrivate,
+                    Some(peer_id),
+                    None,
                 );
+                room.is_active = false;
+
+                matchmaker.rooms.insert(room_id, room);
 
                 let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::SendToPeer {
                     peer_id,
@@ -490,17 +474,6 @@ pub fn handle_join_lobby(
                         room_id,
                         room_code: Some(generated_code.clone()),
                         is_game_ready: false,
-                    },
-                });
-
-                let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::SendToPeer {
-                    peer_id,
-                    msg: ServerMessage::ChatMessageReceived {
-                        sender_name: "SYSTEM".to_string(),
-                        faction: Faction::Neutral,
-                        color: FactionColor::Amber,
-                        text: format!("Private Room created! Share code [{}] with your opponent to join.", generated_code),
-                        is_system: true,
                     },
                 });
 

@@ -1,6 +1,5 @@
 use bevy::prelude::*;
 use shared::components::*;
-use shared::economy::PlayerEconomy;
 use shared::protocol::{EntitySnapshot, GameMode, ServerMessage};
 
 use crate::net_server::{OutgoingNetEvent, ServerNetworkChannels};
@@ -13,7 +12,6 @@ pub fn server_tick_snapshot_system(
     mut tick_timer: ResMut<ServerTickTimer>,
     net_channels: Res<ServerNetworkChannels>,
     matchmaker: Res<Matchmaker>,
-    economy: Res<PlayerEconomy>,
     entities_query: Query<(
         &NetEntity,
         &Transform,
@@ -72,23 +70,23 @@ pub fn server_tick_snapshot_system(
                 });
             }
 
-            let (p1_cur_sup, p1_max_sup) = economy.get_supply(Faction::Player1);
+            let (p1_cur_sup, p1_max_sup) = room.economy.get_supply(Faction::Player1);
             let p2_faction = if room.mode == GameMode::SoloVsAi {
                 Faction::HostileAi
             } else {
                 Faction::Player2
             };
-            let (p2_cur_sup, p2_max_sup) = economy.get_supply(p2_faction);
+            let (p2_cur_sup, p2_max_sup) = room.economy.get_supply(p2_faction);
 
             let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::BroadcastToPeers {
                 peer_ids: peers,
                 msg: ServerMessage::TickSnapshotBatch {
                     tick: *tick_counter,
                     snapshots: room_snapshots,
-                    p1_minerals: economy.get_minerals(Faction::Player1),
+                    p1_minerals: room.economy.get_minerals(Faction::Player1),
                     p1_supply: p1_cur_sup,
                     p1_max_supply: p1_max_sup,
-                    p2_minerals: economy.get_minerals(p2_faction),
+                    p2_minerals: room.economy.get_minerals(p2_faction),
                     p2_supply: p2_cur_sup,
                     p2_max_supply: p2_max_sup,
                     next_wave_seconds: room.time_until_next_wave,

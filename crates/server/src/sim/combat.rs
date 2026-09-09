@@ -1,6 +1,5 @@
 use bevy::prelude::*;
 use shared::components::*;
-use shared::economy::PlayerEconomy;
 use shared::protocol::ServerMessage;
 
 use crate::net_server::{OutgoingNetEvent, ServerNetworkChannels};
@@ -23,8 +22,7 @@ pub fn server_combat_system(
     mut commands: Commands,
     time: Res<Time>,
     net_channels: Res<ServerNetworkChannels>,
-    matchmaker: Res<Matchmaker>,
-    mut economy: ResMut<PlayerEconomy>,
+    mut matchmaker: ResMut<Matchmaker>,
     mut queries: ParamSet<(
         Query<(
             Entity,
@@ -241,12 +239,18 @@ pub fn server_combat_system(
 
                 if hp.is_dead() {
                     if supply_cost > 0 {
-                        let victim_faction = if attacker_fac == Faction::Player1 {
-                            Faction::Player2
-                        } else {
-                            Faction::Player1
-                        };
-                        economy.unregister_supply(victim_faction, supply_cost);
+                        if let Some(room) = matchmaker.rooms.get_mut(&attacker_room_id) {
+                            let victim_faction = if attacker_fac == Faction::Player1 {
+                                if room.mode == shared::protocol::GameMode::SoloVsAi {
+                                    Faction::HostileAi
+                                } else {
+                                    Faction::Player2
+                                }
+                            } else {
+                                Faction::Player1
+                            };
+                            room.economy.unregister_supply(victim_faction, supply_cost);
+                        }
                     }
 
                     let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::BroadcastToPeers {
@@ -269,8 +273,7 @@ pub fn server_turret_combat_system(
     mut commands: Commands,
     time: Res<Time>,
     net_channels: Res<ServerNetworkChannels>,
-    matchmaker: Res<Matchmaker>,
-    mut economy: ResMut<PlayerEconomy>,
+    mut matchmaker: ResMut<Matchmaker>,
     mut queries: ParamSet<(
         Query<(
             Entity,
@@ -397,12 +400,18 @@ pub fn server_turret_combat_system(
 
                 if hp.is_dead() {
                     if supply_cost > 0 {
-                        let victim_faction = if attacker_fac == Faction::Player1 {
-                            Faction::Player2
-                        } else {
-                            Faction::Player1
-                        };
-                        economy.unregister_supply(victim_faction, supply_cost);
+                        if let Some(room) = matchmaker.rooms.get_mut(&attacker_room_id) {
+                            let victim_faction = if attacker_fac == Faction::Player1 {
+                                if room.mode == shared::protocol::GameMode::SoloVsAi {
+                                    Faction::HostileAi
+                                } else {
+                                    Faction::Player2
+                                }
+                            } else {
+                                Faction::Player1
+                            };
+                            room.economy.unregister_supply(victim_faction, supply_cost);
+                        }
                     }
 
                     let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::BroadcastToPeers {
@@ -425,8 +434,7 @@ pub fn server_melee_fighter_combat_system(
     mut commands: Commands,
     time: Res<Time>,
     net_channels: Res<ServerNetworkChannels>,
-    matchmaker: Res<Matchmaker>,
-    mut economy: ResMut<PlayerEconomy>,
+    mut matchmaker: ResMut<Matchmaker>,
     mut queries: ParamSet<(
         Query<(
             Entity,
@@ -589,12 +597,18 @@ pub fn server_melee_fighter_combat_system(
 
                 if hp.is_dead() {
                     if supply_cost > 0 {
-                        let victim_faction = if attacker_fac == Faction::Player1 {
-                            Faction::Player2
-                        } else {
-                            Faction::Player1
-                        };
-                        economy.unregister_supply(victim_faction, supply_cost);
+                        if let Some(room) = matchmaker.rooms.get_mut(&attacker_room_id) {
+                            let victim_faction = if attacker_fac == Faction::Player1 {
+                                if room.mode == shared::protocol::GameMode::SoloVsAi {
+                                    Faction::HostileAi
+                                } else {
+                                    Faction::Player2
+                                }
+                            } else {
+                                Faction::Player1
+                            };
+                            room.economy.unregister_supply(victim_faction, supply_cost);
+                        }
                     }
 
                     let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::BroadcastToPeers {

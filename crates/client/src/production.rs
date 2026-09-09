@@ -261,8 +261,8 @@ fn handle_production_hotkeys(
         }
     }
 
-    // Key 'R' or 'M' for Ranged Fighter at Barracks
-    if keyboard.just_pressed(KeyCode::KeyR) || keyboard.just_pressed(KeyCode::KeyM) {
+    // Key 'R' for Ranged Fighter at Barracks
+    if keyboard.just_pressed(KeyCode::KeyR) {
         for (mut prod, building, faction, selectable, net_entity_opt, _, barracks) in &mut prod_query {
             if *faction == my_faction && selectable.is_selected && building.is_constructed && barracks.is_some() {
                 if prod.queue.len() >= prod.max_queue_size {

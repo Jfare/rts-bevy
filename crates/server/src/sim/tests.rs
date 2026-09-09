@@ -1,6 +1,7 @@
 use super::*;
 use crate::net_server::{IncomingNetEvent, OutgoingNetEvent, ServerNetworkChannels};
 use crate::session::{Matchmaker, PlayerSession, Room};
+use shared::components::*;
 use shared::economy::PlayerEconomy;
 use shared::grid::NavGrid;
 use shared::protocol::{ClientMessage, FactionColor, GameMode, PingType, ServerMessage};
@@ -130,36 +131,15 @@ fn test_match_outcome_per_room_independence() {
     });
 
     let mut matchmaker = Matchmaker::new();
-    matchmaker.rooms.insert(
-        1,
-        Room {
-            room_id: 1,
-            room_code: None,
-            mode: GameMode::Multiplayer1v1,
-            p1_peer: Some(101),
-            p2_peer: Some(102),
-            is_active: true,
-            match_time: 25.0,
-            countdown_timer: 0.0,
-            current_wave: 0,
-            time_until_next_wave: 40.0,
-        },
-    );
-    matchmaker.rooms.insert(
-        2,
-        Room {
-            room_id: 2,
-            room_code: None,
-            mode: GameMode::SoloVsAi,
-            p1_peer: Some(201),
-            p2_peer: None,
-            is_active: true,
-            match_time: 50.0,
-            countdown_timer: 0.0,
-            current_wave: 2,
-            time_until_next_wave: 20.0,
-        },
-    );
+    let mut r1 = Room::new(1, None, GameMode::Multiplayer1v1, Some(101), Some(102));
+    r1.match_time = 25.0;
+    matchmaker.rooms.insert(1, r1);
+
+    let mut r2 = Room::new(2, None, GameMode::SoloVsAi, Some(201), None);
+    r2.match_time = 50.0;
+    r2.current_wave = 2;
+    r2.time_until_next_wave = 20.0;
+    matchmaker.rooms.insert(2, r2);
     app.insert_resource(matchmaker);
     app.add_systems(Update, server_match_outcome_system);
 
@@ -223,21 +203,11 @@ fn test_disconnect_cleans_up_room_entities_and_telemetry() {
             color: FactionColor::Blue,
         },
     );
-    matchmaker.rooms.insert(
-        1,
-        Room {
-            room_id: 1,
-            room_code: None,
-            mode: GameMode::SoloVsAi,
-            p1_peer: Some(101),
-            p2_peer: None,
-            is_active: true,
-            match_time: 10.0,
-            countdown_timer: 0.0,
-            current_wave: 1,
-            time_until_next_wave: 30.0,
-        },
-    );
+    let mut r1 = Room::new(1, None, GameMode::SoloVsAi, Some(101), None);
+    r1.match_time = 10.0;
+    r1.current_wave = 1;
+    r1.time_until_next_wave = 30.0;
+    matchmaker.rooms.insert(1, r1);
     app.insert_resource(matchmaker);
     app.add_systems(Update, handle_incoming_network_events);
 
@@ -293,21 +263,11 @@ fn test_forfeit_cleans_up_room_entities_and_telemetry() {
             color: FactionColor::Blue,
         },
     );
-    matchmaker.rooms.insert(
-        1,
-        Room {
-            room_id: 1,
-            room_code: None,
-            mode: GameMode::SoloVsAi,
-            p1_peer: Some(101),
-            p2_peer: None,
-            is_active: true,
-            match_time: 5.0,
-            countdown_timer: 0.0,
-            current_wave: 1,
-            time_until_next_wave: 30.0,
-        },
-    );
+    let mut r1 = Room::new(1, None, GameMode::SoloVsAi, Some(101), None);
+    r1.match_time = 5.0;
+    r1.current_wave = 1;
+    r1.time_until_next_wave = 30.0;
+    matchmaker.rooms.insert(1, r1);
     app.insert_resource(matchmaker);
     app.add_systems(Update, handle_incoming_network_events);
 
@@ -361,21 +321,11 @@ fn test_tick_snapshots_are_partitioned_per_room() {
             color: FactionColor::Blue,
         },
     );
-    matchmaker.rooms.insert(
-        1,
-        Room {
-            room_id: 1,
-            room_code: None,
-            mode: GameMode::SoloVsAi,
-            p1_peer: Some(101),
-            p2_peer: None,
-            is_active: true,
-            match_time: 5.0,
-            countdown_timer: 0.0,
-            current_wave: 1,
-            time_until_next_wave: 30.0,
-        },
-    );
+    let mut r1 = Room::new(1, None, GameMode::SoloVsAi, Some(101), None);
+    r1.match_time = 5.0;
+    r1.current_wave = 1;
+    r1.time_until_next_wave = 30.0;
+    matchmaker.rooms.insert(1, r1);
 
     matchmaker.players.insert(
         201,
@@ -387,21 +337,11 @@ fn test_tick_snapshots_are_partitioned_per_room() {
             color: FactionColor::Teal,
         },
     );
-    matchmaker.rooms.insert(
-        2,
-        Room {
-            room_id: 2,
-            room_code: None,
-            mode: GameMode::SoloVsAi,
-            p1_peer: Some(201),
-            p2_peer: None,
-            is_active: true,
-            match_time: 15.0,
-            countdown_timer: 0.0,
-            current_wave: 3,
-            time_until_next_wave: 10.0,
-        },
-    );
+    let mut r2 = Room::new(2, None, GameMode::SoloVsAi, Some(201), None);
+    r2.match_time = 15.0;
+    r2.current_wave = 3;
+    r2.time_until_next_wave = 10.0;
+    matchmaker.rooms.insert(2, r2);
     app.insert_resource(matchmaker);
     // Add a tick timer with 0s duration to trigger immediately
     app.insert_resource(ServerTickTimer(Timer::from_seconds(0.0, TimerMode::Repeating)));
@@ -570,21 +510,11 @@ fn test_chat_and_ping_dispatching() {
             color: FactionColor::Red,
         },
     );
-    matchmaker.rooms.insert(
-        1,
-        Room {
-            room_id: 1,
-            room_code: None,
-            mode: GameMode::Multiplayer1v1,
-            p1_peer: Some(101),
-            p2_peer: Some(102),
-            is_active: true,
-            match_time: 10.0,
-            countdown_timer: 0.0,
-            current_wave: 0,
-            time_until_next_wave: 40.0,
-        },
-    );
+    let mut r1 = Room::new(1, None, GameMode::Multiplayer1v1, Some(101), Some(102));
+    r1.match_time = 10.0;
+    r1.current_wave = 0;
+    r1.time_until_next_wave = 40.0;
+    matchmaker.rooms.insert(1, r1);
     app.insert_resource(matchmaker);
     app.add_systems(Update, handle_incoming_network_events);
 
@@ -643,23 +573,10 @@ fn test_ground_move_cancels_attack_and_preserves_movement() {
         tx_outgoing: tx_out,
     });
     let mut matchmaker = Matchmaker::new();
-    matchmaker.rooms.insert(
-        1,
-        Room {
-            room_id: 1,
-            room_code: None,
-            mode: GameMode::SoloVsAi,
-            p1_peer: Some(1),
-            p2_peer: None,
-            is_active: true,
-            match_time: 1.0,
-            countdown_timer: 0.0,
-            current_wave: 0,
-            time_until_next_wave: 40.0,
-        },
-    );
+    let mut r1 = Room::new(1, None, GameMode::SoloVsAi, Some(1), None);
+    r1.match_time = 1.0;
+    matchmaker.rooms.insert(1, r1);
     app.insert_resource(matchmaker);
-    app.insert_resource(PlayerEconomy::new());
 
     // Spawn a friendly soldier at (0, 0) with a MoveTarget to (500, 0)
     let friendly = app.world_mut().spawn((
@@ -718,23 +635,10 @@ fn test_idle_unit_auto_attacks_enemy_in_range_without_move_target() {
         tx_outgoing: tx_out,
     });
     let mut matchmaker = Matchmaker::new();
-    matchmaker.rooms.insert(
-        1,
-        Room {
-            room_id: 1,
-            room_code: None,
-            mode: GameMode::SoloVsAi,
-            p1_peer: Some(1),
-            p2_peer: None,
-            is_active: true,
-            match_time: 1.0,
-            countdown_timer: 0.0,
-            current_wave: 0,
-            time_until_next_wave: 40.0,
-        },
-    );
+    let mut r1 = Room::new(1, None, GameMode::SoloVsAi, Some(1), None);
+    r1.match_time = 1.0;
+    matchmaker.rooms.insert(1, r1);
     app.insert_resource(matchmaker);
-    app.insert_resource(PlayerEconomy::new());
 
     // Spawn an idle friendly soldier at (0, 0) with NO MoveTarget
     let friendly = app.world_mut().spawn((
@@ -881,23 +785,11 @@ fn test_attack_move_acquires_and_engages_enemy_on_encounter() {
         tx_outgoing: tx_out,
     });
     let mut matchmaker = Matchmaker::new();
-    matchmaker.rooms.insert(
-        1,
-        Room {
-            room_id: 1,
-            room_code: None,
-            mode: GameMode::SoloVsAi,
-            p1_peer: Some(1),
-            p2_peer: None,
-            is_active: true,
-            match_time: 1.0,
-            countdown_timer: 0.0,
-            current_wave: 1,
-            time_until_next_wave: 40.0,
-        },
-    );
+    let mut r1 = Room::new(1, None, GameMode::SoloVsAi, Some(1), None);
+    r1.match_time = 1.0;
+    r1.current_wave = 1;
+    matchmaker.rooms.insert(1, r1);
     app.insert_resource(matchmaker);
-    app.insert_resource(PlayerEconomy::new());
 
     // Spawn Hostile AI marine attack-moving towards player base at (1000, 0)
     let hostile = app.world_mut().spawn((
@@ -961,23 +853,13 @@ fn test_inactive_room_freezes_movement_and_combat() {
 
     // Set room.is_active = false (Match ended!)
     let mut matchmaker = Matchmaker::new();
-    matchmaker.rooms.insert(
-        1,
-        Room {
-            room_id: 1,
-            room_code: None,
-            mode: GameMode::SoloVsAi,
-            p1_peer: Some(1),
-            p2_peer: None,
-            is_active: false, // Inactive / Ended
-            match_time: 120.0,
-            countdown_timer: 0.0,
-            current_wave: 2,
-            time_until_next_wave: 0.0,
-        },
-    );
+    let mut r1 = Room::new(1, None, GameMode::SoloVsAi, Some(1), None);
+    r1.is_active = false;
+    r1.match_time = 120.0;
+    r1.current_wave = 2;
+    r1.time_until_next_wave = 0.0;
+    matchmaker.rooms.insert(1, r1);
     app.insert_resource(matchmaker);
-    app.insert_resource(PlayerEconomy::new());
 
     let unit = app.world_mut().spawn((
         NetEntity { net_id: 1, owner_peer_id: 1 },
@@ -1101,4 +983,163 @@ fn test_match_found_triggers_3s_countdown() {
     }
     assert_eq!(match_found_count, 2, "Both players must receive MatchFound message");
 }
+
+#[test]
+fn test_room_economy_isolation() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    let (tx_in, rx_in) = crossbeam_channel::unbounded();
+    let (tx_out, _rx_out) = tokio::sync::mpsc::unbounded_channel();
+    app.insert_resource(ServerNetworkChannels {
+        rx_incoming: rx_in,
+        tx_outgoing: tx_out,
+    });
+    app.insert_resource(Matchmaker::new());
+    app.insert_resource(NavGrid::default());
+    app.add_systems(Update, handle_incoming_network_events);
+
+    // 1. Peer 101 starts Solo game -> Room 1
+    tx_in.send(IncomingNetEvent::MessageReceived {
+        peer_id: 101,
+        msg: ClientMessage::JoinLobby {
+            player_name: "Commander 1".to_string(),
+            mode: GameMode::SoloVsAi,
+            room_code: None,
+            faction_color: Some(FactionColor::Blue),
+        },
+    }).unwrap();
+    app.update();
+
+    // 2. Peer 201 starts Solo game -> Room 2
+    tx_in.send(IncomingNetEvent::MessageReceived {
+        peer_id: 201,
+        msg: ClientMessage::JoinLobby {
+            player_name: "Commander 2".to_string(),
+            mode: GameMode::SoloVsAi,
+            room_code: None,
+            faction_color: Some(FactionColor::Teal),
+        },
+    }).unwrap();
+    app.update();
+
+    let mut mm = app.world_mut().resource_mut::<Matchmaker>();
+    let r1 = mm.rooms.get_mut(&1).expect("Room 1 must exist");
+    assert_eq!(r1.economy.get_minerals(Faction::Player1), 200);
+    assert_eq!(r1.economy.get_supply(Faction::Player1), (2, 10));
+
+    // Room 1 gathers minerals
+    r1.economy.add_minerals(Faction::Player1, 350);
+    assert_eq!(r1.economy.get_minerals(Faction::Player1), 550);
+
+    // Room 2 economy must remain completely untouched!
+    let r2 = mm.rooms.get(&2).expect("Room 2 must exist");
+    assert_eq!(
+        r2.economy.get_minerals(Faction::Player1),
+        200,
+        "Room 2 minerals must remain 200 despite Room 1 mining"
+    );
+    assert_eq!(
+        r2.economy.get_supply(Faction::Player1),
+        (2, 10),
+        "Room 2 supply must remain untouched"
+    );
+}
+
+#[test]
+fn test_consecutive_matches_have_fresh_economy() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    let (tx_in, rx_in) = crossbeam_channel::unbounded();
+    let (tx_out, mut rx_out) = tokio::sync::mpsc::unbounded_channel();
+    app.insert_resource(ServerNetworkChannels {
+        rx_incoming: rx_in,
+        tx_outgoing: tx_out,
+    });
+    app.insert_resource(Matchmaker::new());
+    app.insert_resource(NavGrid::default());
+    app.add_systems(Update, handle_incoming_network_events);
+
+    // 1. Peer 101 starts Match 1 (SoloVsAi)
+    tx_in.send(IncomingNetEvent::MessageReceived {
+        peer_id: 101,
+        msg: ClientMessage::JoinLobby {
+            player_name: "Commander".to_string(),
+            mode: GameMode::SoloVsAi,
+            room_code: None,
+            faction_color: Some(FactionColor::Blue),
+        },
+    }).unwrap();
+    app.update();
+
+    // Drain initial outgoing messages
+    while rx_out.try_recv().is_ok() {}
+
+    // 2. Mutate Match 1 economy (player collected 1000 minerals in game 1)
+    {
+        let mut mm = app.world_mut().resource_mut::<Matchmaker>();
+        let r1 = mm.rooms.get_mut(&1).expect("Room 1 must exist");
+        r1.economy.add_minerals(Faction::Player1, 1000);
+        assert_eq!(r1.economy.get_minerals(Faction::Player1), 1200);
+    }
+
+    // 3. Peer 101 forfeits/closes Match 1
+    tx_in.send(IncomingNetEvent::MessageReceived {
+        peer_id: 101,
+        msg: ClientMessage::ForfeitMatch,
+    }).unwrap();
+    app.update();
+
+    // Verify room 1 was cleaned up
+    {
+        let mm = app.world().resource::<Matchmaker>();
+        assert!(!mm.rooms.contains_key(&1), "Room 1 must be removed after forfeit");
+    }
+
+    // Drain messages from forfeit
+    while rx_out.try_recv().is_ok() {}
+
+    // 4. Peer 101 starts a brand new match (Match 2)
+    tx_in.send(IncomingNetEvent::MessageReceived {
+        peer_id: 101,
+        msg: ClientMessage::JoinLobby {
+            player_name: "Commander".to_string(),
+            mode: GameMode::SoloVsAi,
+            room_code: None,
+            faction_color: Some(FactionColor::Blue),
+        },
+    }).unwrap();
+    app.update();
+
+    // Check newly created Room 2 economy
+    let mm = app.world().resource::<Matchmaker>();
+    let r2 = mm.rooms.get(&2).expect("Room 2 must exist");
+    assert_eq!(
+        r2.economy.get_minerals(Faction::Player1),
+        200,
+        "New match must start with exactly 200 minerals, not lingering minerals from previous game"
+    );
+    assert_eq!(
+        r2.economy.get_supply(Faction::Player1),
+        (2, 10),
+        "New match must start with 2 supply for 2 workers"
+    );
+
+    // Verify InitialWorldState sent to client has fresh minerals
+    let mut initial_state_minerals = None;
+    while let Ok(ev) = rx_out.try_recv() {
+        if let OutgoingNetEvent::SendToPeer {
+            msg: ServerMessage::InitialWorldState { p1_minerals, .. },
+            ..
+        } = ev
+        {
+            initial_state_minerals = Some(p1_minerals);
+        }
+    }
+    assert_eq!(
+        initial_state_minerals,
+        Some(200),
+        "Client must receive InitialWorldState with 200 minerals on fresh match"
+    );
+}
+
 

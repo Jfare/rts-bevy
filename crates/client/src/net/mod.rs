@@ -170,6 +170,10 @@ pub fn cleanup_on_lobby_enter(
     mut outcome_opt: Option<ResMut<MatchOutcome>>,
     mut countdown_opt: Option<ResMut<crate::ui::MatchCountdown>>,
     mut wave_ai_opt: Option<ResMut<bot_ai::WaveAiState>>,
+    mut economy_opt: Option<ResMut<PlayerEconomy>>,
+    mut stats_opt: Option<ResMut<crate::stats::MatchStats>>,
+    mut placement_opt: Option<ResMut<crate::placement::PlacementState>>,
+    mut attack_move_opt: Option<ResMut<crate::ui::AttackMovePending>>,
 ) {
     info!("🧹 [AppState::Lobby] Cleaning up match entities and resetting match state.");
     for ent in cleanup_query.iter() {
@@ -186,6 +190,18 @@ pub fn cleanup_on_lobby_enter(
     }
     if let Some(ref mut wave) = wave_ai_opt {
         wave.is_active = false;
+    }
+    if let Some(ref mut economy) = economy_opt {
+        **economy = PlayerEconomy::new();
+    }
+    if let Some(ref mut stats) = stats_opt {
+        **stats = crate::stats::MatchStats::default();
+    }
+    if let Some(ref mut placement) = placement_opt {
+        **placement = crate::placement::PlacementState::default();
+    }
+    if let Some(ref mut attack_move) = attack_move_opt {
+        attack_move.0 = false;
     }
 }
 

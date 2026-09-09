@@ -1,6 +1,4 @@
 use bevy::prelude::*;
-use shared::components::*;
-use shared::economy::PlayerEconomy;
 use shared::grid::NavGrid;
 
 use crate::net_server::{OutgoingNetEvent, ServerNetworkChannels};
@@ -34,13 +32,7 @@ pub struct ServerSimulationPlugin;
 
 impl Plugin for ServerSimulationPlugin {
     fn build(&self, app: &mut App) {
-        let mut economy = PlayerEconomy::new();
-        economy.register_supply(Faction::Player1, 8);
-        economy.register_supply(Faction::Player2, 8);
-        economy.register_supply(Faction::HostileAi, 4);
-
         app.insert_resource(Matchmaker::new())
-            .insert_resource(economy)
             .init_resource::<NavGrid>()
             .insert_resource(ServerTickTimer(Timer::from_seconds(
                 1.0 / 30.0,

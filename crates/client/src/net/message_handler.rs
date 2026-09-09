@@ -4,7 +4,7 @@ use shared::components::*;
 use shared::economy::PlayerEconomy;
 use shared::grid::{BuildingKind, NavGrid};
 use shared::protocol::{
-    EntityKind, EntityState, ServerMessage, UnitKind,
+    EntityKind, EntityState, GameMode, ServerMessage, UnitKind,
 };
 
 use crate::audio_sfx::SoundEffect;
@@ -105,27 +105,17 @@ pub fn handle_server_message(
                 commands.entity(ent).despawn_recursive();
             }
 
-            // Sync starting minerals and supply
-            let my_minerals = if net_client.my_faction == Faction::Player1 {
-                p1_minerals
-            } else {
-                p2_minerals
-            };
-            let (my_supply, my_max_supply) = if net_client.my_faction == Faction::Player1 {
-                (p1_supply, p1_max_supply)
-            } else {
-                (p2_supply, p2_max_supply)
-            };
-            economy.set_supply(net_client.my_faction, my_supply, my_max_supply);
+            // Sync starting minerals and supply authoritatively
+            economy.set_minerals(Faction::Player1, p1_minerals);
+            economy.set_supply(Faction::Player1, p1_supply, p1_max_supply);
 
-            let cur_min = economy.get_minerals(net_client.my_faction);
-            if cur_min != my_minerals {
-                if my_minerals > cur_min {
-                    economy.add_minerals(net_client.my_faction, my_minerals - cur_min);
-                } else {
-                    economy.spend_minerals(net_client.my_faction, cur_min - my_minerals);
-                }
-            }
+            let p2_faction = if net_client.current_mode == GameMode::SoloVsAi {
+                Faction::HostileAi
+            } else {
+                Faction::Player2
+            };
+            economy.set_minerals(p2_faction, p2_minerals);
+            economy.set_supply(p2_faction, p2_supply, p2_max_supply);
 
             // Spawn authoritative entities
             let mut mineral_nodes: Vec<(Entity, Vec2)> = Vec::new();
@@ -286,21 +276,16 @@ pub fn handle_server_message(
             ..
         } => {
             // Authoritatively synchronize economy bank & supply from server tick snapshot
-            let (my_minerals, my_cur_sup, my_max_sup) = if net_client.my_faction == Faction::Player1 {
-                (p1_minerals, p1_supply, p1_max_supply)
-            } else {
-                (p2_minerals, p2_supply, p2_max_supply)
-            };
+            economy.set_minerals(Faction::Player1, p1_minerals);
+            economy.set_supply(Faction::Player1, p1_supply, p1_max_supply);
 
-            let cur_min = economy.get_minerals(net_client.my_faction);
-            if cur_min != my_minerals {
-                if my_minerals > cur_min {
-                    economy.add_minerals(net_client.my_faction, my_minerals - cur_min);
-                } else {
-                    economy.spend_minerals(net_client.my_faction, cur_min - my_minerals);
-                }
-            }
-            economy.set_supply(net_client.my_faction, my_cur_sup, my_max_sup);
+            let p2_faction = if net_client.current_mode == GameMode::SoloVsAi {
+                Faction::HostileAi
+            } else {
+                Faction::Player2
+            };
+            economy.set_minerals(p2_faction, p2_minerals);
+            economy.set_supply(p2_faction, p2_supply, p2_max_supply);
 
             // Index existing entities by Net ID for Health, Mining, and deadband position reconciliation
             let mut entity_map: HashMap<u32, (Entity, Mut<Transform>, Mut<Health>, Option<Mut<Worker>>, bool)> = HashMap::new();

@@ -80,16 +80,34 @@
         .portal-card {
             width: 100%;
             max-width: 720px;
+            max-height: 94vh;
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(56, 189, 248, 0.3) rgba(15, 23, 42, 0.4);
             background: var(--panel-bg);
             border: 1px solid var(--panel-border);
             border-radius: 12px;
             box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8), 0 0 30px var(--primary-glow);
-            padding: 32px;
+            padding: 26px 30px;
             display: flex;
             flex-direction: column;
-            gap: 22px;
+            gap: 16px;
             position: relative;
-            overflow: hidden;
+        }
+
+        .portal-card::-webkit-scrollbar {
+            width: 6px;
+        }
+        .portal-card::-webkit-scrollbar-track {
+            background: rgba(15, 23, 42, 0.4);
+            border-radius: 4px;
+        }
+        .portal-card::-webkit-scrollbar-thumb {
+            background: rgba(56, 189, 248, 0.3);
+            border-radius: 4px;
+        }
+        .portal-card::-webkit-scrollbar-thumb:hover {
+            background: rgba(56, 189, 248, 0.5);
         }
 
         .portal-header {
@@ -234,7 +252,7 @@
         .portal-view {
             display: flex;
             flex-direction: column;
-            gap: 20px;
+            gap: 15px;
             width: 100%;
         }
 
@@ -432,6 +450,72 @@
             font-family: monospace;
             font-size: 0.8rem;
             color: #e2e8f0;
+        }
+
+        /* ── Latest Updates / Patch Notes Card ── */
+        .updates-card {
+            background: rgba(10, 16, 24, 0.65);
+            border: 1px solid rgba(56, 189, 248, 0.25);
+            border-radius: 8px;
+            padding: 14px 18px;
+            font-size: 0.85rem;
+            color: var(--text-dim);
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .updates-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+            padding-bottom: 8px;
+        }
+
+        .updates-title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .updates-badge {
+            background: rgba(56, 189, 248, 0.15);
+            border: 1px solid rgba(56, 189, 248, 0.4);
+            color: #38bdf8;
+            font-size: 0.72rem;
+            font-weight: 700;
+            padding: 2px 7px;
+            border-radius: 4px;
+            letter-spacing: 0.05em;
+        }
+
+        .updates-version {
+            font-weight: 700;
+            color: #f1f5f9;
+            font-size: 0.88rem;
+        }
+
+        .updates-date {
+            font-size: 0.78rem;
+            color: #94a3b8;
+        }
+
+        .updates-list {
+            margin: 0;
+            padding-left: 18px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            line-height: 1.4;
+        }
+
+        .updates-list li {
+            color: #cbd5e1;
+        }
+
+        .updates-list li strong {
+            color: #f8fafc;
         }
 
         .server-status-bar {
@@ -641,6 +725,23 @@
                     <button class="portal-btn btn-secondary" id="btn-play-solo">
                         🤖 Play Solo vs AI
                     </button>
+                </div>
+
+                <!-- Latest Tactical Update / Patch Notes -->
+                <div class="updates-card">
+                    <div class="updates-header">
+                        <div class="updates-title">
+                            <span class="updates-badge">LATEST UPDATE</span>
+                            <span class="updates-version">v0.4.2</span>
+                        </div>
+                        <div class="updates-date">September 9, 2026</div>
+                    </div>
+                    <ul class="updates-list">
+                        <li><strong>⚔️ Unit Rework:</strong> Worker replaces SCV; Ranged Fighter replaces Marine; Melee Fighter deployed with sword strikes; Siege Tanks decommissioned.</li>
+                        <li><strong>🎮 In-Game Command UI:</strong> Interactive on-screen Command Card with clickable action buttons for unit orders, building construction, and unit training.</li>
+                        <li><strong>💎 Economy Isolation:</strong> Match economy is strictly isolated per room with a guaranteed fresh 200 minerals & supply reset on every match start.</li>
+                        <li><strong>⌨️ Controls Polish:</strong> Retired legacy [M] hotkey; barracks training now strictly responds to [R] for Ranged Fighter and [F] for Melee Fighter.</li>
+                    </ul>
                 </div>
 
                 <!-- Tactical Field Manual -->

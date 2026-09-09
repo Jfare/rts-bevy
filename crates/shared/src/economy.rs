@@ -69,6 +69,11 @@ impl PlayerEconomy {
             .unwrap_or(0)
     }
 
+    pub fn set_minerals(&mut self, faction: Faction, amount: u32) {
+        let entry = self.economies.entry(faction).or_default();
+        entry.minerals = amount;
+    }
+
     pub fn add_minerals(&mut self, faction: Faction, amount: u32) {
         let entry = self.economies.entry(faction).or_default();
         entry.minerals = entry.minerals.saturating_add(amount);

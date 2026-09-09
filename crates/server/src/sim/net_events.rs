@@ -1,7 +1,6 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 use bevy::prelude::*;
 use shared::components::*;
-use shared::economy::PlayerEconomy;
 use shared::grid::{BuildingKind, NavGrid};
 use shared::protocol::ServerMessage;
 
@@ -14,7 +13,6 @@ pub fn handle_incoming_network_events(
     mut commands: Commands,
     net_channels: Res<ServerNetworkChannels>,
     mut matchmaker: ResMut<Matchmaker>,
-    mut economy: ResMut<PlayerEconomy>,
     nav_grid: Res<NavGrid>,
     room_entities: Query<(Entity, &RoomId)>,
     mut unit_query: Query<(
@@ -101,7 +99,6 @@ pub fn handle_incoming_network_events(
                             &mut commands,
                             &net_channels,
                             &mut matchmaker,
-                            &mut economy,
                             peer_id,
                             player_name,
                             mode,
@@ -605,8 +602,20 @@ pub fn handle_incoming_network_events(
                             continue;
                         }
 
-                        if economy.has_minerals(player_faction, building_kind.mineral_cost()) {
-                            economy.spend_minerals(player_faction, building_kind.mineral_cost());
+                        let has_funds = matchmaker
+                            .rooms
+                            .get_mut(&player_room)
+                            .map(|r| {
+                                if r.economy.has_minerals(player_faction, building_kind.mineral_cost()) {
+                                    r.economy.spend_minerals(player_faction, building_kind.mineral_cost());
+                                    true
+                                } else {
+                                    false
+                                }
+                            })
+                            .unwrap_or(false);
+
+                        if has_funds {
                             let net_id = matchmaker.alloc_net_id();
 
                             let mut entity_cmds = commands.spawn((
@@ -695,13 +704,25 @@ pub fn handle_incoming_network_events(
                             if net_entity.net_id == building_net_id
                                 && *faction == player_faction
                                 && b_room.0 == player_room
-                                && economy.has_minerals(player_faction, unit_kind.mineral_cost())
-                                    && economy.has_supply(player_faction, unit_kind.supply_cost())
-                                    && prod.queue.len() < prod.max_queue_size
-                                {
-                                    economy.spend_minerals(player_faction, unit_kind.mineral_cost());
-                                    economy.register_supply(player_faction, unit_kind.supply_cost());
+                                && prod.queue.len() < prod.max_queue_size
+                            {
+                                let can_train = matchmaker
+                                    .rooms
+                                    .get_mut(&player_room)
+                                    .map(|r| {
+                                        if r.economy.has_minerals(player_faction, unit_kind.mineral_cost())
+                                            && r.economy.has_supply(player_faction, unit_kind.supply_cost())
+                                        {
+                                            r.economy.spend_minerals(player_faction, unit_kind.mineral_cost());
+                                            r.economy.register_supply(player_faction, unit_kind.supply_cost());
+                                            true
+                                        } else {
+                                            false
+                                        }
+                                    })
+                                    .unwrap_or(false);
 
+                                if can_train {
                                     prod.queue.push(QueuedUnit {
                                         name: unit_kind.name().to_string(),
                                         mineral_cost: unit_kind.mineral_cost(),
@@ -725,6 +746,7 @@ pub fn handle_incoming_network_events(
                                         });
                                     }
                                 }
+                            }
                         }
                     }
                     shared::protocol::ClientMessage::RequestSetRallyPoint {

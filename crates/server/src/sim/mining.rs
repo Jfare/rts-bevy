@@ -1,6 +1,5 @@
 use bevy::prelude::*;
 use shared::components::*;
-use shared::economy::PlayerEconomy;
 
 use crate::session::Matchmaker;
 
@@ -8,8 +7,7 @@ use crate::session::Matchmaker;
 pub fn server_mining_system(
     mut commands: Commands,
     time: Res<Time>,
-    matchmaker: Res<Matchmaker>,
-    mut economy: ResMut<PlayerEconomy>,
+    mut matchmaker: ResMut<Matchmaker>,
     mut workers: Query<(Entity, &mut Transform, &MoveSpeed, &Faction, &RoomId, &mut Worker, Option<&MoveTarget>)>,
     mut nodes: Query<(&Transform, &mut ResourceNode, &NetEntity, &RoomId), Without<Worker>>,
     bases: Query<(&Transform, &Faction, &RoomId), (With<BaseHQ>, Without<Worker>, Without<ResourceNode>)>,
@@ -103,7 +101,9 @@ pub fn server_mining_system(
 
                 if let Some(base_pos) = best_base {
                     if min_dist <= worker.base_interact_distance {
-                        economy.add_minerals(*faction, worker.carried_minerals);
+                        if let Some(room) = matchmaker.rooms.get_mut(&worker_room.0) {
+                            room.economy.add_minerals(*faction, worker.carried_minerals);
+                        }
                         worker.carried_minerals = 0;
                         if worker.target_node.is_some() {
                             worker.state = WorkerState::MovingToResource;
