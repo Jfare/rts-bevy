@@ -4,7 +4,7 @@ use bevy::prelude::*;
 use shared::components::*;
 use shared::economy::PlayerEconomy;
 use shared::protocol::{FactionColor, GameMode};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
@@ -71,6 +71,7 @@ pub const MAX_ACTIVE_SOLO_MATCHES: usize = 10;
 
 #[derive(Resource, Default)]
 pub struct Matchmaker {
+    pub connected_peers: HashSet<u64>,
     pub players: HashMap<u64, PlayerSession>,
     pub rooms: HashMap<u32, Room>,
     pub waiting_1v1_peer: Option<u64>,
@@ -81,6 +82,7 @@ pub struct Matchmaker {
 impl Matchmaker {
     pub fn new() -> Self {
         Self {
+            connected_peers: HashSet::new(),
             players: HashMap::new(),
             rooms: HashMap::new(),
             waiting_1v1_peer: None,
@@ -196,7 +198,7 @@ impl Matchmaker {
         let max_1v1 = MAX_ACTIVE_PVP_MATCHES as u32;
         let active_solo = self.active_solo_count() as u32;
         let max_solo = MAX_ACTIVE_SOLO_MATCHES as u32;
-        let total_online = self.players.len() as u32;
+        let total_online = self.connected_peers.len().max(self.players.len()) as u32;
         (queue_1v1, active_1v1, max_1v1, active_solo, max_solo, total_online)
     }
 }
@@ -372,6 +374,26 @@ mod tests {
         // Remove Room 2
         matchmaker.remove_room(2);
         matchmaker.players.remove(&201);
+        assert_eq!(matchmaker.get_telemetry(), (0, 0, 10, 0, 10, 0));
+    }
+
+    #[test]
+    fn test_matchmaker_connected_peers_telemetry() {
+        let mut matchmaker = Matchmaker::new();
+        assert_eq!(matchmaker.get_telemetry(), (0, 0, 10, 0, 10, 0));
+
+        // 3 visitors view the site (connect via websocket)
+        matchmaker.connected_peers.insert(10);
+        matchmaker.connected_peers.insert(20);
+        matchmaker.connected_peers.insert(30);
+        assert_eq!(matchmaker.get_telemetry(), (0, 0, 10, 0, 10, 3));
+
+        // One leaves the site
+        matchmaker.connected_peers.remove(&20);
+        assert_eq!(matchmaker.get_telemetry(), (0, 0, 10, 0, 10, 2));
+
+        // All leave
+        matchmaker.connected_peers.clear();
         assert_eq!(matchmaker.get_telemetry(), (0, 0, 10, 0, 10, 0));
     }
 }

@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy::render::camera::OrthographicProjection;
 use bevy::window::PrimaryWindow;
-use shared::components::{AppState, Faction, MeleeFighter, Radius, Selectable, Soldier, Worker};
+use shared::components::{AppState, Building, Faction, MeleeFighter, Radius, Selectable, Soldier, Worker};
 use shared::grid::WorldGridConfig;
 use crate::audio_sfx::SoundEffect;
 use crate::fog_of_war::{FogOfWarGrid, FogState};
@@ -63,6 +63,7 @@ fn handle_selection_input(
         Option<&Soldier>,
         Option<&MeleeFighter>,
         Option<&Worker>,
+        Option<&Building>,
     )>,
 ) {
     let default_cfg = WorldGridConfig::default();
@@ -121,7 +122,7 @@ fn handle_selection_input(
 
         if !shift_held {
             // Clear existing selection if not shift-adding
-            for (_, _, _, _, mut sel, _, _, _) in &mut selectable_query {
+            for (_, _, _, _, mut sel, ..) in &mut selectable_query {
                 sel.is_selected = false;
             }
         }
@@ -136,8 +137,11 @@ fn handle_selection_input(
             let mut friendly_selected = false;
             let mut sound_played = false;
 
-            // Pass 1: Select friendly units inside the box
-            for (_, transform, _, faction, mut sel, soldier_opt, melee_opt, worker_opt) in &mut selectable_query {
+            // Pass 1: Select friendly units inside the box (strictly excluding buildings)
+            for (_, transform, _, faction, mut sel, soldier_opt, melee_opt, worker_opt, bldg_opt) in &mut selectable_query {
+                if bldg_opt.is_some() {
+                    continue;
+                }
                 let pos = transform.translation.truncate();
                 if pos.x >= min_x && pos.x <= max_x && pos.y >= min_y && pos.y <= max_y
                     && *faction == net_client.my_faction {
@@ -157,9 +161,12 @@ fn handle_selection_input(
                     }
             }
 
-            // Pass 2: If no friendly units were inside, select any visible units/buildings inside for inspection
+            // Pass 2: If no friendly units were inside, select any visible units inside for inspection (strictly excluding buildings)
             if !friendly_selected {
-                for (_, transform, _, faction, mut sel, _, _, _) in &mut selectable_query {
+                for (_, transform, _, faction, mut sel, _, _, _, bldg_opt) in &mut selectable_query {
+                    if bldg_opt.is_some() {
+                        continue;
+                    }
                     let pos = transform.translation.truncate();
                     if pos.x >= min_x && pos.x <= max_x && pos.y >= min_y && pos.y <= max_y {
                         if *faction != net_client.my_faction && *faction != Faction::Neutral
@@ -172,10 +179,24 @@ fn handle_selection_input(
             }
         } else {
             // Single Click Selection
-            let mut closest_entity = None;
-            let mut closest_dist = f32::MAX;
+            // Priority:
+            // 1. Direct click on unit (dist <= radius)
+            // 2. Direct click on building (dist <= radius)
+            // 3. Proximity click near unit (dist <= radius + 24.0)
+            // 4. Proximity click near building (dist <= radius + 24.0)
+            let mut direct_unit = None;
+            let mut direct_unit_dist = f32::MAX;
 
-            for (entity, transform, radius, faction, _, _, _, _) in &selectable_query {
+            let mut direct_bldg = None;
+            let mut direct_bldg_dist = f32::MAX;
+
+            let mut near_unit = None;
+            let mut near_unit_dist = f32::MAX;
+
+            let mut near_bldg = None;
+            let mut near_bldg_dist = f32::MAX;
+
+            for (entity, transform, radius, faction, _, _, _, _, bldg_opt) in &selectable_query {
                 let pos = transform.translation.truncate();
                 // Skip selecting shrouded enemies in unexplored or non-visible fog
                 if *faction != net_client.my_faction && *faction != Faction::Neutral
@@ -184,14 +205,38 @@ fn handle_selection_input(
                     }
 
                 let dist = pos.distance(start_world);
-                if dist <= (radius.0 + 24.0) && dist < closest_dist {
-                    closest_dist = dist;
-                    closest_entity = Some(entity);
+                let is_bldg = bldg_opt.is_some();
+
+                if dist <= radius.0 {
+                    if is_bldg {
+                        if dist < direct_bldg_dist {
+                            direct_bldg_dist = dist;
+                            direct_bldg = Some(entity);
+                        }
+                    } else if dist < direct_unit_dist {
+                        direct_unit_dist = dist;
+                        direct_unit = Some(entity);
+                    }
+                } else if dist <= (radius.0 + 24.0) {
+                    if is_bldg {
+                        if dist < near_bldg_dist {
+                            near_bldg_dist = dist;
+                            near_bldg = Some(entity);
+                        }
+                    } else if dist < near_unit_dist {
+                        near_unit_dist = dist;
+                        near_unit = Some(entity);
+                    }
                 }
             }
 
-            if let Some(target_entity) = closest_entity {
-                if let Ok((_, _, _, faction, mut sel, soldier_opt, melee_opt, worker_opt)) = selectable_query.get_mut(target_entity) {
+            let target_candidate = direct_unit
+                .or(direct_bldg)
+                .or(near_unit)
+                .or(near_bldg);
+
+            if let Some(target_entity) = target_candidate {
+                if let Ok((_, _, _, faction, mut sel, soldier_opt, melee_opt, worker_opt, _)) = selectable_query.get_mut(target_entity) {
                     let new_state = if shift_held { !sel.is_selected } else { true };
                     sel.is_selected = new_state;
 
@@ -259,3 +304,169 @@ fn draw_selection_gizmos(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::input::mouse::MouseButton;
+    use bevy::input::ButtonInput;
+    use shared::components::Building;
+
+    fn setup_test_app() -> App {
+        let mut app = App::new();
+        app.init_resource::<ButtonInput<MouseButton>>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<NetClient>()
+            .init_resource::<FogOfWarGrid>()
+            .init_resource::<SelectionState>()
+            .add_event::<SoundEffect>();
+
+        let mut window = Window::default();
+        window.resolution.set(800.0, 600.0);
+        window.set_cursor_position(Some(Vec2::new(400.0, 300.0))); // Centers to world (0, 0)
+        app.world_mut().spawn((window, PrimaryWindow));
+
+        app.world_mut().spawn((
+            Camera::default(),
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            OrthographicProjection::default_2d(),
+        ));
+
+        app
+    }
+
+    #[test]
+    fn test_drag_selection_strictly_excludes_buildings() {
+        let mut app = setup_test_app();
+
+        let unit_entity = app
+            .world_mut()
+            .spawn((
+                Transform::from_xyz(-10.0, -10.0, 0.0),
+                Radius(14.0),
+                Faction::Player1,
+                Selectable { is_selected: false },
+                Soldier::default(),
+            ))
+            .id();
+
+        let building_entity = app
+            .world_mut()
+            .spawn((
+                Transform::from_xyz(-20.0, -20.0, 0.0),
+                Radius(50.0),
+                Faction::Player1,
+                Selectable { is_selected: false },
+                Building::new("Base HQ", Vec2::new(96.0, 96.0), 0.0, true),
+            ))
+            .id();
+
+        app.add_systems(Update, handle_selection_input);
+
+        // Configure active drag marquee box covering (-100, -100) to (0, 0)
+        {
+            let mut state = app.world_mut().resource_mut::<SelectionState>();
+            state.is_dragging = true;
+            state.drag_start_world = Some(Vec2::new(-100.0, -100.0));
+        }
+
+        // Simulate release of Left mouse button
+        {
+            let mut mouse_btn = app.world_mut().resource_mut::<ButtonInput<MouseButton>>();
+            mouse_btn.press(MouseButton::Left);
+            mouse_btn.clear_just_pressed(MouseButton::Left);
+            mouse_btn.release(MouseButton::Left);
+        }
+        app.update();
+
+        let unit_sel = app.world().get::<Selectable>(unit_entity).unwrap();
+        let bldg_sel = app.world().get::<Selectable>(building_entity).unwrap();
+
+        assert!(unit_sel.is_selected, "Friendly unit inside drag box must be selected");
+        assert!(!bldg_sel.is_selected, "Building inside drag box must NOT be selected");
+    }
+
+    #[test]
+    fn test_single_click_selects_building() {
+        let mut app = setup_test_app();
+
+        let building_entity = app
+            .world_mut()
+            .spawn((
+                Transform::from_xyz(0.0, 0.0, 0.0),
+                Radius(50.0),
+                Faction::Player1,
+                Selectable { is_selected: false },
+                Building::new("Base HQ", Vec2::new(96.0, 96.0), 0.0, true),
+            ))
+            .id();
+
+        // Not dragging, click directly on the building at (0, 0)
+        {
+            let mut state = app.world_mut().resource_mut::<SelectionState>();
+            state.is_dragging = false;
+            state.drag_start_world = Some(Vec2::new(0.0, 0.0));
+        }
+
+        {
+            let mut mouse_btn = app.world_mut().resource_mut::<ButtonInput<MouseButton>>();
+            mouse_btn.press(MouseButton::Left);
+            mouse_btn.release(MouseButton::Left);
+        }
+
+        app.add_systems(Update, handle_selection_input);
+        app.update();
+
+        let bldg_sel = app.world().get::<Selectable>(building_entity).unwrap();
+        assert!(bldg_sel.is_selected, "Direct single click on a building must select it");
+    }
+
+    #[test]
+    fn test_single_click_prioritizes_unit_over_building_when_both_under_cursor() {
+        let mut app = setup_test_app();
+
+        let unit_entity = app
+            .world_mut()
+            .spawn((
+                Transform::from_xyz(0.0, 0.0, 0.0),
+                Radius(14.0),
+                Faction::Player1,
+                Selectable { is_selected: false },
+                Soldier::default(),
+            ))
+            .id();
+
+        let building_entity = app
+            .world_mut()
+            .spawn((
+                Transform::from_xyz(0.0, 0.0, 0.0),
+                Radius(50.0),
+                Faction::Player1,
+                Selectable { is_selected: false },
+                Building::new("Base HQ", Vec2::new(96.0, 96.0), 0.0, true),
+            ))
+            .id();
+
+        {
+            let mut state = app.world_mut().resource_mut::<SelectionState>();
+            state.is_dragging = false;
+            state.drag_start_world = Some(Vec2::new(0.0, 0.0));
+        }
+
+        {
+            let mut mouse_btn = app.world_mut().resource_mut::<ButtonInput<MouseButton>>();
+            mouse_btn.press(MouseButton::Left);
+            mouse_btn.release(MouseButton::Left);
+        }
+
+        app.add_systems(Update, handle_selection_input);
+        app.update();
+
+        let unit_sel = app.world().get::<Selectable>(unit_entity).unwrap();
+        let bldg_sel = app.world().get::<Selectable>(building_entity).unwrap();
+
+        assert!(unit_sel.is_selected, "Direct click on unit should select the unit");
+        assert!(!bldg_sel.is_selected, "Unit should take precedence over building when overlapping");
+    }
+}
+

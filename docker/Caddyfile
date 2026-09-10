@@ -11,6 +11,7 @@
         Cross-Origin-Embedder-Policy require-corp
         Cross-Origin-Resource-Policy cross-origin
         Access-Control-Allow-Origin *
+        Cache-Control "no-cache, must-revalidate"
     }
 
     # Reverse proxy WebSocket & API traffic to the dedicated Bevy game server

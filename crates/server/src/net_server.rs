@@ -216,6 +216,7 @@ async fn handle_connection(
     {
         let mut peers_guard = peers.lock().await;
         peers_guard.insert(peer_id, tx_peer_out);
+        TELEMETRY_TOTAL_ONLINE.store(peers_guard.len() as u32, Ordering::Relaxed);
     }
 
     let _ = tx_incoming.send(IncomingNetEvent::PeerConnected { peer_id, addr });
@@ -268,6 +269,7 @@ async fn handle_connection(
     {
         let mut peers_guard = peers.lock().await;
         peers_guard.remove(&peer_id);
+        TELEMETRY_TOTAL_ONLINE.store(peers_guard.len() as u32, Ordering::Relaxed);
     }
 
     println!("🔌 [WebSocket Server] Peer #{} disconnected", peer_id);

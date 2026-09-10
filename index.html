@@ -138,12 +138,18 @@
         /* ── Live Server Telemetry Grid ── */
         .telemetry-grid {
             display: grid;
-            grid-template-columns: repeat(3, 1fr);
+            grid-template-columns: repeat(4, 1fr);
             gap: 12px;
             background: rgba(15, 23, 42, 0.65);
             border: 1px solid rgba(56, 189, 248, 0.2);
             border-radius: 8px;
             padding: 14px;
+        }
+
+        @media (max-width: 680px) {
+            .telemetry-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
         }
 
         .telemetry-item {
@@ -701,6 +707,13 @@
                 <!-- Live Server Telemetry -->
                 <div class="telemetry-grid">
                     <div class="telemetry-item">
+                        <div class="telemetry-label">Players Online</div>
+                        <div class="telemetry-val" style="color: #a78bfa;">
+                            <span class="pulse-dot" style="background: #a78bfa; box-shadow: 0 0 8px rgba(167, 139, 250, 0.6);"></span>
+                            <span id="stat-online">0</span>
+                        </div>
+                    </div>
+                    <div class="telemetry-item">
                         <div class="telemetry-label">Matchmaking Queue (1v1)</div>
                         <div class="telemetry-val" style="color: #38bdf8;">
                             <span class="pulse-dot"></span>
@@ -732,15 +745,15 @@
                     <div class="updates-header">
                         <div class="updates-title">
                             <span class="updates-badge">LATEST UPDATE</span>
-                            <span class="updates-version">v0.4.2</span>
+                            <span class="updates-version">v0.4.3</span>
                         </div>
-                        <div class="updates-date">September 9, 2026</div>
+                        <div class="updates-date">September 10, 2026</div>
                     </div>
                     <ul class="updates-list">
-                        <li><strong>⚔️ Unit Rework:</strong> Worker replaces SCV; Ranged Fighter replaces Marine; Melee Fighter deployed with sword strikes; Siege Tanks decommissioned.</li>
-                        <li><strong>🎮 In-Game Command UI:</strong> Interactive on-screen Command Card with clickable action buttons for unit orders, building construction, and unit training.</li>
-                        <li><strong>💎 Economy Isolation:</strong> Match economy is strictly isolated per room with a guaranteed fresh 200 minerals & supply reset on every match start.</li>
-                        <li><strong>⌨️ Controls Polish:</strong> Retired legacy [M] hotkey; barracks training now strictly responds to [R] for Ranged Fighter and [F] for Melee Fighter.</li>
+                        <li><strong>🎯 Unit Drag-Selection:</strong> Dragging a selection box now strictly selects units, eliminating accidental building selections. Buildings can be selected individually via direct single-click.</li>
+                        <li><strong>🌐 Live Player Tracking:</strong> Real-time online player & viewer count is now broadcast and displayed on the portal and match lobby.</li>
+                        <li><strong>⚡ Server Architecture:</strong> Modularized command event pipeline into dedicated subsystems (movement, combat, economy, social) for cleaner performance and reliability.</li>
+                        <li><strong>🔄 Fast Cache Delivery:</strong> Tuned asset caching headers to guarantee instant updates when new builds are deployed.</li>
                     </ul>
                 </div>
 
@@ -748,7 +761,7 @@
                 <div class="controls-card">
                     <div class="controls-title">🎮 QUICK GUIDE & CONTROLS</div>
                     <div class="controls-row">
-                        <span><strong>Select:</strong> Left-Click / Drag Box</span>
+                        <span><strong>Select:</strong> Left-Click (Unit/Building) | Drag Box (Units Only)</span>
                         <span><strong>Orders:</strong> Right-Click (Move / Attack / Harvest)</span>
                     </div>
                     <div class="controls-row">
@@ -1114,13 +1127,18 @@
             // Live Telemetry Polling via /api/stats
             async function fetchServerTelemetry() {
                 try {
-                    const res = await fetch('/api/stats');
+                    const statsUrl = (window.location.port === '8000')
+                        ? `http://${window.location.hostname || '127.0.0.1'}:8080/api/stats`
+                        : '/api/stats';
+                    const res = await fetch(statsUrl);
                     if (res.ok) {
                         const data = await res.json();
+                        const onlineEl = document.getElementById('stat-online');
                         const qEl = document.getElementById('stat-queue');
                         const pvpEl = document.getElementById('stat-pvp');
                         const soloEl = document.getElementById('stat-solo');
 
+                        if (onlineEl) onlineEl.innerText = data.total_online ?? 0;
                         if (qEl) qEl.innerText = data.queue_1v1 ?? 0;
                         if (pvpEl) pvpEl.innerText = `${data.active_1v1_matches ?? 0} / ${data.max_1v1_matches ?? 10}`;
                         if (soloEl) soloEl.innerText = `${data.active_solo_matches ?? 0} / ${data.max_solo_matches ?? 10}`;

@@ -89,8 +89,8 @@ pub fn update_lobby_modal_status_text(
 ) {
     let telem_str = if let Some(t) = telemetry {
         format!(
-            " | 👥 Queue: {} | ⚔️ 1v1: {}/{} | 🤖 Solo: {}/{}",
-            t.queue_1v1, t.active_1v1_matches, t.max_1v1_matches, t.active_solo_matches, t.max_solo_matches
+            " | 🌐 Online: {} | 👥 Queue: {} | ⚔️ 1v1: {}/{} | 🤖 Solo: {}/{}",
+            t.total_online, t.queue_1v1, t.active_1v1_matches, t.max_1v1_matches, t.active_solo_matches, t.max_solo_matches
         )
     } else {
         String::new()

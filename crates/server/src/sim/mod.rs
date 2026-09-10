@@ -5,6 +5,7 @@ use crate::net_server::{OutgoingNetEvent, ServerNetworkChannels};
 use crate::session::Matchmaker;
 
 pub mod combat;
+pub mod commands;
 pub mod lobby;
 pub mod mining;
 pub mod movement;
