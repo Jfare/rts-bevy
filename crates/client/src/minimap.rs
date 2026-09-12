@@ -1,12 +1,13 @@
 use bevy::prelude::*;
 use bevy::render::camera::OrthographicProjection;
 use bevy::window::PrimaryWindow;
-use shared::components::{AppState, Building, Faction, Health, MoveTarget, ResourceNode, Selectable, Unit};
+use shared::components::{AppState, Building, Faction, Health, MatchOutcome, MoveTarget, ResourceNode, Selectable, Unit};
 use shared::grid::WorldGridConfig;
 use shared::protocol::ClientMessage;
 use crate::camera::RtsCamera;
 use crate::fog_of_war::{FogOfWarGrid, FogState, FOG_GRID_DIM};
 use crate::net::{NetClient, NetStatus};
+use crate::stats::MatchStats;
 
 pub struct MinimapPlugin;
 
@@ -270,9 +271,15 @@ fn handle_minimap_input(
     mut minimap_state: ResMut<MinimapState>,
     grid_cfg: Option<Res<WorldGridConfig>>,
     net_client: Res<NetClient>,
+    outcome_opt: Option<Res<MatchOutcome>>,
+    mut stats: ResMut<MatchStats>,
     mut attack_move_pending: ResMut<crate::ui::AttackMovePending>,
     mut unit_query: Query<(Entity, &Faction, &Selectable, &mut MoveTarget, Option<&NetEntity>), (With<Unit>, Without<Building>)>,
 ) {
+    if outcome_opt.as_deref() == Some(&MatchOutcome::Victory) || outcome_opt.as_deref() == Some(&MatchOutcome::Defeat) {
+        return;
+    }
+
     let Ok(window) = window_query.get_single() else {
         return;
     };
@@ -316,8 +323,10 @@ fn handle_minimap_input(
         let my_faction = net_client.my_faction;
 
         let mut unit_net_ids = Vec::new();
+        let mut any_ordered = false;
         for (_, faction, selectable, mut mt, net_opt) in &mut unit_query {
             if *faction == my_faction && selectable.is_selected {
+                any_ordered = true;
                 mt.destination = target_world_pos;
                 mt.is_attack_move = is_attack_move;
                 mt.waypoints = vec![target_world_pos];
@@ -328,15 +337,16 @@ fn handle_minimap_input(
             }
         }
 
-        if net_client.status != NetStatus::Disconnected {
-            net_client.send(&ClientMessage::RequestMove {
-                unit_net_ids,
-                target_position: target_world_pos,
-                is_attack_move,
-            });
+        if any_ordered {
+            stats.record_action();
+            if net_client.status != NetStatus::Disconnected {
+                net_client.send(&ClientMessage::RequestMove {
+                    unit_net_ids,
+                    target_position: target_world_pos,
+                    is_attack_move,
+                });
+            }
+            info!("🗺️ [Minimap] Dispatched move order to {:?}", target_world_pos);
         }
-
-
-        info!("🗺️ [Minimap] Dispatched move order to {:?}", target_world_pos);
     }
 }

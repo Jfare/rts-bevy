@@ -41,6 +41,7 @@ fn handle_placement_input(
     keyboard: Res<ButtonInput<KeyCode>>,
     mouse_button: Res<ButtonInput<MouseButton>>,
     net_client: Res<NetClient>,
+    outcome_opt: Option<Res<MatchOutcome>>,
     mut economy: ResMut<PlayerEconomy>,
     mut stats: ResMut<MatchStats>,
     mut sound_events: EventWriter<SoundEffect>,
@@ -48,24 +49,31 @@ fn handle_placement_input(
     window_query: Query<&Window, With<PrimaryWindow>>,
     camera_query: Query<(&Camera, &Transform, Option<&OrthographicProjection>)>,
 ) {
+    if outcome_opt.as_deref() == Some(&MatchOutcome::Victory) || outcome_opt.as_deref() == Some(&MatchOutcome::Defeat) {
+        return;
+    }
 
     // 1. Hotkeys to enter placement mode
     if keyboard.just_pressed(KeyCode::KeyB) {
+        stats.record_action();
         state.active_kind = Some(BuildingKind::Barracks);
         state.mineral_cost = BuildingKind::Barracks.mineral_cost();
         info!("🏗️ [Build Mode] Barracks ($150) selected for placement");
     }
     if keyboard.just_pressed(KeyCode::KeyU) {
+        stats.record_action();
         state.active_kind = Some(BuildingKind::Turret);
         state.mineral_cost = BuildingKind::Turret.mineral_cost();
         info!("🏗️ [Build Mode] Gun Turret ($125) selected for placement");
     }
     if keyboard.just_pressed(KeyCode::KeyP) {
+        stats.record_action();
         state.active_kind = Some(BuildingKind::SupplyDepot);
         state.mineral_cost = BuildingKind::SupplyDepot.mineral_cost();
         info!("🏗️ [Build Mode] Supply Depot ($100) selected for placement");
     }
     if keyboard.just_pressed(KeyCode::KeyH) {
+        stats.record_action();
         state.active_kind = Some(BuildingKind::BaseHQ);
         state.mineral_cost = BuildingKind::BaseHQ.mineral_cost();
         info!("🏗️ [Build Mode] Base HQ ($400) selected for placement");
@@ -106,6 +114,7 @@ fn handle_placement_input(
     if mouse_button.just_pressed(MouseButton::Left) && state.is_valid {
         let my_faction = net_client.my_faction;
         if economy.spend_minerals(my_faction, state.mineral_cost) {
+            stats.record_action();
             let spawn_pos = state.ghost_pos;
             sound_events.send(SoundEffect::BuildPlaced);
             if my_faction == Faction::Player1 {

@@ -1,12 +1,13 @@
 use bevy::prelude::*;
 use bevy::render::camera::OrthographicProjection;
 use bevy::window::PrimaryWindow;
-use shared::components::{AppState, Building, Faction, MeleeFighter, Radius, Selectable, Soldier, Worker};
+use shared::components::{AppState, Building, Faction, MatchOutcome, MeleeFighter, Radius, Selectable, Soldier, Worker};
 use shared::grid::WorldGridConfig;
 use crate::audio_sfx::SoundEffect;
 use crate::fog_of_war::{FogOfWarGrid, FogState};
 use crate::minimap::{get_minimap_screen_rect, MinimapState};
 use crate::net::NetClient;
+use crate::stats::MatchStats;
 
 /// Helper to convert screen cursor coordinates to 2D world coordinates accurately across all platforms
 pub fn screen_to_world_2d(
@@ -50,6 +51,8 @@ fn handle_selection_input(
     net_client: Res<NetClient>,
     grid_cfg: Option<Res<WorldGridConfig>>,
     fog: Res<FogOfWarGrid>,
+    outcome_opt: Option<Res<MatchOutcome>>,
+    mut stats: ResMut<MatchStats>,
     window_query: Query<&Window, With<PrimaryWindow>>,
     camera_query: Query<(&Camera, &Transform, Option<&OrthographicProjection>)>,
     mut selection_state: ResMut<SelectionState>,
@@ -66,6 +69,12 @@ fn handle_selection_input(
         Option<&Building>,
     )>,
 ) {
+    if outcome_opt.as_deref() == Some(&MatchOutcome::Victory)
+        || outcome_opt.as_deref() == Some(&MatchOutcome::Defeat)
+    {
+        return;
+    }
+
     let default_cfg = WorldGridConfig::default();
     let config = grid_cfg.as_deref().unwrap_or(&default_cfg);
 
@@ -161,6 +170,7 @@ fn handle_selection_input(
                     }
             }
 
+            let mut any_selected = friendly_selected;
             // Pass 2: If no friendly units were inside, select any visible units inside for inspection (strictly excluding buildings)
             if !friendly_selected {
                 for (_, transform, _, faction, mut sel, _, _, _, bldg_opt) in &mut selectable_query {
@@ -174,8 +184,13 @@ fn handle_selection_input(
                                 continue;
                             }
                         sel.is_selected = true;
+                        any_selected = true;
                     }
                 }
+            }
+
+            if any_selected {
+                stats.record_action();
             }
         } else {
             // Single Click Selection
@@ -236,6 +251,7 @@ fn handle_selection_input(
                 .or(near_bldg);
 
             if let Some(target_entity) = target_candidate {
+                stats.record_action();
                 if let Ok((_, _, _, faction, mut sel, soldier_opt, melee_opt, worker_opt, _)) = selectable_query.get_mut(target_entity) {
                     let new_state = if shift_held { !sel.is_selected } else { true };
                     sel.is_selected = new_state;
@@ -319,6 +335,7 @@ mod tests {
             .init_resource::<NetClient>()
             .init_resource::<FogOfWarGrid>()
             .init_resource::<SelectionState>()
+            .init_resource::<MatchStats>()
             .add_event::<SoundEffect>();
 
         let mut window = Window::default();
@@ -467,6 +484,64 @@ mod tests {
 
         assert!(unit_sel.is_selected, "Direct click on unit should select the unit");
         assert!(!bldg_sel.is_selected, "Unit should take precedence over building when overlapping");
+    }
+
+    #[test]
+    fn test_selection_records_action_only_when_entity_selected() {
+        let mut app = setup_test_app();
+        app.add_systems(Update, handle_selection_input);
+
+        // 1. Click empty space (no entities spawned)
+        {
+            let mut state = app.world_mut().resource_mut::<SelectionState>();
+            state.is_dragging = false;
+            state.drag_start_world = Some(Vec2::new(100.0, 100.0));
+        }
+        {
+            let mut mouse_btn = app.world_mut().resource_mut::<ButtonInput<MouseButton>>();
+            mouse_btn.press(MouseButton::Left);
+            mouse_btn.release(MouseButton::Left);
+        }
+        app.update();
+
+        // Empty space click should NOT record an action
+        assert_eq!(app.world().resource::<MatchStats>().total_commands, 0);
+
+        // 2. Spawn a unit at (0, 0) and click it
+        app.world_mut().spawn((
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            Radius(14.0),
+            Faction::Player1,
+            Selectable { is_selected: false },
+            Soldier::default(),
+        ));
+
+        {
+            let mut state = app.world_mut().resource_mut::<SelectionState>();
+            state.is_dragging = false;
+            state.drag_start_world = Some(Vec2::new(0.0, 0.0));
+        }
+        {
+            let mut mouse_btn = app.world_mut().resource_mut::<ButtonInput<MouseButton>>();
+            mouse_btn.press(MouseButton::Left);
+            mouse_btn.release(MouseButton::Left);
+        }
+        app.update();
+
+        // Clicking the unit SHOULD record an action
+        assert_eq!(app.world().resource::<MatchStats>().total_commands, 1);
+
+        // 3. Set match outcome to Victory: further selection should not record actions
+        app.world_mut().insert_resource(MatchOutcome::Victory);
+        {
+            let mut mouse_btn = app.world_mut().resource_mut::<ButtonInput<MouseButton>>();
+            mouse_btn.press(MouseButton::Left);
+            mouse_btn.release(MouseButton::Left);
+        }
+        app.update();
+
+        // Post-game selection must NOT increment actions
+        assert_eq!(app.world().resource::<MatchStats>().total_commands, 1);
     }
 }
 

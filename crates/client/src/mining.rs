@@ -31,6 +31,7 @@ fn handle_mining_click_orders(
     mouse_button: Res<ButtonInput<MouseButton>>,
     net_client: Res<NetClient>,
     outcome_opt: Option<Res<MatchOutcome>>,
+    mut stats: ResMut<MatchStats>,
     window_query: Query<&Window, With<PrimaryWindow>>,
 
     camera_query: Query<(&Camera, &Transform, Option<&OrthographicProjection>), With<Camera>>,
@@ -76,9 +77,11 @@ fn handle_mining_click_orders(
     };
 
     let mut worker_net_ids = Vec::new();
+    let mut any_assigned = false;
 
     for (worker_entity, faction, selectable, mut worker, net_opt) in &mut worker_query {
-        if selectable.is_selected && *faction == Faction::Player1 {
+        if selectable.is_selected && *faction == net_client.my_faction {
+            any_assigned = true;
             worker.target_node = Some(target_node_entity);
             worker.state = WorkerState::MovingToResource;
             worker.harvest_timer = 0.0;
@@ -91,9 +94,10 @@ fn handle_mining_click_orders(
         }
     }
 
-    if !worker_net_ids.is_empty() {
+    if any_assigned {
+        stats.record_action();
         sound_events.send(SoundEffect::OrderIssued);
-        if net_client.status != NetStatus::Disconnected {
+        if net_client.status != NetStatus::Disconnected && !worker_net_ids.is_empty() {
             if let Some(resource_net_id) = target_net_id_opt {
                 net_client.send(&ClientMessage::RequestHarvest {
                     worker_net_ids,

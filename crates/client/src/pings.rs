@@ -1,11 +1,12 @@
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
-use shared::components::AppState;
+use shared::components::{AppState, MatchOutcome};
 use shared::grid::WorldGridConfig;
 use shared::protocol::{ClientMessage, FactionColor, PingType};
 use crate::camera::RtsCamera;
 use crate::minimap::{get_minimap_screen_rect, minimap_screen_to_world, world_to_minimap_screen, MinimapState};
 use crate::net::NetClient;
+use crate::stats::MatchStats;
 
 pub struct TacticalPingPlugin;
 
@@ -36,6 +37,8 @@ pub struct TacticalPingVisual {
 fn handle_tactical_ping_input(
     buttons: Res<ButtonInput<MouseButton>>,
     keyboard: Res<ButtonInput<KeyCode>>,
+    outcome_opt: Option<Res<MatchOutcome>>,
+    mut stats: ResMut<MatchStats>,
     window_query: Query<&Window, With<PrimaryWindow>>,
     camera_query: Query<(&Camera, &GlobalTransform), With<RtsCamera>>,
     minimap_state: Res<MinimapState>,
@@ -43,6 +46,9 @@ fn handle_tactical_ping_input(
     net_client: Res<NetClient>,
     mut commands: Commands,
 ) {
+    if outcome_opt.as_deref() == Some(&MatchOutcome::Victory) || outcome_opt.as_deref() == Some(&MatchOutcome::Defeat) {
+        return;
+    }
     let is_alt_pressed = keyboard.pressed(KeyCode::AltLeft) || keyboard.pressed(KeyCode::AltRight);
     if !is_alt_pressed {
         return;
@@ -79,6 +85,8 @@ fn handle_tactical_ping_input(
         } else {
             PingType::Attention
         };
+
+        stats.record_action();
 
         // Dispatch over network
         net_client.send(&ClientMessage::SendTacticalPing {

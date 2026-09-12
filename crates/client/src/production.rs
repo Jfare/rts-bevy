@@ -242,6 +242,7 @@ fn handle_production_hotkeys(
                         stats.minerals_spent += 50;
                         stats.units_trained += 1;
                     }
+                    stats.record_action();
                     sound_events.send(SoundEffect::UnitTrained);
 
                     prod.queue.push(QueuedUnit {
@@ -291,6 +292,7 @@ fn handle_production_hotkeys(
                     stats.minerals_spent += 100;
                     stats.units_trained += 1;
                 }
+                stats.record_action();
                 sound_events.send(SoundEffect::UnitTrained);
 
                 prod.queue.push(QueuedUnit {
@@ -340,6 +342,7 @@ fn handle_production_hotkeys(
                     stats.minerals_spent += 75;
                     stats.units_trained += 1;
                 }
+                stats.record_action();
                 sound_events.send(SoundEffect::UnitTrained);
 
                 prod.queue.push(QueuedUnit {
@@ -370,6 +373,7 @@ fn handle_rally_point_order(
     mouse_button: Res<ButtonInput<MouseButton>>,
     net_client: Res<NetClient>,
     outcome_opt: Option<Res<MatchOutcome>>,
+    mut stats: ResMut<MatchStats>,
     window_query: Query<&Window, With<PrimaryWindow>>,
     camera_query: Query<(&Camera, &Transform, Option<&OrthographicProjection>)>,
     mut prod_query: Query<(&mut ProductionBuilding, &Faction, &Selectable, Option<&NetEntity>), Without<Unit>>,
@@ -398,8 +402,10 @@ fn handle_rally_point_order(
     let target_world_pos = screen_to_world_2d(cursor_screen, win_size, cam_pos, cam_scale);
     let my_faction = net_client.my_faction;
 
+    let mut any_updated = false;
     for (mut prod, faction, selectable, net_entity_opt) in &mut prod_query {
         if *faction == my_faction && selectable.is_selected {
+            any_updated = true;
             prod.rally_point = target_world_pos;
             if let Some(net) = net_entity_opt {
                 if net_client.status != NetStatus::Disconnected {
@@ -411,6 +417,9 @@ fn handle_rally_point_order(
             }
             info!("📍 [Rally Point] Production rally updated to {:?}", target_world_pos);
         }
+    }
+    if any_updated {
+        stats.record_action();
     }
 }
 

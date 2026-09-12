@@ -591,6 +591,7 @@ pub fn handle_command_card_interactions_system(
         let is_cancel = *action == CommandCardAction::CancelPlacement;
         match *interaction {
             Interaction::Pressed => {
+                stats.record_action();
                 bg_color.0 = if is_cancel {
                     Color::srgba(0.70, 0.10, 0.10, 1.0)
                 } else {

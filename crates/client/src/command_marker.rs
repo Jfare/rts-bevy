@@ -11,6 +11,7 @@ use crate::audio_sfx::SoundEffect;
 use crate::fog_of_war::{FogOfWarGrid, FogState};
 use crate::net::{NetClient, NetStatus};
 use crate::selection::screen_to_world_2d;
+use crate::stats::MatchStats;
 use crate::ui::AttackMovePending;
 
 /// Visual expanding and fading marker at ground destination when right-clicking
@@ -45,6 +46,7 @@ fn handle_right_click_orders(
     keyboard: Res<ButtonInput<KeyCode>>,
     net_client: Res<NetClient>,
     outcome_opt: Option<Res<MatchOutcome>>,
+    mut stats: ResMut<MatchStats>,
     mut attack_move_pending: ResMut<AttackMovePending>,
     nav_grid: Res<NavGrid>,
     grid_cfg: Option<Res<WorldGridConfig>>,
@@ -151,6 +153,7 @@ fn handle_right_click_orders(
 
     // Direct Focus-Fire Attack Order on Enemy Target
     if let Some((target_entity, target_net_opt)) = clicked_hostile {
+        stats.record_action();
         // Spawn bright red attack pulse marker
         commands.spawn((
             CommandMarker {
@@ -191,6 +194,7 @@ fn handle_right_click_orders(
     }
 
     sound_events.send(SoundEffect::OrderIssued);
+    stats.record_action();
 
     let is_attack_move = keyboard.pressed(KeyCode::KeyA) || attack_move_pending.0;
     attack_move_pending.0 = false;
@@ -281,6 +285,7 @@ fn handle_stance_and_ability_hotkeys(
     keyboard: Res<ButtonInput<KeyCode>>,
     net_client: Res<NetClient>,
     outcome_opt: Option<Res<MatchOutcome>>,
+    mut stats: ResMut<MatchStats>,
     mut attack_move_pending: ResMut<AttackMovePending>,
     mut sound_events: EventWriter<SoundEffect>,
     mut unit_query: Query<(
@@ -309,8 +314,10 @@ fn handle_stance_and_ability_hotkeys(
     if keyboard.just_pressed(KeyCode::KeyS) {
         attack_move_pending.0 = false;
         let mut net_ids = Vec::new();
+        let mut any_selected = false;
         for (entity, _, faction, selectable, net_opt, _, mut soldier_opt, mut melee_opt, mut stance_opt) in &mut unit_query {
             if *faction == my_faction && selectable.is_selected {
+                any_selected = true;
                 commands.entity(entity).remove::<MoveTarget>();
                 if let Some(ref mut soldier) = soldier_opt {
                     soldier.state = SoldierState::Idle;
@@ -328,19 +335,24 @@ fn handle_stance_and_ability_hotkeys(
                 }
             }
         }
-        if !net_ids.is_empty() && net_client.status != NetStatus::Disconnected {
-            net_client.send(&ClientMessage::RequestStop { unit_net_ids: net_ids });
+        if any_selected {
+            stats.record_action();
+            if !net_ids.is_empty() && net_client.status != NetStatus::Disconnected {
+                net_client.send(&ClientMessage::RequestStop { unit_net_ids: net_ids });
+            }
+            sound_events.send(SoundEffect::OrderIssued);
+            info!("🛑 [Stance] Stop command issued to selected units");
         }
-        sound_events.send(SoundEffect::OrderIssued);
-        info!("🛑 [Stance] Stop command issued to selected units");
     }
 
     // 2. [H] Key: Hold Position Order
     if keyboard.just_pressed(KeyCode::KeyH) {
         attack_move_pending.0 = false;
         let mut net_ids = Vec::new();
+        let mut any_selected = false;
         for (entity, _, faction, selectable, net_opt, _, mut soldier_opt, mut melee_opt, mut stance_opt) in &mut unit_query {
             if *faction == my_faction && selectable.is_selected {
+                any_selected = true;
                 commands.entity(entity).remove::<MoveTarget>();
                 if let Some(ref mut soldier) = soldier_opt {
                     soldier.state = SoldierState::HoldingPosition;
@@ -360,15 +372,19 @@ fn handle_stance_and_ability_hotkeys(
                 }
             }
         }
-        if !net_ids.is_empty() && net_client.status != NetStatus::Disconnected {
-            net_client.send(&ClientMessage::RequestHoldPosition { unit_net_ids: net_ids });
+        if any_selected {
+            stats.record_action();
+            if !net_ids.is_empty() && net_client.status != NetStatus::Disconnected {
+                net_client.send(&ClientMessage::RequestHoldPosition { unit_net_ids: net_ids });
+            }
+            sound_events.send(SoundEffect::OrderIssued);
+            info!("🛡️ [Stance] Hold Position command issued to selected units");
         }
-        sound_events.send(SoundEffect::OrderIssued);
-        info!("🛡️ [Stance] Hold Position command issued to selected units");
     }
 
     // 3. [A] Key: Toggle Attack-Move order mode
     if keyboard.just_pressed(KeyCode::KeyA) {
+        stats.record_action();
         attack_move_pending.0 = !attack_move_pending.0;
         info!("⚔️ [Stance] Attack-Move armed: {}", attack_move_pending.0);
     }
