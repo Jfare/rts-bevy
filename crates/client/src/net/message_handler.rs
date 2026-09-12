@@ -310,6 +310,7 @@ pub fn handle_server_message(
                         if let Some(ref mut worker) = worker_opt {
                             if snap.is_mining {
                                 worker.state = WorkerState::Mining;
+                                worker.carried_minerals = 0;
                             }
                         }
 

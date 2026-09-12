@@ -82,6 +82,7 @@ fn handle_mining_click_orders(
             worker.target_node = Some(target_node_entity);
             worker.state = WorkerState::MovingToResource;
             worker.harvest_timer = 0.0;
+            worker.carried_minerals = 0;
             commands.entity(worker_entity).remove::<MoveTarget>();
 
             if let Some(net) = net_opt {
@@ -135,6 +136,8 @@ fn worker_mining_state_machine(
             }
 
             WorkerState::MovingToResource => {
+                worker.carried_minerals = 0;
+
                 let Some(node_entity) = worker.target_node else {
                     worker.state = WorkerState::Idle;
                     continue;
@@ -162,6 +165,7 @@ fn worker_mining_state_machine(
                     // Arrived at mineral patch, begin mining
                     worker.state = WorkerState::Mining;
                     worker.harvest_timer = 0.0;
+                    worker.carried_minerals = 0;
                 } else {
                     // Move towards node
                     let dir = (node_pos - worker_pos).normalize_or_zero();
@@ -440,9 +444,9 @@ fn draw_mining_visuals(
             gizmos.line_2d(p_back, p_front, Color::srgb(0.85, 0.88, 0.95));
         }
 
-        // 2. Draw Carried Gold Nugget on Worker
-        if worker.carried_minerals > 0 {
-            let nugget_center = worker_pos + Vec2::new(0.0, 18.0);
+        // 2. Draw Carried Gold Nugget on Worker (strictly when actively hauling gold back to Base HQ)
+        if worker.state == WorkerState::MovingToBase && worker.carried_minerals > 0 {
+            let nugget_center = worker_pos - forward * 2.0 + Vec2::new(0.0, 14.0);
             let gold_bright = Color::srgb(1.0, 0.84, 0.18);
             let gold_highlight = Color::srgb(1.0, 0.98, 0.65);
             let gold_shadow = Color::srgb(0.75, 0.52, 0.10);
