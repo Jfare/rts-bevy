@@ -47,6 +47,12 @@ pub fn server_tick_snapshot_system(
                     .map(|w| w.state == WorkerState::Mining)
                     .unwrap_or(false);
 
+                let (worker_state, carried_minerals) = if let Some(w) = worker_opt {
+                    (Some(w.state), w.carried_minerals)
+                } else {
+                    (None, 0)
+                };
+
                 let laser_target = if is_mining {
                     worker_opt.and_then(|w| {
                         w.target_node.and_then(|node_e| {
@@ -67,6 +73,8 @@ pub fn server_tick_snapshot_system(
                     max_hp: health.max,
                     is_mining,
                     laser_target,
+                    carried_minerals,
+                    worker_state,
                 });
             }
 

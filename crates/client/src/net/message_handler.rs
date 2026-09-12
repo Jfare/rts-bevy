@@ -217,7 +217,8 @@ pub fn handle_server_message(
                         net_id: ent_state.net_id,
                         owner_peer_id: 0,
                     },
-                    Transform::from_xyz(pos.x, pos.y, 2.0),
+                    Transform::from_xyz(pos.x, pos.y, 2.0)
+                        .with_rotation(Quat::from_rotation_z(ent_state.rotation)),
                 ));
 
                 match kind {
@@ -235,7 +236,7 @@ pub fn handle_server_message(
                                 ..default()
                             },
                             Radius(14.0),
-                            MoveSpeed(190.0),
+                            MoveSpeed(WORKER_MOVE_SPEED),
                             Velocity::default(),
                         ));
                     }
@@ -307,11 +308,17 @@ pub fn handle_server_message(
                         hp.current = snap.current_hp;
                         hp.max = snap.max_hp;
 
+                        let is_worker = worker_opt.is_some();
                         if let Some(ref mut worker) = worker_opt {
-                            if snap.is_mining {
+                            if let Some(ws) = snap.worker_state {
+                                worker.state = ws;
+                            } else if snap.is_mining {
                                 worker.state = WorkerState::Mining;
-                                worker.carried_minerals = 0;
                             }
+                            if worker.carried_minerals == 0 && snap.carried_minerals > 0 {
+                                sound_events.send(SoundEffect::LaserMining);
+                            }
+                            worker.carried_minerals = snap.carried_minerals;
                         }
 
                         let cur_pos = tf.translation.truncate();
@@ -327,6 +334,11 @@ pub fn handle_server_message(
                                 tf.translation = tf.translation.lerp(target_3d, 0.20);
                             }
                         }
+
+                        // Synchronize facing rotation from authoritative server snapshot
+                        if is_worker || !has_move {
+                            tf.rotation = Quat::from_rotation_z(snap.rotation);
+                        }
                     }
                 }
             }
@@ -338,8 +350,12 @@ pub fn handle_server_message(
             is_attack_move,
         } => {
             for (net_id, dest) in unit_net_ids.into_iter().zip(destinations) {
-                for (entity, net_entity, _fac, tf, _hp, _worker, soldier_opt, melee_opt, move_target_opt, stance_opt, ..) in entity_query.iter_mut() {
+                for (entity, net_entity, _fac, tf, _hp, mut worker_opt, soldier_opt, melee_opt, move_target_opt, stance_opt, ..) in entity_query.iter_mut() {
                     if net_entity.net_id == net_id {
+                        if let Some(ref mut worker) = worker_opt {
+                            worker.state = WorkerState::Idle;
+                            worker.target_node = None;
+                        }
                         if let Some(mut soldier) = soldier_opt {
                             soldier.target = None;
                             soldier.state = if is_attack_move {
@@ -601,7 +617,7 @@ pub fn handle_server_message(
                         Worker::default(),
                         TacticalStance::default(),
                         Radius(14.0),
-                        MoveSpeed(190.0),
+                        MoveSpeed(WORKER_MOVE_SPEED),
                         Velocity::default(),
                     ));
                 }

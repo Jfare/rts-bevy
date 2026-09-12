@@ -85,6 +85,26 @@ pub fn server_mining_system(
                         worker.carried_minerals = amount;
                         worker.state = WorkerState::MovingToBase;
                         worker.harvest_timer = 0.0;
+
+                        // Immediately orient towards nearest base upon completing mining
+                        let mut best_base = None;
+                        let mut min_dist = f32::MAX;
+                        for (base_tf, base_faction, base_room) in &bases {
+                            if base_room.0 == worker_room.0 && base_faction == faction {
+                                let b_pos = base_tf.translation.truncate();
+                                let dist = w_pos.distance(b_pos);
+                                if dist < min_dist {
+                                    min_dist = dist;
+                                    best_base = Some(b_pos);
+                                }
+                            }
+                        }
+                        if let Some(base_pos) = best_base {
+                            let dir = (base_pos - w_pos).normalize_or_zero();
+                            if dir.length_squared() > 0.0 {
+                                transform.rotation = Quat::from_rotation_z(dir.y.atan2(dir.x));
+                            }
+                        }
                     }
                 } else {
                     worker.target_node = None;
@@ -113,8 +133,14 @@ pub fn server_mining_system(
                             room.economy.add_minerals(*faction, worker.carried_minerals);
                         }
                         worker.carried_minerals = 0;
-                        if worker.target_node.is_some() {
+                        if let Some(node_e) = worker.target_node {
                             worker.state = WorkerState::MovingToResource;
+                            if let Ok((node_tf, ..)) = nodes.get(node_e) {
+                                let dir = (node_tf.translation.truncate() - w_pos).normalize_or_zero();
+                                if dir.length_squared() > 0.0 {
+                                    transform.rotation = Quat::from_rotation_z(dir.y.atan2(dir.x));
+                                }
+                            }
                         } else {
                             worker.state = WorkerState::Idle;
                         }

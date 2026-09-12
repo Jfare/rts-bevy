@@ -65,7 +65,12 @@ pub fn server_production_system(
                         };
 
                         let net_id = matchmaker.alloc_net_id();
-                        let spawn_pos = transform.translation.truncate() + Vec2::new(0.0, -60.0);
+                        let spawn_offset = if *faction == Faction::Player1 {
+                            Vec2::new(0.0, -65.0)
+                        } else {
+                            Vec2::new(0.0, 65.0)
+                        };
+                        let spawn_pos = transform.translation.truncate() + spawn_offset;
                         let rally = prod.rally_point;
                         let waypoints = nav_grid.find_path(spawn_pos, rally);
 
@@ -91,7 +96,7 @@ pub fn server_production_system(
                                     Worker::default(),
                                     TacticalStance::default(),
                                     Radius(14.0),
-                                    MoveSpeed(190.0),
+                                    MoveSpeed(WORKER_MOVE_SPEED),
                                     Velocity::default(),
                                 ));
                             }

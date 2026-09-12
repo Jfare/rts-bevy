@@ -93,6 +93,9 @@ pub fn spawn_match_entities(
     // P1 Starting Workers (2 workers auto-harvesting at start)
     for &pos in shared::map::P1_STARTER_WORKERS.iter() {
         let scv_id = matchmaker.alloc_net_id();
+        let target_rock = shared::map::P1_MAIN_MINERALS[0];
+        let dir = (target_rock - pos).normalize_or_zero();
+        let rot = dir.y.atan2(dir.x);
 
         commands.spawn((
             Unit {
@@ -106,7 +109,7 @@ pub fn spawn_match_entities(
             },
             Health::new(80.0),
             Radius(14.0),
-            MoveSpeed(190.0),
+            MoveSpeed(WORKER_MOVE_SPEED),
             Velocity::default(),
             Faction::Player1,
             RoomId(room_id),
@@ -114,7 +117,7 @@ pub fn spawn_match_entities(
                 net_id: scv_id,
                 owner_peer_id: p1_peer,
             },
-            Transform::from_xyz(pos.x, pos.y, 2.0),
+            Transform::from_xyz(pos.x, pos.y, 2.0).with_rotation(Quat::from_rotation_z(rot)),
         ));
 
         initial_states.push(EntityState {
@@ -122,7 +125,7 @@ pub fn spawn_match_entities(
             kind: EntityKind::Unit(UnitKind::Worker),
             faction: Faction::Player1,
             position: pos,
-            rotation: 0.0,
+            rotation: rot,
             current_hp: 80.0,
             max_hp: 80.0,
         });
@@ -210,6 +213,9 @@ pub fn spawn_match_entities(
     // P2 Starting Workers (2 workers auto-harvesting at start)
     for &pos in shared::map::P2_STARTER_WORKERS.iter() {
         let scv_id = matchmaker.alloc_net_id();
+        let target_rock = shared::map::P2_MAIN_MINERALS[0];
+        let dir = (target_rock - pos).normalize_or_zero();
+        let rot = dir.y.atan2(dir.x);
 
         commands.spawn((
             Unit {
@@ -223,7 +229,7 @@ pub fn spawn_match_entities(
             },
             Health::new(80.0),
             Radius(14.0),
-            MoveSpeed(190.0),
+            MoveSpeed(WORKER_MOVE_SPEED),
             Velocity::default(),
             p2_faction,
             RoomId(room_id),
@@ -231,7 +237,7 @@ pub fn spawn_match_entities(
                 net_id: scv_id,
                 owner_peer_id: p2_owner,
             },
-            Transform::from_xyz(pos.x, pos.y, 2.0),
+            Transform::from_xyz(pos.x, pos.y, 2.0).with_rotation(Quat::from_rotation_z(rot)),
         ));
 
         initial_states.push(EntityState {
@@ -239,7 +245,7 @@ pub fn spawn_match_entities(
             kind: EntityKind::Unit(UnitKind::Worker),
             faction: p2_faction,
             position: pos,
-            rotation: 0.0,
+            rotation: rot,
             current_hp: 80.0,
             max_hp: 80.0,
         });

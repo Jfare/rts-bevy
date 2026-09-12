@@ -110,7 +110,11 @@ fn production_queue_system(
             prod.current_timer = 0.0;
 
             let building_pos = transform.translation.truncate();
-            let spawn_offset = Vec2::new(0.0, -radius.0 - 22.0);
+            let spawn_offset = if *faction == Faction::Player1 {
+                Vec2::new(0.0, -radius.0 - 22.0)
+            } else {
+                Vec2::new(0.0, radius.0 + 22.0)
+            };
             let spawn_pos = building_pos + spawn_offset;
             let rally_waypoints = nav_grid.find_path(spawn_pos, prod.rally_point);
 
@@ -129,7 +133,7 @@ fn production_queue_system(
                     TacticalStance::default(),
                     Health::new(80.0),
                     Radius(14.0),
-                    MoveSpeed(190.0),
+                    MoveSpeed(WORKER_MOVE_SPEED),
                     Velocity::default(),
                     *faction,
                     Selectable::default(),

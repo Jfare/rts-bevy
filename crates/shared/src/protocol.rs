@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
-use crate::components::Faction;
+use crate::components::{Faction, WorkerState};
 use crate::grid::BuildingKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Reflect)]
@@ -198,6 +198,8 @@ pub struct EntitySnapshot {
     pub max_hp: f32,
     pub is_mining: bool,
     pub laser_target: Option<Vec2>,
+    pub carried_minerals: u32,
+    pub worker_state: Option<WorkerState>,
 }
 
 /// Complete initial state of an entity on match start

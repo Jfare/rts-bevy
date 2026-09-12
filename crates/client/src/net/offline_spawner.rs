@@ -83,6 +83,10 @@ pub fn spawn_standalone_offline_match(
 
     // Spawn P1 Workers (2 workers auto-harvesting at start)
     for (i, &pos) in shared::map::P1_STARTER_WORKERS.iter().enumerate() {
+        let target_rock = shared::map::P1_MAIN_MINERALS[0];
+        let dir = (target_rock - pos).normalize_or_zero();
+        let rot = dir.y.atan2(dir.x);
+
         commands.spawn((
             Unit { name: "Worker".to_string(), supply_cost: 1 },
             Worker {
@@ -94,10 +98,10 @@ pub fn spawn_standalone_offline_match(
             Faction::Player1,
             Selectable::default(),
             Radius(14.0),
-            MoveSpeed(190.0),
+            MoveSpeed(WORKER_MOVE_SPEED),
             Velocity::default(),
             NetEntity { net_id: 10 + i as u32, owner_peer_id: 1 },
-            Transform::from_xyz(pos.x, pos.y, 2.0),
+            Transform::from_xyz(pos.x, pos.y, 2.0).with_rotation(Quat::from_rotation_z(rot)),
         ));
     }
 
@@ -135,6 +139,10 @@ pub fn spawn_standalone_offline_match(
 
     // Spawn Hostile AI Workers (2 workers auto-harvesting at start)
     for (i, &pos) in shared::map::P2_STARTER_WORKERS.iter().enumerate() {
+        let target_rock = shared::map::P2_MAIN_MINERALS[0];
+        let dir = (target_rock - pos).normalize_or_zero();
+        let rot = dir.y.atan2(dir.x);
+
         commands.spawn((
             Unit { name: "Worker".to_string(), supply_cost: 1 },
             Worker {
@@ -146,10 +154,10 @@ pub fn spawn_standalone_offline_match(
             Faction::HostileAi,
             Selectable::default(),
             Radius(14.0),
-            MoveSpeed(190.0),
+            MoveSpeed(WORKER_MOVE_SPEED),
             Velocity::default(),
             NetEntity { net_id: 110 + i as u32, owner_peer_id: 2 },
-            Transform::from_xyz(pos.x, pos.y, 2.0),
+            Transform::from_xyz(pos.x, pos.y, 2.0).with_rotation(Quat::from_rotation_z(rot)),
         ));
     }
 

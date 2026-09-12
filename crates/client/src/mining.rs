@@ -108,6 +108,7 @@ fn handle_mining_click_orders(
 fn worker_mining_state_machine(
     mut commands: Commands,
     time: Res<Time>,
+    net_client: Res<NetClient>,
     mut economy: ResMut<PlayerEconomy>,
     mut stats: ResMut<MatchStats>,
     mut worker_query: Query<(
@@ -122,6 +123,11 @@ fn worker_mining_state_machine(
     base_query: Query<(Entity, &Transform, &Faction, &Building, &BaseHQ), (With<BaseHQ>, Without<Worker>, Without<ResourceNode>)>,
     mut sound_events: EventWriter<SoundEffect>,
 ) {
+    // In online matches, the server simulates mining authoritatively and replicates via TickSnapshotBatch
+    if net_client.status == NetStatus::InGame {
+        return;
+    }
+
     let dt = time.delta_secs();
 
     for (worker_entity, mut worker, mut worker_transform, move_speed, faction, move_target_opt) in &mut worker_query {
@@ -446,20 +452,24 @@ fn draw_mining_visuals(
 
         // 2. Draw Carried Gold Nugget on Worker (strictly when actively hauling gold back to Base HQ)
         if worker.state == WorkerState::MovingToBase && worker.carried_minerals > 0 {
-            let nugget_center = worker_pos - forward * 2.0 + Vec2::new(0.0, 14.0);
+            // Center the chunky nugget on the worker's back oriented along heading
+            let nugget_center = worker_pos - forward * 7.0;
             let gold_bright = Color::srgb(1.0, 0.84, 0.18);
             let gold_highlight = Color::srgb(1.0, 0.98, 0.65);
             let gold_shadow = Color::srgb(0.75, 0.52, 0.10);
 
-            // Chunky faceted golden nugget
-            let pts = [
-                nugget_center + Vec2::new(-2.0, 7.0),
-                nugget_center + Vec2::new(4.5, 5.0),
-                nugget_center + Vec2::new(6.0, -1.5),
-                nugget_center + Vec2::new(2.5, -6.5),
-                nugget_center + Vec2::new(-4.0, -5.0),
-                nugget_center + Vec2::new(-6.0, 1.5),
+            // Chunky faceted golden nugget oriented with worker heading
+            let raw_offsets = [
+                Vec2::new(-2.0, 7.0),
+                Vec2::new(4.5, 5.0),
+                Vec2::new(6.0, -1.5),
+                Vec2::new(2.5, -6.5),
+                Vec2::new(-4.0, -5.0),
+                Vec2::new(-6.0, 1.5),
             ];
+            let pts: Vec<Vec2> = raw_offsets.iter().map(|o| {
+                nugget_center + right_side * o.x + forward * o.y
+            }).collect();
 
             for i in 0..pts.len() {
                 let next = (i + 1) % pts.len();
@@ -467,7 +477,7 @@ fn draw_mining_visuals(
             }
 
             // Chiseled facets
-            let apex = nugget_center + Vec2::new(-0.5, 1.5);
+            let apex = nugget_center + right_side * -0.5 + forward * 1.5;
             gizmos.line_2d(apex, pts[0], gold_highlight);
             gizmos.line_2d(apex, pts[1], gold_highlight);
             gizmos.line_2d(apex, pts[2], gold_bright);

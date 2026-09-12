@@ -11,13 +11,13 @@ pub const P1_BASE_POS: Vec2 = Vec2::new(0.0, -1000.0);
 pub const P2_BASE_POS: Vec2 = Vec2::new(0.0, 1000.0);
 
 pub const P1_STARTER_WORKERS: [Vec2; 2] = [
-    Vec2::new(-45.0, -920.0),
-    Vec2::new(45.0, -920.0),
+    Vec2::new(-40.0, -1080.0),
+    Vec2::new(40.0, -1080.0),
 ];
 
 pub const P2_STARTER_WORKERS: [Vec2; 2] = [
-    Vec2::new(45.0, 920.0),
-    Vec2::new(-45.0, 920.0),
+    Vec2::new(40.0, 1080.0),
+    Vec2::new(-40.0, 1080.0),
 ];
 
 // Main Golden Rock Fields (single 2000 Gold deposit centered with a 100% clear mining line to Base HQ)

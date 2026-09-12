@@ -201,6 +201,8 @@ pub enum WorkerState {
     MovingToBase,
 }
 
+pub const WORKER_MOVE_SPEED: f32 = 140.0;
+
 #[derive(Debug, Clone, PartialEq, Component, Reflect)]
 pub struct Worker {
     pub state: WorkerState,
@@ -223,7 +225,7 @@ impl Default for Worker {
             harvest_duration: 1.8,
             harvest_timer: 0.0,
             interact_distance: 51.0,
-            base_interact_distance: 125.0,
+            base_interact_distance: 72.0,
             target_node: None,
             target_base: None,
         }
