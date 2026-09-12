@@ -26,6 +26,9 @@ pub fn setup_hud(mut commands: Commands) {
             // Top HUD Bar (Title, APM, Resources, Network Status, Menu Button)
             spawn_top_bar(root);
 
+            // Top-Right Minimap Frame (Clean container without in-game headline)
+            spawn_minimap_frame(root);
+
             // Center Match Outcome Scoreboard (Hidden until Victory/Defeat)
             spawn_post_match_banner(root);
 
@@ -35,7 +38,26 @@ pub fn setup_hud(mut commands: Commands) {
             // ESC / Game Menu Modal Overlay (Hidden until toggled)
             spawn_game_menu_modal(root);
 
-            // Bottom Control Bar (Minimap / Radar Frame, Selection Info Card, Command Card)
+            // Bottom Control Bar (Selection Info Card, Command Card)
             spawn_bottom_bar(root);
         });
+}
+
+/// Spawns the top-right minimap backdrop frame without an in-game headline
+pub fn spawn_minimap_frame(parent: &mut ChildBuilder) {
+    parent.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            right: Val::Px(12.0),
+            top: Val::Px(70.0),
+            width: Val::Px(170.0),
+            height: Val::Px(170.0),
+            border: UiRect::all(Val::Px(1.5)),
+            ..default()
+        },
+        BorderRadius::all(Val::Px(4.0)),
+        BackgroundColor(Color::srgba(0.04, 0.07, 0.10, 0.85)),
+        BorderColor(Color::srgba(0.20, 0.45, 0.70, 0.90)),
+        FocusPolicy::Pass,
+    ));
 }

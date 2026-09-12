@@ -26,6 +26,7 @@ pub struct MinimapState {
     pub width: f32,
     pub height: f32,
     pub padding: f32,
+    pub top_offset: f32,
     pub is_dragging: bool,
 }
 
@@ -35,17 +36,18 @@ impl Default for MinimapState {
             width: 170.0,
             height: 170.0,
             padding: 12.0,
+            top_offset: 70.0,
             is_dragging: false,
         }
     }
 }
 
-/// Helper to get the screen-space Rect of the minimap (bottom-left area)
+/// Helper to get the screen-space Rect of the minimap (top-right area)
 pub fn get_minimap_screen_rect(window: &Window, state: &MinimapState) -> Rect {
-    let x_min = state.padding;
-    let y_max = window.height() - state.padding;
-    let x_max = x_min + state.width;
-    let y_min = y_max - state.height;
+    let x_max = window.width() - state.padding;
+    let x_min = x_max - state.width;
+    let y_min = state.top_offset;
+    let y_max = y_min + state.height;
     Rect {
         min: Vec2::new(x_min, y_min),
         max: Vec2::new(x_max, y_max),
@@ -84,7 +86,7 @@ pub fn minimap_screen_to_world(
     Vec2::new(world_x, world_y)
 }
 
-/// Renders the radar backdrop, blips, entities, and camera frustum
+/// Renders the minimap backdrop, blips, entities, and camera frustum
 fn draw_minimap_system(
     mut gizmos: Gizmos,
     minimap_state: Res<MinimapState>,
@@ -126,11 +128,11 @@ fn draw_minimap_system(
     let center = (p_min + p_max) * 0.5;
     let size = (p_max - p_min).abs();
 
-    // 1. Draw Radar Frame Background & Borders
+    // 1. Draw Minimap Frame Background & Borders
     let border_color = Color::srgba(0.20, 0.45, 0.70, 0.90);
     gizmos.rect_2d(center, size, border_color);
 
-    // Subtle radar crosshair in minimap center
+    // Subtle crosshair in minimap center
     gizmos.line_2d(
         to_world(Vec2::new(mm_rect.min.x, (mm_rect.min.y + mm_rect.max.y) * 0.5)),
         to_world(Vec2::new(mm_rect.max.x, (mm_rect.min.y + mm_rect.max.y) * 0.5)),
@@ -142,7 +144,7 @@ fn draw_minimap_system(
         Color::srgba(0.15, 0.30, 0.45, 0.35),
     );
 
-    // 1.5. Draw Static Map Obstacles (Dark Slate Radar Terrain) - shrouded if unexplored
+    // 1.5. Draw Static Map Obstacles (Dark Slate Terrain) - shrouded if unexplored
     let obs_color = Color::srgba(0.12, 0.16, 0.22, 0.90);
     let obs_border = Color::srgba(0.24, 0.35, 0.45, 0.70);
     let mm_scale = (mm_rect.max.x - mm_rect.min.x) / config.width();

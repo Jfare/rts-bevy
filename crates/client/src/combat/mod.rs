@@ -1,6 +1,6 @@
 pub mod melee_fighters;
 pub mod projectiles;
-pub mod soldiers;
+pub mod ranged_fighters;
 pub mod turrets;
 
 use bevy::prelude::*;
@@ -11,7 +11,7 @@ pub use projectiles::{
     death_and_elimination_system, draw_combat_gizmos, muzzle_flash_system,
     projectile_movement_and_impact_system,
 };
-pub use soldiers::soldier_combat_system;
+pub use ranged_fighters::ranged_fighter_combat_system;
 pub use turrets::turret_combat_system;
 
 /// Target snapshot used for disjoint scanning and combat logic
@@ -31,7 +31,7 @@ impl Plugin for CombatPlugin {
             .add_systems(
                 Update,
                 (
-                    soldier_combat_system,
+                    ranged_fighter_combat_system,
                     turret_combat_system,
                     melee_fighter_combat_system,
                     projectile_movement_and_impact_system,

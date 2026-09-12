@@ -42,7 +42,7 @@ pub fn update_match_outcome_banner(
 
             summary_text.0 = format!(
                 "⏱️ Match Duration: {:02}:{:02} | ⚡ APM: {} ({} Actions)\n\
-                 Gold Mined: {} | Spent: {}\n\
+                 🪙 Gold Mined: {} | Spent: {}\n\
                  🎖️ Units Trained: {} | Units Lost: {} | Kills: {}\n\
                  💥 Enemy Bases Destroyed: {} | Damage Dealt: {:.0}\n\
                  🎯 Kill / Death Ratio: {:.2}",
@@ -71,7 +71,7 @@ pub fn update_match_outcome_banner(
 
             summary_text.0 = format!(
                 "⏱️ Match Duration: {:02}:{:02} | ⚡ APM: {} ({} Actions)\n\
-                 Gold Mined: {} | Spent: {}\n\
+                 🪙 Gold Mined: {} | Spent: {}\n\
                  🎖️ Units Trained: {} | Units Lost: {} | Kills: {}\n\
                  💥 Enemy Bases Destroyed: {} | Damage Dealt: {:.0}\n\
                  🎯 Kill / Death Ratio: {:.2}",
@@ -152,7 +152,7 @@ pub fn handle_return_to_landing_button_interaction(
     }
 }
 
-/// Spawns the match outcome banner (Victory / Defeat and post-match scoreboard)
+/// Spawns the post-match outcome scoreboard banner (Victory/Defeat)
 pub fn spawn_post_match_banner(parent: &mut ChildBuilder) {
     parent
         .spawn((
@@ -265,4 +265,5 @@ pub fn spawn_post_match_banner(parent: &mut ChildBuilder) {
                 });
         });
 }
+
 

@@ -125,3 +125,4 @@ pub fn spawn_top_bar(parent: &mut ChildBuilder) {
                 });
         });
 }
+

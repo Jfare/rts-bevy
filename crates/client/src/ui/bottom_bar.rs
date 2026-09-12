@@ -5,7 +5,7 @@ use super::{
     spawn_command_card_ui, ProductionQueueText, SelectionDetailsText, SelectionTitleText,
 };
 
-/// Spawns the bottom HUD bar containing the radar map frame, selection/queue info card, and command card
+/// Spawns the bottom HUD bar containing the selection/queue info card and command card
 pub fn spawn_bottom_bar(parent: &mut ChildBuilder) {
     parent
         .spawn((
@@ -19,36 +19,7 @@ pub fn spawn_bottom_bar(parent: &mut ChildBuilder) {
             FocusPolicy::Pass,
         ))
         .with_children(|bottom_row| {
-            // Left Panel: Radar Minimap Frame
-            bottom_row
-                .spawn((
-                    Node {
-                        width: Val::Px(170.0),
-                        height: Val::Px(170.0),
-                        padding: UiRect::all(Val::Px(8.0)),
-                        border: UiRect::all(Val::Px(1.5)),
-                        justify_content: JustifyContent::FlexStart,
-                        align_items: AlignItems::FlexStart,
-                        ..default()
-                    },
-                    BorderRadius::all(Val::Px(4.0)),
-                    BackgroundColor(Color::srgba(0.04, 0.07, 0.10, 0.85)),
-                    BorderColor(Color::srgba(0.20, 0.45, 0.70, 0.90)),
-                    FocusPolicy::Pass,
-                ))
-                .with_children(|radar| {
-                    radar.spawn((
-                        Text::new("📡 RADAR MAP"),
-                        TextFont {
-                            font_size: 10.0,
-                            ..default()
-                        },
-                        TextColor(Color::srgba(0.35, 0.80, 1.0, 0.8)),
-                        FocusPolicy::Pass,
-                    ));
-                });
-
-            // Center Panel: Selection Info & Production Queue
+            // Left Panel: Selection Info & Production Queue
             bottom_row
                 .spawn((
                     Node {
@@ -102,3 +73,4 @@ pub fn spawn_bottom_bar(parent: &mut ChildBuilder) {
             spawn_command_card_ui(bottom_row);
         });
 }
+

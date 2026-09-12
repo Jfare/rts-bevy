@@ -6,7 +6,7 @@ use crate::particles::ParticleEvent;
 use super::TargetSnapshot;
 
 /// Ranged Fighter Combat State Machine with Hold Position support
-pub fn soldier_combat_system(
+pub fn ranged_fighter_combat_system(
     mut commands: Commands,
     time: Res<Time>,
     outcome_opt: Option<Res<MatchOutcome>>,
@@ -46,7 +46,7 @@ pub fn soldier_combat_system(
         })
         .collect();
 
-    // 2. Update all soldiers using the snapshot
+    // 2. Update all ranged fighters using the snapshot
     for (soldier_entity, mut soldier, mut soldier_transform, move_speed, faction, radius, move_target_opt, stance_opt) in
         &mut queries.p1()
     {
@@ -201,7 +201,7 @@ pub fn soldier_combat_system(
                                     lifetime: 0.0,
                                     max_lifetime: 0.07,
                                     color: Color::srgb(1.0, 0.85, 0.35),
-                                },
+                                    },
                                 Transform::from_xyz(muzzle_start.x, muzzle_start.y, 3.1),
                             ));
 
@@ -233,4 +233,3 @@ pub fn soldier_combat_system(
         }
     }
 }
-

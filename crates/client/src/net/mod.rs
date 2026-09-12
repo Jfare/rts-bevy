@@ -20,7 +20,9 @@ use crate::audio_sfx::SoundEffect;
 use crate::chat::ChatLog;
 use crate::particles::ParticleEvent;
 use crate::AppState;
-use message_handler::handle_server_message;
+use message_handler::{
+    handle_server_message, CameraQuery, CleanupQuery, EntityNetQuery, NodeQuery,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum NetStatus {
@@ -240,24 +242,10 @@ pub fn poll_network_events(
     mut next_state: ResMut<NextState<AppState>>,
     mut sound_events: EventWriter<SoundEffect>,
     mut particle_events: EventWriter<ParticleEvent>,
-    cleanup_query: Query<Entity, Or<(With<NetEntity>, With<Unit>, With<Building>, With<ResourceNode>)>>,
-    mut camera_query: Query<&mut Transform, (With<Camera2d>, Without<NetEntity>, Without<Unit>, Without<Building>, Without<ResourceNode>)>,
-    node_query: Query<(Entity, &NetEntity, &Transform), (With<ResourceNode>, Without<Camera2d>, Without<Unit>, Without<Building>)>,
-    mut entity_query: Query<(
-        Entity,
-        &NetEntity,
-        &Faction,
-        &mut Transform,
-        &mut Health,
-        Option<&mut Worker>,
-        Option<&mut Soldier>,
-        Option<&mut MeleeFighter>,
-        Option<&mut MoveTarget>,
-        Option<&mut TacticalStance>,
-        Option<&Radius>,
-        Option<&mut GunTurret>,
-        Option<&mut ProductionBuilding>,
-    ), (Without<Camera2d>, Without<ResourceNode>)>,
+    cleanup_query: CleanupQuery,
+    mut camera_query: CameraQuery,
+    node_query: NodeQuery,
+    mut entity_query: EntityNetQuery,
 ) {
     let now_ms = time.elapsed().as_millis() as u64;
 
