@@ -23,7 +23,7 @@ pub fn update_hud_economy_text(
 ) {
     let my_eco = economy.get(net_client.my_faction);
     for mut text in &mut min_query {
-        text.0 = format!("Gold: {}", my_eco.minerals);
+        text.0 = format!("🪙 Gold: {}", my_eco.minerals);
     }
     for mut text in &mut sup_query {
         text.0 = format!("⚡ Supply: {} / {}", my_eco.current_supply, my_eco.max_supply);
@@ -134,7 +134,7 @@ pub fn update_selection_info_text(
             }
         }
     } else if let Some(resource) = selected_resource {
-        title_str = "Gold Rock Deposit".to_string();
+        title_str = "🪙 Gold Rock Deposit".to_string();
         details_str = format!("Remaining Gold: {} / {}", resource.remaining_minerals, resource.max_minerals);
     } else if !selected_units.is_empty() {
         if selected_units.len() == 1 {
@@ -154,7 +154,7 @@ pub fn update_selection_info_text(
                     shared::components::WorkerState::Mining => "Mining Gold Rock",
                     shared::components::WorkerState::MovingToBase => "Returning Gold to Base HQ",
                 };
-                details_str = format!("Worker: {}{} | Carried: {} Gold | [S] Stop", state_str, stance_suffix, worker.carried_minerals);
+                details_str = format!("Worker: {}{} | Carried: {} 🪙 Gold | [S] Stop", state_str, stance_suffix, worker.carried_minerals);
             } else if melee_opt.is_some() {
                 details_str = format!("Melee Fighter (24 DMG, 32 Rng, Sword Strike){} | Right-Click Move/Attack | [S] Stop | [H] Hold", stance_suffix);
             } else if soldier_opt.is_some() {
@@ -188,7 +188,7 @@ pub fn update_command_card_text(
             let status = if placement_state.is_valid { "Valid Location (Left-Click to Place)" } else { "Blocked / Insufficient Tech or Gold" };
             text.0 = format!("🏗️ Placing: {} ({} Gold) - {} | [Esc/Right-Click] Cancel", kind.name(), placement_state.mineral_cost, status);
         } else {
-            text.0 = "[B] Barracks (150G) | [U] Turret (125G, Req Barracks) | [P] Supply Depot (100G) | [H] Base HQ (400G)".to_string();
+            text.0 = "[B] Barracks (150🪙) | [U] Turret (125🪙, Req Barracks) | [P] Supply Depot (100🪙) | [H] Base HQ (400🪙)".to_string();
         }
     }
 }

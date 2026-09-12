@@ -69,10 +69,10 @@ pub fn spawn_standalone_offline_match(
     let mut p1_primary_mineral_e = None;
     for (i, &min_pos) in shared::map::P1_MAIN_MINERALS.iter().enumerate() {
         let e = commands.spawn((
-            ResourceNode::new(1500),
+            ResourceNode::new(2000),
             Faction::Neutral,
             Selectable::default(),
-            Radius(24.0),
+            Radius(36.0),
             NetEntity { net_id: 2 + i as u32, owner_peer_id: 0 },
             Transform::from_xyz(min_pos.x, min_pos.y, 0.5),
         )).id();
@@ -121,10 +121,10 @@ pub fn spawn_standalone_offline_match(
     let mut ai_primary_mineral_e = None;
     for (i, &min_pos) in shared::map::P2_MAIN_MINERALS.iter().enumerate() {
         let e = commands.spawn((
-            ResourceNode::new(1500),
+            ResourceNode::new(2000),
             Faction::Neutral,
             Selectable::default(),
-            Radius(24.0),
+            Radius(36.0),
             NetEntity { net_id: 101 + i as u32, owner_peer_id: 0 },
             Transform::from_xyz(min_pos.x, min_pos.y, 0.5),
         )).id();
@@ -165,10 +165,10 @@ pub fn spawn_standalone_offline_match(
     for exp_cluster in all_expansions {
         for &exp_pos in exp_cluster {
             commands.spawn((
-                ResourceNode::new(1500),
+                ResourceNode::new(2000),
                 Faction::Neutral,
                 Selectable::default(),
-                Radius(24.0),
+                Radius(36.0),
                 NetEntity { net_id: net_id_counter, owner_peer_id: 0 },
                 Transform::from_xyz(exp_pos.x, exp_pos.y, 0.5),
             ));

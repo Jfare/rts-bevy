@@ -104,7 +104,7 @@ pub fn setup_hud(mut commands: Commands) {
                     ))
                     .with_children(|res_group| {
                         res_group.spawn((
-                            Text::new("Gold: 200"),
+                            Text::new("🪙 Gold: 200"),
                             TextFont {
                                 font_size: 17.0,
                                 ..default()

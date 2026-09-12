@@ -246,7 +246,7 @@ mod tests {
 
         assert_eq!(r1_count, states_r1.len());
         assert_eq!(r2_count, states_r2.len());
-        assert_eq!(r1_count, 20, "Room 1 should spawn 20 entities (HQs, Workers, Main & Expansion Minerals)");
+        assert_eq!(r1_count, 16, "Room 1 should spawn 16 entities (HQs, Workers, 1 Golden Rock per base & Expansion Minerals)");
     }
 
     #[test]

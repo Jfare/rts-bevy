@@ -183,10 +183,19 @@ fn worker_mining_state_machine(
                     continue;
                 };
 
-                let Ok((_, _, mut node)) = node_query.get_mut(node_entity) else {
+                let Ok((_, node_transform, mut node)) = node_query.get_mut(node_entity) else {
                     worker.state = WorkerState::MovingToBase;
                     continue;
                 };
+
+                // Face the golden rock directly while in melee range
+                let worker_pos = worker_transform.translation.truncate();
+                let node_pos = node_transform.translation.truncate();
+                let dir = (node_pos - worker_pos).normalize_or_zero();
+                if dir.length_squared() > 0.0 {
+                    let angle = dir.y.atan2(dir.x);
+                    worker_transform.rotation = Quat::from_rotation_z(angle);
+                }
 
                 worker.harvest_timer += dt;
 
@@ -320,38 +329,115 @@ fn draw_mining_visuals(
     time: Res<Time>,
     mut gizmos: Gizmos,
     worker_query: Query<(&Transform, &Worker)>,
-    node_query: Query<(Entity, &Transform, &ResourceNode)>,
+    _node_query: Query<(Entity, &Transform, &ResourceNode)>,
 ) {
     let t = time.elapsed_secs();
 
     for (worker_transform, worker) in &worker_query {
         let worker_pos = worker_transform.translation.truncate();
 
-        // 1. Draw Golden Plasma Mining Laser
+        let rot = worker_transform.rotation.to_euler(EulerRot::ZYX).0;
+        let forward = Vec2::new(rot.cos(), rot.sin());
+        let right_side = Vec2::new(forward.y, -forward.x);
+
+        // 1. Pickaxe Mining Animation & Strike Visuals
         if worker.state == WorkerState::Mining {
-            if let Some(node_entity) = worker.target_node {
-                if let Ok((_, node_transform, _)) = node_query.get(node_entity) {
-                    let node_pos = node_transform.translation.truncate();
+            // Rhythmic pickaxe swing cycle: ~0.42 seconds per swing
+            let swing_freq = 2.4;
+            let cycle = (t * swing_freq).fract(); // 0.0 to 1.0
 
-                    // Golden laser beam
-                    let pulse = (t * 20.0).sin() * 0.2 + 0.8;
-                    let laser_core = Color::srgba(1.0, 0.88, 0.25, 0.95 * pulse);
-                    let laser_glow = Color::srgba(0.95, 0.55, 0.08, 0.45 * pulse);
-                    let laser_hot = Color::srgba(1.0, 1.0, 0.80, 0.90 * pulse);
+            // Swing angle relative to worker forward orientation:
+            // 0.00..0.55: Wind-up - raising pickaxe back/high (+55 deg)
+            // 0.55..0.78: Power downswing - slamming forward down to the rock (-25 deg)
+            // 0.78..1.00: Impact, recoil, and follow-through (+10 deg returning to wind-up)
+            let angle_offset = if cycle < 0.55 {
+                let p = cycle / 0.55;
+                0.35 + 0.60 * (p * std::f32::consts::PI * 0.5).sin()
+            } else if cycle < 0.78 {
+                let p = (cycle - 0.55) / 0.23;
+                0.95 - 1.40 * (p * p)
+            } else {
+                let p = (cycle - 0.78) / 0.22;
+                -0.45 + 0.80 * (p * std::f32::consts::PI * 0.5).sin()
+            };
 
-                    gizmos.line_2d(worker_pos, node_pos, laser_core);
-                    gizmos.line_2d(worker_pos + Vec2::new(1.0, 1.0), node_pos + Vec2::new(1.0, 1.0), laser_glow);
-                    gizmos.line_2d(worker_pos - Vec2::new(1.0, 1.0), node_pos - Vec2::new(1.0, 1.0), laser_glow);
-                    gizmos.line_2d(worker_pos, node_pos, laser_hot);
+            let swing_angle = rot + angle_offset;
+            let swing_dir = Vec2::new(swing_angle.cos(), swing_angle.sin());
+            let swing_perp = Vec2::new(-swing_dir.y, swing_dir.x);
 
-                    // Molten golden sparks at impact point
-                    let spark_offset1 = Vec2::new((t * 25.0).cos() * 6.0, (t * 25.0).sin() * 6.0);
-                    let spark_offset2 = Vec2::new((t * 32.0).sin() * 7.5, (t * 32.0).cos() * 7.5);
-                    gizmos.circle_2d(node_pos + spark_offset1, 3.5, Color::srgba(1.0, 0.95, 0.50, 0.95));
-                    gizmos.circle_2d(node_pos + spark_offset2, 2.5, Color::srgba(1.0, 0.65, 0.15, 0.85));
-                    gizmos.circle_2d(node_pos, 4.0, Color::srgba(1.0, 1.0, 0.70, 0.80));
+            // Worker hands / handle pivot
+            let hands_pos = worker_pos + forward * 7.0 + right_side * 3.5;
+            let handle_len = 19.0;
+            let pick_head_center = hands_pos + swing_dir * handle_len;
+
+            // Worker arms holding pickaxe haft
+            let left_shoulder = worker_pos + forward * 4.0 - right_side * 4.5;
+            let right_shoulder = worker_pos + forward * 5.0 + right_side * 4.5;
+            gizmos.line_2d(left_shoulder, hands_pos, Color::srgb(0.95, 0.75, 0.20));
+            gizmos.line_2d(right_shoulder, hands_pos, Color::srgb(0.95, 0.75, 0.20));
+
+            // Pickaxe wooden haft (shaft)
+            gizmos.line_2d(hands_pos, pick_head_center, Color::srgb(0.72, 0.46, 0.22)); // Warm wood
+            gizmos.line_2d(hands_pos + swing_perp * 0.8, pick_head_center + swing_perp * 0.8, Color::srgb(0.55, 0.32, 0.12));
+
+            // Forged steel pickaxe head: double-pointed curved pick
+            let front_tip = pick_head_center + swing_perp * 12.0 + swing_dir * 4.5;
+            let back_tip = pick_head_center - swing_perp * 9.0 - swing_dir * 2.0;
+
+            // Steel collar / eye
+            gizmos.circle_2d(pick_head_center, 2.6, Color::srgb(0.38, 0.42, 0.48));
+            gizmos.circle_2d(pick_head_center, 1.4, Color::srgb(0.65, 0.70, 0.78));
+
+            // Curved pick blade lines
+            gizmos.line_2d(back_tip, pick_head_center, Color::srgb(0.78, 0.82, 0.90)); // Rear pick
+            gizmos.line_2d(pick_head_center, front_tip, Color::srgb(0.95, 0.98, 1.0)); // Front striking blade
+            gizmos.line_2d(pick_head_center + swing_dir * 1.5, front_tip, Color::srgb(0.70, 0.75, 0.85)); // Blade bevel
+            gizmos.circle_2d(front_tip, 1.4, Color::srgb(1.0, 1.0, 1.0)); // Glint on sharp chisel tip
+
+            // Strike Impact: Sparks, Flash & Golden Rock Chips
+            let is_striking = cycle >= 0.74 && cycle <= 0.88;
+            if is_striking {
+                // Bright golden impact flash
+                gizmos.circle_2d(front_tip, 5.0, Color::srgba(1.0, 0.95, 0.50, 0.85));
+                gizmos.circle_2d(front_tip, 2.5, Color::srgb(1.0, 1.0, 1.0));
+
+                // Molten golden sparks radiating outward
+                for s in 0..6 {
+                    let s_angle = (s as f32) * 1.05 + t * 40.0;
+                    let s_dist = 6.0 + (s as f32) * 2.5;
+                    let spark_pos = front_tip + Vec2::new(s_angle.cos(), s_angle.sin()) * s_dist;
+                    let spark_col = if s % 2 == 0 {
+                        Color::srgb(1.0, 0.88, 0.25)
+                    } else {
+                        Color::srgb(1.0, 0.55, 0.15)
+                    };
+                    gizmos.circle_2d(spark_pos, 1.8, spark_col);
                 }
+
+                // Flying chipped golden rock fragments
+                let chip_dir = forward;
+                let chip_left = front_tip + chip_dir * 5.0 + right_side * 7.0;
+                let chip_right = front_tip + chip_dir * 4.0 - right_side * 8.0;
+                gizmos.line_2d(front_tip, chip_left, Color::srgb(1.0, 0.84, 0.18));
+                gizmos.line_2d(front_tip, chip_right, Color::srgb(1.0, 0.92, 0.40));
             }
+        } else {
+            // Worker is Idle, Moving to Resource, or Returning to Base:
+            // Render pickaxe resting / strapped at worker's side
+            let rest_angle = rot - 0.55;
+            let rest_dir = Vec2::new(rest_angle.cos(), rest_angle.sin());
+            let rest_perp = Vec2::new(-rest_dir.y, rest_dir.x);
+            let handle_base = worker_pos - right_side * 6.0 + forward * 2.0;
+            let pick_head = handle_base + rest_dir * 14.0;
+
+            // Shaft
+            gizmos.line_2d(handle_base, pick_head, Color::srgb(0.72, 0.46, 0.22));
+            // Collar
+            gizmos.circle_2d(pick_head, 2.0, Color::srgb(0.40, 0.45, 0.50));
+            // Pick head
+            let p_back = pick_head - rest_perp * 6.0;
+            let p_front = pick_head + rest_perp * 7.5;
+            gizmos.line_2d(p_back, p_front, Color::srgb(0.85, 0.88, 0.95));
         }
 
         // 2. Draw Carried Gold Nugget on Worker

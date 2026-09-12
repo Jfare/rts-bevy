@@ -20,17 +20,13 @@ pub const P2_STARTER_WORKERS: [Vec2; 2] = [
     Vec2::new(-45.0, 920.0),
 ];
 
-// Main Mineral Fields (positioned in front of the back cliff wall, with a 100% clear mining line to Base HQ)
-pub const P1_MAIN_MINERALS: [Vec2; 3] = [
-    Vec2::new(-110.0, -1180.0),
+// Main Golden Rock Fields (single 2000 Gold deposit centered with a 100% clear mining line to Base HQ)
+pub const P1_MAIN_MINERALS: [Vec2; 1] = [
     Vec2::new(0.0, -1200.0),
-    Vec2::new(110.0, -1180.0),
 ];
 
-pub const P2_MAIN_MINERALS: [Vec2; 3] = [
-    Vec2::new(110.0, 1180.0),
+pub const P2_MAIN_MINERALS: [Vec2; 1] = [
     Vec2::new(0.0, 1200.0),
-    Vec2::new(-110.0, 1180.0),
 ];
 
 // Natural & Contested Expansion Mineral Fields

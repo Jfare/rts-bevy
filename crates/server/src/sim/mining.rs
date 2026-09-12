@@ -63,11 +63,19 @@ pub fn server_mining_system(
                     continue;
                 };
 
-                if let Ok((_, mut node, _, node_room)) = nodes.get_mut(node_e) {
+                if let Ok((node_tf, mut node, _, node_room)) = nodes.get_mut(node_e) {
                     if node_room.0 != worker_room.0 || node.remaining_minerals == 0 {
                         worker.target_node = None;
                         worker.state = WorkerState::Idle;
                         continue;
+                    }
+
+                    // Face the golden rock directly while in melee mining range
+                    let w_pos = transform.translation.truncate();
+                    let n_pos = node_tf.translation.truncate();
+                    let dir = (n_pos - w_pos).normalize_or_zero();
+                    if dir.length_squared() > 0.0 {
+                        transform.rotation = Quat::from_rotation_z(dir.y.atan2(dir.x));
                     }
 
                     worker.harvest_timer += dt;

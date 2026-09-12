@@ -106,7 +106,7 @@ pub fn spawn_command_card_ui(parent: &mut ChildBuilder) {
                     FocusPolicy::Pass,
                 ));
                 header.spawn((
-                    Text::new("[B] Barracks (150G) | [U] Turret (125G) | [P] Depot (100G) | [H] HQ (400G)"),
+                    Text::new("[B] Barracks (150🪙) | [U] Turret (125🪙) | [P] Depot (100🪙) | [H] HQ (400🪙)"),
                     TextFont {
                         font_size: 10.5,
                         ..default()
@@ -327,7 +327,7 @@ fn spawn_action_button(
     };
 
     let label_text = if let Some(cost) = mineral_cost {
-        format!("{} ({}G) {}", title, cost, shortcut)
+        format!("{} ({}🪙) {}", title, cost, shortcut)
     } else {
         format!("{} {}", title, shortcut)
     };

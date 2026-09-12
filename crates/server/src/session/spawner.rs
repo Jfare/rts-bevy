@@ -60,13 +60,13 @@ pub fn spawn_match_entities(
         max_hp: BuildingKind::BaseHQ.max_health(),
     });
 
-    // P1 Starting Mineral Field (3 nodes)
+    // P1 Starting Mineral Field (1 Golden Rock Deposit with 2000 Gold)
     let mut p1_primary_mineral_e = None;
     for &min_pos in shared::map::P1_MAIN_MINERALS.iter() {
         let min_id = matchmaker.alloc_net_id();
         let e = commands.spawn((
-            ResourceNode::new(1500),
-            Radius(32.0),
+            ResourceNode::new(2000),
+            Radius(36.0),
             RoomId(room_id),
             NetEntity {
                 net_id: min_id,
@@ -85,8 +85,8 @@ pub fn spawn_match_entities(
             faction: Faction::Neutral,
             position: min_pos,
             rotation: 0.0,
-            current_hp: 1500.0,
-            max_hp: 1500.0,
+            current_hp: 2000.0,
+            max_hp: 2000.0,
         });
     }
 
@@ -177,13 +177,13 @@ pub fn spawn_match_entities(
         max_hp: BuildingKind::BaseHQ.max_health(),
     });
 
-    // P2 / AI Starting Mineral Field (3 nodes)
+    // P2 / AI Starting Mineral Field (1 Golden Rock Deposit with 2000 Gold)
     let mut p2_primary_mineral_e = None;
     for &min_pos in shared::map::P2_MAIN_MINERALS.iter() {
         let min_id = matchmaker.alloc_net_id();
         let e = commands.spawn((
-            ResourceNode::new(1500),
-            Radius(32.0),
+            ResourceNode::new(2000),
+            Radius(36.0),
             RoomId(room_id),
             NetEntity {
                 net_id: min_id,
@@ -202,8 +202,8 @@ pub fn spawn_match_entities(
             faction: Faction::Neutral,
             position: min_pos,
             rotation: 0.0,
-            current_hp: 1500.0,
-            max_hp: 1500.0,
+            current_hp: 2000.0,
+            max_hp: 2000.0,
         });
     }
 
@@ -259,8 +259,8 @@ pub fn spawn_match_entities(
         for &exp_pos in exp_cluster {
             let exp_id = matchmaker.alloc_net_id();
             commands.spawn((
-                ResourceNode::new(1500),
-                Radius(32.0),
+                ResourceNode::new(2000),
+                Radius(36.0),
                 RoomId(room_id),
                 NetEntity {
                     net_id: exp_id,
@@ -275,8 +275,8 @@ pub fn spawn_match_entities(
                 faction: Faction::Neutral,
                 position: exp_pos,
                 rotation: 0.0,
-                current_hp: 1500.0,
-                max_hp: 1500.0,
+                current_hp: 2000.0,
+                max_hp: 2000.0,
             });
         }
     }

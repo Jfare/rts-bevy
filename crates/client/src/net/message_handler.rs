@@ -127,10 +127,10 @@ pub fn handle_server_message(
                     EntityKind::ResourceNode => {
                         let pos = ent_state.position;
                         let node_e = commands.spawn((
-                            ResourceNode::new(1500),
+                            ResourceNode::new(2000),
                             Faction::Neutral,
                             Selectable::default(),
-                            Radius(24.0),
+                            Radius(36.0),
                             NetEntity {
                                 net_id: ent_state.net_id,
                                 owner_peer_id: 0,

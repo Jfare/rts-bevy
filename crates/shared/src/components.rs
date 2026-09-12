@@ -222,7 +222,7 @@ impl Default for Worker {
             carried_minerals: 0,
             harvest_duration: 1.8,
             harvest_timer: 0.0,
-            interact_distance: 58.0,
+            interact_distance: 51.0,
             base_interact_distance: 125.0,
             target_node: None,
             target_base: None,

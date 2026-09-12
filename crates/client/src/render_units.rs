@@ -309,7 +309,7 @@ fn draw_resources_system(
         }
 
         let fullness = (resource.remaining_minerals as f32 / resource.max_minerals as f32).clamp(0.25, 1.0);
-        let size = 28.0 * fullness;
+        let size = 35.0 * fullness;
 
         // 1. Soft Ambient Gold Aura
         gizmos.circle_2d(pos, size + 8.0, gold_aura);
@@ -371,8 +371,8 @@ fn draw_resources_system(
         gizmos.circle_2d(pos + Vec2::new(-0.40, -0.30) * size, 2.0 * fullness, gold_bright);
 
         // 5. Flanking Satellite Gold Nuggets / Rock Clusters
-        let sat1_pos = pos + Vec2::new(-19.0, -10.0) * (0.6 + 0.4 * fullness);
-        let sat1_size = 7.0 * fullness;
+        let sat1_pos = pos + Vec2::new(-24.0, -13.0) * (0.6 + 0.4 * fullness);
+        let sat1_size = 8.0 * fullness;
         let sat1_pts = [
             sat1_pos + Vec2::new(0.0, sat1_size),
             sat1_pos + Vec2::new(sat1_size * 0.9, 0.0),
@@ -384,8 +384,8 @@ fn draw_resources_system(
         }
         gizmos.line_2d(sat1_pts[0], sat1_pts[2], gold_highlight);
 
-        let sat2_pos = pos + Vec2::new(18.0, 12.0) * (0.6 + 0.4 * fullness);
-        let sat2_size = 8.0 * fullness;
+        let sat2_pos = pos + Vec2::new(23.0, 15.0) * (0.6 + 0.4 * fullness);
+        let sat2_size = 9.0 * fullness;
         let sat2_pts = [
             sat2_pos + Vec2::new(0.2, sat2_size),
             sat2_pos + Vec2::new(sat2_size, -0.2 * sat2_size),
