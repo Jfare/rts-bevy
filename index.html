@@ -745,15 +745,15 @@
                     <div class="updates-header">
                         <div class="updates-title">
                             <span class="updates-badge">LATEST UPDATE</span>
-                            <span class="updates-version">v0.4.5</span>
+                            <span class="updates-version">v0.4.6</span>
                         </div>
                         <div class="updates-date">September 12, 2026</div>
                     </div>
                     <ul class="updates-list">
-                        <li><strong>⚡ Tactical APM Meter & Post-Match Lock:</strong> APM now tracks genuine tactical commands (movement, attacks, construction, training, stance toggles, rally points) instead of raw clicks or keyboard inputs. Early-game rate extrapolation provides accurate real-time metrics, and stats cleanly lock when Victory or Defeat is reached.</li>
-                        <li><strong>🪙 2,000 Gold Rock & Melee Pickaxe Mining:</strong> Resources are now renamed to Gold, featuring a monumental 2,000 Gold boulder at each base. Workers walk into melee range and strike with animated pickaxes, flying sparks, rock chips, and carried gold nuggets.</li>
-                        <li><strong>🎯 Unit Drag-Selection:</strong> Drag-box selection strictly selects mobile units, preventing accidental building selection during micro. Buildings are selected via dedicated single-clicks.</li>
-                        <li><strong>🧭 Forward-Facing Worker Movement:</strong> Workers consistently face forward along their movement vector, move at a balanced pace (140.0 speed), and spawn directly on the mineral side of the HQ.</li>
+                        <li><strong>🌫️ Fog of War Shrouded Enemy Mining:</strong> Hostile workers operating in the fog of war have their pickaxe swings, impact flashes, sparks, chipped rock fragments, and carried gold nuggets completely shrouded. Mining activity is only visible when scouted with active friendly vision.</li>
+                        <li><strong>🗺️ Top-Right Minimap & Smooth Drag Navigation:</strong> The minimap is now positioned in the top-right corner with a clean headline-free frame. Click-and-drag camera panning across the minimap is fully stabilized with boundary clamping in PostUpdate, preventing camera stutter and edge-pan conflicts.</li>
+                        <li><strong>⛏️ Smooth Worker Move Orders:</strong> Ordering mining workers to move away immediately breaks their mining cycle and resets their navigation state, preventing stalling, clustering, or rotational jitter.</li>
+                        <li><strong>⚡ Tactical APM Meter & Modularized Networking:</strong> Real-time APM extrapolates genuine strategic actions (moves, attacks, builds, stance toggles) and cleanly locks at match end, backed by modularized networking systems.</li>
                     </ul>
                 </div>
 
@@ -855,7 +855,7 @@
                 <div class="requirements-header">Required Controls & Hardware:</div>
                 <div class="requirement-item">
                     <span>🖱️</span>
-                    <span><strong>Mouse:</strong> Box-selection, right-click movement & context orders, radar panning.</span>
+                    <span><strong>Mouse:</strong> Box-selection, right-click movement & context orders, minimap panning.</span>
                 </div>
                 <div class="requirement-item">
                     <span>⌨️</span>
