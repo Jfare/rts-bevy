@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy::ui::FocusPolicy;
 use shared::components::{AppState, Faction};
 use shared::protocol::ClientMessage;
 
@@ -131,4 +132,176 @@ pub fn update_lobby_modal_status_text(
         }
     }
 }
+
+/// Spawns the in-game modal menu (controls summary, match status, resume, and forfeit)
+pub fn spawn_game_menu_modal(parent: &mut ChildBuilder) {
+    parent
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Percent(50.0),
+                top: Val::Percent(50.0),
+                margin: UiRect {
+                    left: Val::Px(-240.0),
+                    top: Val::Px(-200.0),
+                    right: Val::Px(0.0),
+                    bottom: Val::Px(0.0),
+                },
+                width: Val::Px(480.0),
+                padding: UiRect::all(Val::Px(24.0)),
+                border: UiRect::all(Val::Px(2.0)),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(14.0),
+                display: Display::None,
+                ..default()
+            },
+            BorderRadius::all(Val::Px(8.0)),
+            BackgroundColor(Color::srgba(0.06, 0.09, 0.14, 0.98)),
+            BorderColor(Color::srgb(0.30, 0.75, 1.0)),
+            LobbyModalContainer,
+        ))
+        .with_children(|modal| {
+            modal.spawn((
+                Text::new("⚙️ GAME MENU"),
+                TextFont {
+                    font_size: 20.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.35, 0.85, 1.0)),
+                FocusPolicy::Pass,
+            ));
+
+            modal.spawn((
+                Text::new("Match is in progress. Review game status and controls, resume, or forfeit."),
+                TextFont {
+                    font_size: 12.5,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.70, 0.78, 0.85)),
+                FocusPolicy::Pass,
+            ));
+
+            // Match status card
+            modal.spawn((
+                Text::new("Status: Match Active"),
+                TextFont {
+                    font_size: 13.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.80, 0.92, 1.0)),
+                LobbyStatusText,
+                FocusPolicy::Pass,
+            ));
+
+            // Quick Controls summary container
+            modal
+                .spawn((
+                    Node {
+                        width: Val::Percent(100.0),
+                        flex_direction: FlexDirection::Column,
+                        padding: UiRect::all(Val::Px(12.0)),
+                        row_gap: Val::Px(6.0),
+                        border: UiRect::all(Val::Px(1.0)),
+                        ..default()
+                    },
+                    BorderRadius::all(Val::Px(6.0)),
+                    BackgroundColor(Color::srgba(0.08, 0.12, 0.18, 0.95)),
+                    BorderColor(Color::srgb(0.20, 0.35, 0.50)),
+                    FocusPolicy::Pass,
+                ))
+                .with_children(|guide| {
+                    guide.spawn((
+                        Text::new("🎮 CONTROLS & COMMANDS"),
+                        TextFont {
+                            font_size: 12.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.35, 0.85, 1.0)),
+                        FocusPolicy::Pass,
+                    ));
+                    guide.spawn((
+                        Text::new("• Select Units: Left-Click / Drag Selection Box\n• Issue Orders: Right-Click (Move / Attack / Harvest)\n• Unit Tactics: [S] Stop | [H] Hold Position\n• Production: [V] Worker | [R] Ranged | [F] Melee\n• Structures: [B] Build Menu (HQ, Barracks, Supply Depot, Turret)\n• Game Menu: [Tab] / [F1] / [Esc]"),
+                        TextFont {
+                            font_size: 11.5,
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.75, 0.85, 0.95)),
+                        FocusPolicy::Pass,
+                    ));
+                });
+
+            // Action Buttons (Resume & Forfeit)
+            modal
+                .spawn((
+                    Node {
+                        width: Val::Percent(100.0),
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(10.0),
+                        margin: UiRect::top(Val::Px(8.0)),
+                        ..default()
+                    },
+                    FocusPolicy::Pass,
+                ))
+                .with_children(|actions| {
+                    // Resume Button
+                    actions
+                        .spawn((
+                            Button,
+                            Node {
+                                width: Val::Percent(100.0),
+                                padding: UiRect::axes(Val::Px(16.0), Val::Px(12.0)),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                border: UiRect::all(Val::Px(1.5)),
+                                ..default()
+                            },
+                            BorderRadius::all(Val::Px(6.0)),
+                            BackgroundColor(Color::srgba(0.12, 0.28, 0.45, 0.95)),
+                            BorderColor(Color::srgb(0.35, 0.85, 1.0)),
+                            LobbyButtonAction::CloseModal,
+                        ))
+                        .with_children(|btn| {
+                            btn.spawn((
+                                Text::new("▶ RESUME MATCH"),
+                                TextFont {
+                                    font_size: 14.0,
+                                    ..default()
+                                },
+                                TextColor(Color::WHITE),
+                                FocusPolicy::Pass,
+                            ));
+                        });
+
+                    // Forfeit & Return to Landing Page Button
+                    actions
+                        .spawn((
+                            Button,
+                            Node {
+                                width: Val::Percent(100.0),
+                                padding: UiRect::axes(Val::Px(16.0), Val::Px(12.0)),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                border: UiRect::all(Val::Px(1.5)),
+                                ..default()
+                            },
+                            BorderRadius::all(Val::Px(6.0)),
+                            BackgroundColor(Color::srgba(0.40, 0.12, 0.12, 0.95)),
+                            BorderColor(Color::srgb(0.95, 0.30, 0.30)),
+                            LobbyButtonAction::ForfeitMatch,
+                        ))
+                        .with_children(|btn| {
+                            btn.spawn((
+                                Text::new("🏳️ FORFEIT & QUIT TO LANDING PAGE"),
+                                TextFont {
+                                    font_size: 14.0,
+                                    ..default()
+                                },
+                                TextColor(Color::srgb(1.0, 0.90, 0.90)),
+                                FocusPolicy::Pass,
+                            ));
+                        });
+                });
+        });
+}
+
 

@@ -152,3 +152,117 @@ pub fn handle_return_to_landing_button_interaction(
     }
 }
 
+/// Spawns the match outcome banner (Victory / Defeat and post-match scoreboard)
+pub fn spawn_post_match_banner(parent: &mut ChildBuilder) {
+    parent
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Percent(50.0),
+                top: Val::Percent(50.0),
+                margin: UiRect {
+                    left: Val::Px(-270.0),
+                    top: Val::Px(-200.0),
+                    right: Val::Px(0.0),
+                    bottom: Val::Px(0.0),
+                },
+                width: Val::Px(540.0),
+                padding: UiRect::all(Val::Px(24.0)),
+                border: UiRect::all(Val::Px(2.0)),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                row_gap: Val::Px(16.0),
+                display: Display::None,
+                ..default()
+            },
+            BorderRadius::all(Val::Px(8.0)),
+            BackgroundColor(Color::srgba(0.04, 0.06, 0.09, 0.98)),
+            BorderColor(Color::srgb(0.3, 0.8, 1.0)),
+            MatchBannerContainer,
+        ))
+        .with_children(|banner| {
+            banner.spawn((
+                Text::new(""),
+                TextFont {
+                    font_size: 26.0,
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+                MatchBannerText,
+            ));
+
+            banner.spawn((
+                Text::new(""),
+                TextFont {
+                    font_size: 14.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.85, 0.90, 0.95)),
+                MatchStatsSummaryText,
+            ));
+
+            // Action Buttons Row
+            banner
+                .spawn(Node {
+                    flex_direction: FlexDirection::Row,
+                    column_gap: Val::Px(14.0),
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    ..default()
+                })
+                .with_children(|row| {
+                    // Play Again / Restart Button
+                    row.spawn((
+                        Button,
+                        Node {
+                            padding: UiRect::axes(Val::Px(24.0), Val::Px(10.0)),
+                            border: UiRect::all(Val::Px(1.5)),
+                            align_items: AlignItems::Center,
+                            justify_content: JustifyContent::Center,
+                            ..default()
+                        },
+                        BorderRadius::all(Val::Px(6.0)),
+                        BackgroundColor(Color::srgba(0.15, 0.35, 0.55, 0.95)),
+                        BorderColor(Color::srgb(0.35, 0.85, 1.0)),
+                        PlayAgainButton,
+                    ))
+                    .with_children(|btn| {
+                        btn.spawn((
+                            Text::new("🔄 PLAY AGAIN"),
+                            TextFont {
+                                font_size: 14.0,
+                                ..default()
+                            },
+                            TextColor(Color::WHITE),
+                        ));
+                    });
+
+                    // Return to Landing Button
+                    row.spawn((
+                        Button,
+                        Node {
+                            padding: UiRect::axes(Val::Px(24.0), Val::Px(10.0)),
+                            border: UiRect::all(Val::Px(1.5)),
+                            align_items: AlignItems::Center,
+                            justify_content: JustifyContent::Center,
+                            ..default()
+                        },
+                        BorderRadius::all(Val::Px(6.0)),
+                        BackgroundColor(Color::srgba(0.22, 0.26, 0.34, 0.95)),
+                        BorderColor(Color::srgb(0.60, 0.70, 0.85)),
+                        ReturnToLandingButton,
+                    ))
+                    .with_children(|btn| {
+                        btn.spawn((
+                            Text::new("🏠 LANDING PAGE"),
+                            TextFont {
+                                font_size: 14.0,
+                                ..default()
+                            },
+                            TextColor(Color::WHITE),
+                        ));
+                    });
+                });
+        });
+}
+

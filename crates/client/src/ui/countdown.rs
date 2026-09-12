@@ -76,3 +76,54 @@ pub fn update_match_countdown_system(
     }
 }
 
+/// Spawns the central countdown overlay (3, 2, 1, ENGAGE!)
+pub fn spawn_countdown_overlay(parent: &mut ChildBuilder) {
+    parent
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Percent(50.0),
+                top: Val::Percent(38.0),
+                margin: UiRect {
+                    left: Val::Px(-180.0),
+                    top: Val::Px(-80.0),
+                    ..default()
+                },
+                width: Val::Px(360.0),
+                height: Val::Px(160.0),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                flex_direction: FlexDirection::Column,
+                display: Display::None,
+                padding: UiRect::all(Val::Px(16.0)),
+                row_gap: Val::Px(6.0),
+                border: UiRect::all(Val::Px(2.0)),
+                ..default()
+            },
+            BorderRadius::all(Val::Px(12.0)),
+            BackgroundColor(Color::srgba(0.04, 0.07, 0.12, 0.95)),
+            BorderColor(Color::srgb(0.22, 0.74, 0.97)),
+            CountdownOverlayContainer,
+        ))
+        .with_children(|cd| {
+            cd.spawn((
+                Text::new("3"),
+                TextFont {
+                    font_size: 56.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.22, 0.74, 0.97)),
+                CountdownNumberText,
+            ));
+            cd.spawn((
+                Text::new("PREPARE FOR BATTLE"),
+                TextFont {
+                    font_size: 13.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.70, 0.85, 0.95)),
+                CountdownSubText,
+            ));
+        });
+}
+
