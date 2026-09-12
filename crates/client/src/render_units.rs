@@ -278,7 +278,7 @@ fn draw_buildings_system(
     }
 }
 
-/// Renders mineral crystal fields with crystalline facets and remaining node clusters
+/// Renders gold ore deposits as large, multi-faceted yellowish golden rock boulders with satellite nuggets
 fn draw_resources_system(
     mut gizmos: Gizmos,
     fog: Res<FogOfWarGrid>,
@@ -288,8 +288,13 @@ fn draw_resources_system(
     let default_cfg = WorldGridConfig::default();
     let config = grid_cfg.as_deref().unwrap_or(&default_cfg);
 
-    let crystal_col = Color::srgb(0.22, 0.90, 1.0);
-    let crystal_glow = Color::srgba(0.22, 0.90, 1.0, 0.35);
+    // Golden Rock Color Palette
+    let gold_bright = Color::srgb(1.0, 0.84, 0.18);       // Bright radiant gold edge
+    let gold_highlight = Color::srgb(1.0, 0.96, 0.55);    // Lit facet edge / gleam
+    let gold_rim = Color::srgba(0.88, 0.68, 0.12, 0.70);  // Inner rim contour
+    let gold_shadow = Color::srgba(0.68, 0.46, 0.08, 0.88); // Shadowed facet creases
+    let gold_core = Color::srgb(1.0, 1.0, 0.80);         // Sparkling ore fleck
+    let gold_aura = Color::srgba(1.0, 0.80, 0.12, 0.22);  // Ambient golden aura
 
     for (transform, resource) in &query {
         if resource.remaining_minerals == 0 {
@@ -298,34 +303,103 @@ fn draw_resources_system(
 
         let pos = transform.translation.truncate();
 
-        // Shroud mineral fields in unexplored fog
+        // Shroud gold deposits in unexplored fog
         if fog.get_state_at_world_pos(pos, config) == FogState::Unexplored {
             continue;
         }
 
-        let fullness = (resource.remaining_minerals as f32 / resource.max_minerals as f32).clamp(0.2, 1.0);
-        let size = 26.0 * fullness;
+        let fullness = (resource.remaining_minerals as f32 / resource.max_minerals as f32).clamp(0.25, 1.0);
+        let size = 28.0 * fullness;
 
-        // Central large crystal
-        let p_top = pos + Vec2::new(0.0, size);
-        let p_right = pos + Vec2::new(size * 0.8, 0.0);
-        let p_bottom = pos + Vec2::new(0.0, -size);
-        let p_left = pos + Vec2::new(-size * 0.8, 0.0);
+        // 1. Soft Ambient Gold Aura
+        gizmos.circle_2d(pos, size + 8.0, gold_aura);
+        gizmos.circle_2d(pos, size * 0.65, Color::srgba(1.0, 0.85, 0.18, 0.20));
 
-        gizmos.line_2d(p_top, p_right, crystal_col);
-        gizmos.line_2d(p_right, p_bottom, crystal_col);
-        gizmos.line_2d(p_bottom, p_left, crystal_col);
-        gizmos.line_2d(p_left, p_top, crystal_col);
-        gizmos.line_2d(p_left, p_right, Color::WHITE);
-        gizmos.line_2d(p_top, p_bottom, Color::srgba(1.0, 1.0, 1.0, 0.5));
+        // 2. Chunky Asymmetric Golden Rock Outline (8-point faceted polygon)
+        let rock_pts = [
+            pos + Vec2::new(-0.25, 0.98) * size,  // 0: top crest
+            pos + Vec2::new(0.45, 1.05) * size,   // 1: top ridge
+            pos + Vec2::new(0.98, 0.50) * size,   // 2: upper right cliff
+            pos + Vec2::new(1.05, -0.20) * size,  // 3: right edge
+            pos + Vec2::new(0.60, -0.88) * size,  // 4: lower right base
+            pos + Vec2::new(-0.15, -1.02) * size, // 5: bottom base
+            pos + Vec2::new(-0.85, -0.72) * size, // 6: lower left corner
+            pos + Vec2::new(-1.02, 0.20) * size,  // 7: left shoulder
+        ];
 
-        // Flanking small crystal clusters
-        let left_cluster = pos + Vec2::new(-16.0, -6.0);
-        let right_cluster = pos + Vec2::new(16.0, 8.0);
-        gizmos.circle_2d(left_cluster, 6.0 * fullness, crystal_col);
-        gizmos.circle_2d(right_cluster, 7.0 * fullness, crystal_col);
+        // Draw primary golden boulder outline
+        for i in 0..rock_pts.len() {
+            let next = (i + 1) % rock_pts.len();
+            gizmos.line_2d(rock_pts[i], rock_pts[next], gold_bright);
+        }
 
-        gizmos.circle_2d(pos, size * 0.5, crystal_glow);
+        // Inset rim line for chunky rock thickness
+        for i in 0..rock_pts.len() {
+            let next = (i + 1) % rock_pts.len();
+            let p1 = pos + (rock_pts[i] - pos) * 0.88;
+            let p2 = pos + (rock_pts[next] - pos) * 0.88;
+            gizmos.line_2d(p1, p2, gold_rim);
+        }
+
+        // 3. Chiseled 3D Rock Facet Ridges & Creases
+        let apex1 = pos + Vec2::new(-0.15, 0.25) * size;
+        let apex2 = pos + Vec2::new(0.22, -0.18) * size;
+
+        // Central ridge dividing main rock faces
+        gizmos.line_2d(apex1, apex2, gold_highlight);
+
+        // Lit facet ridges radiating from upper crest
+        gizmos.line_2d(apex1, rock_pts[0], gold_highlight);
+        gizmos.line_2d(apex1, rock_pts[1], gold_bright);
+        gizmos.line_2d(apex1, rock_pts[7], gold_bright);
+
+        // Transition ridges
+        gizmos.line_2d(apex1, rock_pts[2], gold_bright);
+        gizmos.line_2d(apex2, rock_pts[2], gold_bright);
+
+        // Shadowed facet creases radiating from lower ridge
+        gizmos.line_2d(apex2, rock_pts[3], gold_shadow);
+        gizmos.line_2d(apex2, rock_pts[4], gold_shadow);
+        gizmos.line_2d(apex2, rock_pts[5], gold_shadow);
+        gizmos.line_2d(apex2, rock_pts[6], gold_shadow);
+        gizmos.line_2d(apex1, rock_pts[6], gold_rim);
+
+        // 4. Embedded Gold Ore Flecks & Nuggets on the rock
+        gizmos.rect_2d(apex1 + Vec2::new(2.5, 3.0), Vec2::splat(4.5 * fullness), gold_core);
+        gizmos.rect_2d(apex2 + Vec2::new(-3.0, -2.0), Vec2::splat(3.5 * fullness), gold_highlight);
+        gizmos.circle_2d(pos + Vec2::new(0.35, 0.35) * size, 2.5 * fullness, gold_highlight);
+        gizmos.circle_2d(pos + Vec2::new(-0.40, -0.30) * size, 2.0 * fullness, gold_bright);
+
+        // 5. Flanking Satellite Gold Nuggets / Rock Clusters
+        let sat1_pos = pos + Vec2::new(-19.0, -10.0) * (0.6 + 0.4 * fullness);
+        let sat1_size = 7.0 * fullness;
+        let sat1_pts = [
+            sat1_pos + Vec2::new(0.0, sat1_size),
+            sat1_pos + Vec2::new(sat1_size * 0.9, 0.0),
+            sat1_pos + Vec2::new(0.0, -sat1_size),
+            sat1_pos + Vec2::new(-sat1_size * 0.9, 0.0),
+        ];
+        for i in 0..4 {
+            gizmos.line_2d(sat1_pts[i], sat1_pts[(i + 1) % 4], gold_bright);
+        }
+        gizmos.line_2d(sat1_pts[0], sat1_pts[2], gold_highlight);
+
+        let sat2_pos = pos + Vec2::new(18.0, 12.0) * (0.6 + 0.4 * fullness);
+        let sat2_size = 8.0 * fullness;
+        let sat2_pts = [
+            sat2_pos + Vec2::new(0.2, sat2_size),
+            sat2_pos + Vec2::new(sat2_size, -0.2 * sat2_size),
+            sat2_pos + Vec2::new(-0.2 * sat2_size, -sat2_size),
+            sat2_pos + Vec2::new(-sat2_size, 0.1 * sat2_size),
+        ];
+        for i in 0..4 {
+            gizmos.line_2d(sat2_pts[i], sat2_pts[(i + 1) % 4], gold_bright);
+        }
+        gizmos.line_2d(sat2_pts[0], sat2_pts[2], gold_highlight);
+
+        let sat3_pos = pos + Vec2::new(13.0, -16.0) * (0.6 + 0.4 * fullness);
+        gizmos.circle_2d(sat3_pos, 4.0 * fullness, gold_bright);
+        gizmos.circle_2d(sat3_pos, 2.0 * fullness, gold_core);
     }
 }
 

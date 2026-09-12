@@ -106,7 +106,7 @@ pub fn spawn_command_card_ui(parent: &mut ChildBuilder) {
                     FocusPolicy::Pass,
                 ));
                 header.spawn((
-                    Text::new("[B] Barracks (150 💎) | [U] Turret (125 💎) | [P] Depot (100 💎) | [H] HQ (400 💎)"),
+                    Text::new("[B] Barracks (150G) | [U] Turret (125G) | [P] Depot (100G) | [H] HQ (400G)"),
                     TextFont {
                         font_size: 10.5,
                         ..default()
@@ -327,7 +327,7 @@ fn spawn_action_button(
     };
 
     let label_text = if let Some(cost) = mineral_cost {
-        format!("{} ({}💎) {}", title, cost, shortcut)
+        format!("{} ({}G) {}", title, cost, shortcut)
     } else {
         format!("{} {}", title, shortcut)
     };
@@ -610,7 +610,7 @@ pub fn handle_command_card_interactions_system(
                                 && prod.queue.len() < prod.max_queue_size
                             {
                                 if !economy.has_minerals(*faction, 50) {
-                                    info!("⚠️ [Economy] Not enough minerals for Worker (Requires 50 💎)!");
+                                    info!("⚠️ [Economy] Not enough Gold for Worker (Requires 50 🪙)!");
                                     continue;
                                 }
 
@@ -663,7 +663,7 @@ pub fn handle_command_card_interactions_system(
                                 }
 
                                 if !economy.has_minerals(*faction, 100) {
-                                    info!("⚠️ [Economy] Not enough minerals for Ranged Fighter (Requires 100 💎)!");
+                                    info!("⚠️ [Economy] Not enough Gold for Ranged Fighter (Requires 100 🪙)!");
                                     continue;
                                 }
 
@@ -716,7 +716,7 @@ pub fn handle_command_card_interactions_system(
                                 }
 
                                 if !economy.has_minerals(*faction, 75) {
-                                    info!("⚠️ [Economy] Not enough minerals for Melee Fighter (Requires 75 💎)!");
+                                    info!("⚠️ [Economy] Not enough Gold for Melee Fighter (Requires 75 🪙)!");
                                     continue;
                                 }
 

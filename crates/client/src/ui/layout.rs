@@ -104,12 +104,12 @@ pub fn setup_hud(mut commands: Commands) {
                     ))
                     .with_children(|res_group| {
                         res_group.spawn((
-                            Text::new("💎 Minerals: 200"),
+                            Text::new("Gold: 200"),
                             TextFont {
                                 font_size: 17.0,
                                 ..default()
                             },
-                            TextColor(Color::srgb(0.25, 0.95, 1.0)),
+                            TextColor(Color::srgb(1.0, 0.84, 0.18)),
                             MineralsText,
                             FocusPolicy::Pass,
                         ));

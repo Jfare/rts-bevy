@@ -262,7 +262,7 @@ fn worker_mining_state_machine(
                         if *faction == Faction::Player1 {
                             stats.minerals_mined += worker.carried_minerals;
                         }
-                        info!("💎 [Mining] Worker deposited {} minerals for {:?}! New Bank Total: {}", worker.carried_minerals, faction, economy.get_minerals(*faction));
+                        info!("🪙 [Mining] Worker deposited {} gold for {:?}! New Bank Total: {}", worker.carried_minerals, faction, economy.get_minerals(*faction));
                         worker.carried_minerals = 0;
                     }
 
@@ -315,7 +315,7 @@ fn worker_mining_state_machine(
     }
 }
 
-/// Renders the pulsating cyan mining laser and carried mineral crystal
+/// Renders the pulsating golden mining laser and carried gold nugget
 fn draw_mining_visuals(
     time: Res<Time>,
     mut gizmos: Gizmos,
@@ -327,42 +327,64 @@ fn draw_mining_visuals(
     for (worker_transform, worker) in &worker_query {
         let worker_pos = worker_transform.translation.truncate();
 
-        // 1. Draw Cyan Mining Laser
+        // 1. Draw Golden Plasma Mining Laser
         if worker.state == WorkerState::Mining {
             if let Some(node_entity) = worker.target_node {
                 if let Ok((_, node_transform, _)) = node_query.get(node_entity) {
                     let node_pos = node_transform.translation.truncate();
 
-                    // Laser core
+                    // Golden laser beam
                     let pulse = (t * 20.0).sin() * 0.2 + 0.8;
-                    let laser_core = Color::srgba(0.35, 0.90, 1.0, 0.95 * pulse);
-                    let laser_glow = Color::srgba(0.15, 0.60, 1.0, 0.40 * pulse);
+                    let laser_core = Color::srgba(1.0, 0.88, 0.25, 0.95 * pulse);
+                    let laser_glow = Color::srgba(0.95, 0.55, 0.08, 0.45 * pulse);
+                    let laser_hot = Color::srgba(1.0, 1.0, 0.80, 0.90 * pulse);
 
                     gizmos.line_2d(worker_pos, node_pos, laser_core);
                     gizmos.line_2d(worker_pos + Vec2::new(1.0, 1.0), node_pos + Vec2::new(1.0, 1.0), laser_glow);
                     gizmos.line_2d(worker_pos - Vec2::new(1.0, 1.0), node_pos - Vec2::new(1.0, 1.0), laser_glow);
+                    gizmos.line_2d(worker_pos, node_pos, laser_hot);
 
-                    // Sparks at impact point
-                    let spark_offset = Vec2::new((t * 25.0).cos() * 6.0, (t * 25.0).sin() * 6.0);
-                    gizmos.circle_2d(node_pos + spark_offset, 3.5, Color::srgba(0.8, 1.0, 1.0, 0.9));
+                    // Molten golden sparks at impact point
+                    let spark_offset1 = Vec2::new((t * 25.0).cos() * 6.0, (t * 25.0).sin() * 6.0);
+                    let spark_offset2 = Vec2::new((t * 32.0).sin() * 7.5, (t * 32.0).cos() * 7.5);
+                    gizmos.circle_2d(node_pos + spark_offset1, 3.5, Color::srgba(1.0, 0.95, 0.50, 0.95));
+                    gizmos.circle_2d(node_pos + spark_offset2, 2.5, Color::srgba(1.0, 0.65, 0.15, 0.85));
+                    gizmos.circle_2d(node_pos, 4.0, Color::srgba(1.0, 1.0, 0.70, 0.80));
                 }
             }
         }
 
-        // 2. Draw Carried Mineral Diamond on Worker
+        // 2. Draw Carried Gold Nugget on Worker
         if worker.carried_minerals > 0 {
-            let diamond_center = worker_pos + Vec2::new(0.0, 18.0);
-            let diamond_col = Color::srgb(0.20, 0.95, 1.0);
-            let d_top = diamond_center + Vec2::new(0.0, 7.0);
-            let d_bottom = diamond_center + Vec2::new(0.0, -7.0);
-            let d_left = diamond_center + Vec2::new(-5.0, 0.0);
-            let d_right = diamond_center + Vec2::new(5.0, 0.0);
+            let nugget_center = worker_pos + Vec2::new(0.0, 18.0);
+            let gold_bright = Color::srgb(1.0, 0.84, 0.18);
+            let gold_highlight = Color::srgb(1.0, 0.98, 0.65);
+            let gold_shadow = Color::srgb(0.75, 0.52, 0.10);
 
-            gizmos.line_2d(d_top, d_right, diamond_col);
-            gizmos.line_2d(d_right, d_bottom, diamond_col);
-            gizmos.line_2d(d_bottom, d_left, diamond_col);
-            gizmos.line_2d(d_left, d_top, diamond_col);
-            gizmos.line_2d(d_left, d_right, Color::srgba(1.0, 1.0, 1.0, 0.7));
+            // Chunky faceted golden nugget
+            let pts = [
+                nugget_center + Vec2::new(-2.0, 7.0),
+                nugget_center + Vec2::new(4.5, 5.0),
+                nugget_center + Vec2::new(6.0, -1.5),
+                nugget_center + Vec2::new(2.5, -6.5),
+                nugget_center + Vec2::new(-4.0, -5.0),
+                nugget_center + Vec2::new(-6.0, 1.5),
+            ];
+
+            for i in 0..pts.len() {
+                let next = (i + 1) % pts.len();
+                gizmos.line_2d(pts[i], pts[next], gold_bright);
+            }
+
+            // Chiseled facets
+            let apex = nugget_center + Vec2::new(-0.5, 1.5);
+            gizmos.line_2d(apex, pts[0], gold_highlight);
+            gizmos.line_2d(apex, pts[1], gold_highlight);
+            gizmos.line_2d(apex, pts[2], gold_bright);
+            gizmos.line_2d(apex, pts[3], gold_shadow);
+            gizmos.line_2d(apex, pts[4], gold_shadow);
+            gizmos.line_2d(apex, pts[5], gold_bright);
+            gizmos.circle_2d(apex, 1.5, Color::srgb(1.0, 1.0, 0.9));
         }
     }
 }

@@ -69,9 +69,17 @@ impl PlayerEconomy {
             .unwrap_or(0)
     }
 
+    pub fn get_gold(&self, faction: Faction) -> u32 {
+        self.get_minerals(faction)
+    }
+
     pub fn set_minerals(&mut self, faction: Faction, amount: u32) {
         let entry = self.economies.entry(faction).or_default();
         entry.minerals = amount;
+    }
+
+    pub fn set_gold(&mut self, faction: Faction, amount: u32) {
+        self.set_minerals(faction, amount);
     }
 
     pub fn add_minerals(&mut self, faction: Faction, amount: u32) {
@@ -79,8 +87,16 @@ impl PlayerEconomy {
         entry.minerals = entry.minerals.saturating_add(amount);
     }
 
+    pub fn add_gold(&mut self, faction: Faction, amount: u32) {
+        self.add_minerals(faction, amount);
+    }
+
     pub fn has_minerals(&self, faction: Faction, amount: u32) -> bool {
         self.get_minerals(faction) >= amount
+    }
+
+    pub fn has_gold(&self, faction: Faction, amount: u32) -> bool {
+        self.has_minerals(faction, amount)
     }
 
     pub fn spend_minerals(&mut self, faction: Faction, amount: u32) -> bool {
@@ -91,6 +107,10 @@ impl PlayerEconomy {
         } else {
             false
         }
+    }
+
+    pub fn spend_gold(&mut self, faction: Faction, amount: u32) -> bool {
+        self.spend_minerals(faction, amount)
     }
 
     pub fn get_supply(&self, faction: Faction) -> (u32, u32) {

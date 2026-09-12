@@ -42,7 +42,7 @@ pub fn update_match_outcome_banner(
 
             summary_text.0 = format!(
                 "⏱️ Match Duration: {:02}:{:02} | ⚡ APM: {} ({} Actions)\n\
-                 💎 Minerals Mined: {} | Spent: {}\n\
+                 Gold Mined: {} | Spent: {}\n\
                  🎖️ Units Trained: {} | Units Lost: {} | Kills: {}\n\
                  💥 Enemy Bases Destroyed: {} | Damage Dealt: {:.0}\n\
                  🎯 Kill / Death Ratio: {:.2}",
@@ -71,7 +71,7 @@ pub fn update_match_outcome_banner(
 
             summary_text.0 = format!(
                 "⏱️ Match Duration: {:02}:{:02} | ⚡ APM: {} ({} Actions)\n\
-                 💎 Minerals Mined: {} | Spent: {}\n\
+                 Gold Mined: {} | Spent: {}\n\
                  🎖️ Units Trained: {} | Units Lost: {} | Kills: {}\n\
                  💥 Enemy Bases Destroyed: {} | Damage Dealt: {:.0}\n\
                  🎯 Kill / Death Ratio: {:.2}",
