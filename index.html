@@ -553,8 +553,8 @@
             100% { transform: rotate(360deg); }
         }
 
-        /* ── Mobile Unsupported Blocker Overlay ── */
-        #mobile-overlay {
+        /* ── Mobile Orientation & Guidance Overlay ── */
+        #mobile-overlay, #orientation-overlay {
             display: none;
             position: fixed;
             top: 0;
@@ -701,7 +701,7 @@
             <div id="portal-view-main" class="portal-view">
                 <div class="portal-header">
                     <div class="portal-title">⚡ MINI-RTS // TACTICAL COMMAND</div>
-                    <div class="portal-subtitle">Real-Time Strategy in Browser (Rust & Bevy 0.15 Wasm)</div>
+                    <div class="portal-subtitle">Real-Time Strategy in Browser (Rust & Bevy 0.15 Wasm) • Desktop & Mobile Touch</div>
                 </div>
 
                 <!-- Live Server Telemetry -->
@@ -745,15 +745,16 @@
                     <div class="updates-header">
                         <div class="updates-title">
                             <span class="updates-badge">LATEST UPDATE</span>
-                            <span class="updates-version">v0.4.6</span>
+                            <span class="updates-version">v0.5.0</span>
                         </div>
-                        <div class="updates-date">September 12, 2026</div>
+                        <div class="updates-date">September 13, 2026</div>
                     </div>
                     <ul class="updates-list">
-                        <li><strong>🌫️ Fog of War Shrouded Enemy Mining:</strong> Hostile workers operating in the fog of war have their pickaxe swings, impact flashes, sparks, chipped rock fragments, and carried gold nuggets completely shrouded. Mining activity is only visible when scouted with active friendly vision.</li>
-                        <li><strong>🗺️ Top-Right Minimap & Smooth Drag Navigation:</strong> The minimap is now positioned in the top-right corner with a clean headline-free frame. Click-and-drag camera panning across the minimap is fully stabilized with boundary clamping in PostUpdate, preventing camera stutter and edge-pan conflicts.</li>
-                        <li><strong>⛏️ Smooth Worker Move Orders:</strong> Ordering mining workers to move away immediately breaks their mining cycle and resets their navigation state, preventing stalling, clustering, or rotational jitter.</li>
-                        <li><strong>⚡ Tactical APM Meter & Modularized Networking:</strong> Real-time APM extrapolates genuine strategic actions (moves, attacks, builds, stance toggles) and cleanly locks at match end, backed by modularized networking systems.</li>
+                        <li><strong>📱 Mobile Touch & Cross-Platform 1v1:</strong> Complete mobile support with intuitive touch controls! Mobile and desktop commanders can face each other in real-time 1v1 matches with explicit platform identification badges (🖥️ Desktop vs 📱 Mobile).</li>
+                        <li><strong>👆 Touch Gestures & Proximity Tolerance:</strong> 1-finger camera drag pan, 2-finger pinch zoom, generous 20px finger tap-targeting, and double-tap unit grouping to instantly select all units of the same type on screen.</li>
+                        <li><strong>🔲 Floating Thumb Quick Bar:</strong> On-screen tactical controls for mobile commanders: instant [⚔️ ALL ARMY], [⛏️ WORKERS], [🔲 BOX SELECT] marquee mode toggle, and [❌ CLEAR] selection.</li>
+                        <li><strong>🖥️ Zero Desktop Regression:</strong> Desktop mouse and keyboard controls (WASD/edge pan, wheel zoom, marquee drag box, right-click context orders, and rapid hotkeys) remain completely untouched and isolated.</li>
+                        <li><strong>🔄 Responsive Landscape Guidance:</strong> Automatic orientation detection prompts mobile commanders to rotate their device into landscape mode for optimal battlefield visibility.</li>
                     </ul>
                 </div>
 
@@ -761,16 +762,12 @@
                 <div class="controls-card">
                     <div class="controls-title">🎮 QUICK GUIDE & CONTROLS</div>
                     <div class="controls-row">
-                        <span><strong>Select:</strong> Left-Click (Unit/Building) | Drag Box (Units Only)</span>
-                        <span><strong>Orders:</strong> Right-Click (Move / Attack / Mine Gold)</span>
+                        <span><strong>Desktop:</strong> Left-Click Select / Marquee Box | Right-Click Orders (Move / Attack / Mine Gold)</span>
+                        <span><strong>Hotkeys:</strong> <span class="kbd">B</span> Build | <span class="kbd">V</span> Worker | <span class="kbd">R</span>/<span class="kbd">F</span> Units | <span class="kbd">S</span> Stop | <span class="kbd">H</span> Hold</span>
                     </div>
                     <div class="controls-row">
-                        <span><strong>Tactics:</strong> Right-Click Move/Focus Fire | <span class="kbd">S</span> Stop | <span class="kbd">H</span> Hold Position</span>
-                        <span><strong>Production:</strong> <span class="kbd">V</span> Worker | <span class="kbd">R</span> Ranged | <span class="kbd">F</span> Melee</span>
-                    </div>
-                    <div class="controls-row">
-                        <span><strong>Structures:</strong> <span class="kbd">B</span> Build Menu (HQ, Barracks, Supply Depot, Gun Turret)</span>
-                        <span><strong>Menu:</strong> <span class="kbd">Tab</span> / <span class="kbd">F1</span> for Match Lobby</span>
+                        <span><strong>Mobile Touch:</strong> Tap Select/Order | 1-Finger Drag Pan | 2-Finger Pinch Zoom | Double-Tap Type Select</span>
+                        <span><strong>Mobile Bar:</strong> [⚔️ All Army] [⛏️ Workers] [🔲 Box Select] [❌ Clear]</span>
                     </div>
                 </div>
 
@@ -821,12 +818,14 @@
                         <div class="player-badge" style="background: rgba(56, 189, 248, 0.2); color: #38bdf8; border: 2px solid #38bdf8;">C</div>
                         <div class="player-name">Commander</div>
                         <div class="player-role" style="font-size: 0.75rem; color: #38bdf8;">YOU (BLUE)</div>
+                        <div class="player-platform" id="my-platform-badge" style="font-size: 0.72rem; color: #94a3b8; margin-top: 3px; font-weight: 600;">🖥️ Desktop</div>
                     </div>
                     <div class="vs-text">VS</div>
                     <div class="match-player">
                         <div class="player-badge" id="opponent-badge" style="background: rgba(239, 68, 68, 0.2); color: #ef4444; border: 2px solid #ef4444;">E</div>
                         <div class="player-name" id="opponent-name-val">Challenger</div>
                         <div class="player-role" id="opponent-color-val" style="font-size: 0.75rem; color: #ef4444;">OPPONENT (RED)</div>
+                        <div class="player-platform" id="opponent-platform-badge" style="font-size: 0.72rem; color: #94a3b8; margin-top: 3px; font-weight: 600;">🖥️ Desktop</div>
                     </div>
                 </div>
 
@@ -838,41 +837,44 @@
         </div>
     </div>
 
-    <!-- Mobile Unsupported Overlay -->
-    <div id="mobile-overlay">
+    <!-- Mobile Orientation & Landscape Guidance Overlay -->
+    <div id="orientation-overlay" style="display: none;">
         <div class="mobile-card">
-            <div class="mobile-badge">
-                <span>🚫</span>
-                <span>Desktop Experience Required</span>
+            <div class="mobile-badge" style="background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.5); color: #38bdf8;">
+                <span>📱</span>
+                <span>Mobile Touch Enabled</span>
             </div>
-            <div class="mobile-icon-banner">🖥️ ⚔️ 🖱️</div>
-            <h1 class="mobile-title">Desktop Only</h1>
+            <div class="mobile-icon-banner">🔄 📱 ⚔️</div>
+            <h1 class="mobile-title">Rotate to Landscape</h1>
             <p class="mobile-description">
-                <strong>Mini-RTS</strong> is designed for precision real-time strategy gameplay and currently requires a <strong>desktop or laptop browser</strong> with a physical keyboard and mouse.
+                <strong>Mini-RTS</strong> is optimized for <strong>Landscape mode</strong>. Turn your device horizontally for maximum battlefield visibility and tactical touch controls.
             </p>
 
             <div class="requirements-box">
-                <div class="requirements-header">Required Controls & Hardware:</div>
+                <div class="requirements-header">📱 Touch Controls Quick Guide:</div>
                 <div class="requirement-item">
-                    <span>🖱️</span>
-                    <span><strong>Mouse:</strong> Box-selection, right-click movement & context orders, minimap panning.</span>
+                    <span>👆</span>
+                    <span><strong>1-Finger Drag:</strong> Pan camera across the map.</span>
                 </div>
                 <div class="requirement-item">
-                    <span>⌨️</span>
-                    <span><strong>Keyboard:</strong> Rapid hotkeys for tactics (<span class="kbd">S</span> Stop, <span class="kbd">H</span> Hold), building (<span class="kbd">B</span>), and production (<span class="kbd">V</span> Worker, <span class="kbd">R</span>/<span class="kbd">F</span> Combat Units).</span>
+                    <span>✌️</span>
+                    <span><strong>2-Finger Pinch:</strong> Smoothly zoom in and out.</span>
                 </div>
                 <div class="requirement-item">
-                    <span>💻</span>
-                    <span><strong>Platform:</strong> Chrome, Edge, Firefox, or Safari on Windows, macOS, or Linux.</span>
+                    <span>🎯</span>
+                    <span><strong>Tap:</strong> Select units/buildings, issue Move/Attack/Mine orders.</span>
+                </div>
+                <div class="requirement-item">
+                    <span>🔲</span>
+                    <span><strong>Thumb Quick Bar:</strong> Select All Army, Workers, or Toggle Box-Select mode.</span>
                 </div>
             </div>
 
             <div class="copy-box">
-                <button class="copy-btn" id="btn-copy-link">
-                    <span>📋</span>
-                    <span id="copy-btn-text">Copy Link to Play on Desktop</span>
+                <button class="copy-btn" id="btn-dismiss-orientation">
+                    <span>⚔️</span>
+                    <span>Continue in Portrait / Dismiss</span>
                 </button>
-                <div class="url-display" id="url-display-text">https://rts.farell.ax</div>
             </div>
         </div>
     </div>
@@ -932,52 +934,66 @@
         }
 
         const isMobile = isMobileDevice();
+        window.__rts_client_platform = isMobile ? 'mobile' : 'desktop';
 
+        // Orientation guide for mobile portrait mode
+        const orientationOverlay = document.getElementById('orientation-overlay');
+        const btnDismissOrientation = document.getElementById('btn-dismiss-orientation');
+        let orientationDismissed = false;
+
+        function checkOrientation() {
+            if (!isMobile || orientationDismissed) {
+                if (orientationOverlay) orientationOverlay.style.display = 'none';
+                return;
+            }
+            const isPortrait = window.innerHeight > window.innerWidth;
+            if (isPortrait) {
+                if (orientationOverlay) orientationOverlay.style.display = 'flex';
+            } else {
+                if (orientationOverlay) orientationOverlay.style.display = 'none';
+            }
+        }
+
+        if (btnDismissOrientation) {
+            btnDismissOrientation.addEventListener('click', () => {
+                orientationDismissed = true;
+                if (orientationOverlay) orientationOverlay.style.display = 'none';
+            });
+        }
+
+        window.addEventListener('resize', checkOrientation);
+        window.addEventListener('orientationchange', () => setTimeout(checkOrientation, 200));
+        checkOrientation();
+
+        // Update UI for Mobile
         if (isMobile) {
-            // Disable game on mobile device
-            if (portalOverlay) portalOverlay.style.display = 'none';
-            if (canvas) {
-                canvas.style.display = 'none';
-                canvas.remove();
-            }
-            if (mobileOverlay) {
-                mobileOverlay.style.display = 'flex';
-            }
+            const myPlatBadge = document.getElementById('my-platform-badge');
+            if (myPlatBadge) myPlatBadge.innerText = '📱 Mobile';
 
-            if (urlDisplayText) {
-                urlDisplayText.innerText = window.location.href;
+            const controlsCard = document.querySelector('.controls-card');
+            if (controlsCard) {
+                controlsCard.innerHTML = `
+                    <div class="controls-title">📱 MOBILE TOUCH CONTROLS</div>
+                    <div class="controls-row">
+                        <span><strong>Camera:</strong> 1-Finger Drag to Pan | 2-Finger Pinch to Zoom</span>
+                        <span><strong>Orders:</strong> Tap Ground (Move) | Tap Enemy (Attack) | Tap Mineral (Mine)</span>
+                    </div>
+                    <div class="controls-row">
+                        <span><strong>Selection:</strong> Tap Unit/Building | Double-Tap (Select Same Type)</span>
+                        <span><strong>Quick Bar:</strong> [⚔️ All Army] [⛏️ Workers] [🔲 Box Select] [❌ Clear]</span>
+                    </div>
+                    <div class="controls-row">
+                        <span><strong>Building:</strong> Tap [🏗️ BUILD] button, then tap battlefield to place</span>
+                        <span><strong>Minimap:</strong> Drag thumb over top-right radar to reposition camera</span>
+                    </div>
+                `;
             }
+        }
 
-            if (btnCopyLink) {
-                btnCopyLink.addEventListener('click', async () => {
-                    try {
-                        const url = window.location.href;
-                        if (navigator.clipboard && navigator.clipboard.writeText) {
-                            await navigator.clipboard.writeText(url);
-                        } else {
-                            const tempInput = document.createElement('input');
-                            tempInput.value = url;
-                            document.body.appendChild(tempInput);
-                            tempInput.select();
-                            document.execCommand('copy');
-                            document.body.removeChild(tempInput);
-                        }
-                        if (copyBtnText) {
-                            copyBtnText.innerText = '✅ Link Copied to Clipboard!';
-                            setTimeout(() => {
-                                copyBtnText.innerText = 'Copy Link to Play on Desktop';
-                            }, 3000);
-                        }
-                    } catch (err) {
-                        if (copyBtnText) copyBtnText.innerText = 'URL: ' + window.location.host;
-                    }
-                });
-            }
-        } else {
-            // Desktop flow & Views Management
-            let queueTimerInterval = null;
-            let queueSeconds = 0;
-            let countdownTimerInterval = null;
+        // Tactical Views Management & Matchmaking
+        let queueTimerInterval = null;
+        let queueSeconds = 0;
+        let countdownTimerInterval = null;
 
             function showView(viewId) {
                 ['portal-view-main', 'portal-view-queue', 'portal-view-match-found'].forEach(id => {
@@ -1074,13 +1090,15 @@
                 fetchServerTelemetry();
             };
 
-            window.__rts_on_match_found = function(opponentName, opponentColor, countdownSecs) {
+            window.__rts_on_match_found = function(opponentName, opponentColor, countdownSecs, opponentPlatform) {
                 stopQueueTimer();
                 showView('portal-view-match-found');
 
                 const oppNameEl = document.getElementById('opponent-name-val');
                 const oppColorEl = document.getElementById('opponent-color-val');
                 const oppBadge = document.getElementById('opponent-badge');
+                const oppPlatformEl = document.getElementById('opponent-platform-badge');
+                const myPlatformEl = document.getElementById('my-platform-badge');
                 const countNumEl = document.getElementById('match-countdown-number');
                 const countLblEl = document.getElementById('match-countdown-label');
 
@@ -1090,6 +1108,8 @@
                 if (oppNameEl) oppNameEl.innerText = oppName;
                 if (oppColorEl) oppColorEl.innerText = `OPPONENT (${oppCol.toUpperCase()})`;
                 if (oppBadge) oppBadge.innerText = oppName.charAt(0).toUpperCase();
+                if (oppPlatformEl) oppPlatformEl.innerText = opponentPlatform || '🖥️ Desktop';
+                if (myPlatformEl) myPlatformEl.innerText = isMobile ? '📱 Mobile' : '🖥️ Desktop';
 
                 let count = Math.ceil(countdownSecs || 3);
                 if (countNumEl) {
@@ -1165,7 +1185,6 @@
                 if (loadingBadge) loadingBadge.style.display = 'none';
                 if (serverCloudBadge) serverCloudBadge.style.display = 'inline';
             }, 3000);
-        }
     </script>
 </body>
 </html>

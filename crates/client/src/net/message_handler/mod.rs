@@ -302,12 +302,15 @@ pub fn handle_server_message(
             opponent_name,
             opponent_color,
             countdown_seconds,
+            opponent_platform,
         } => session::handle_match_found(
+            net_client,
             countdown_opt,
             sound_events,
             opponent_name,
             opponent_color,
             countdown_seconds,
+            opponent_platform,
         ),
 
         ServerMessage::QueueCancelled => session::handle_queue_cancelled(net_client, next_state),

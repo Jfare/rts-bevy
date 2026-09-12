@@ -39,7 +39,11 @@ impl Plugin for SelectionPlugin {
         app.init_resource::<SelectionState>()
             .add_systems(
                 Update,
-                (handle_selection_input, draw_selection_gizmos).run_if(in_state(AppState::InGame)),
+                (
+                    handle_selection_input.run_if(crate::controls::is_desktop_control_scheme),
+                    draw_selection_gizmos,
+                )
+                    .run_if(in_state(AppState::InGame)),
             );
     }
 }

@@ -30,8 +30,8 @@ impl Plugin for CommandMarkerPlugin {
         app.add_systems(
             Update,
             (
-                handle_right_click_orders,
-                handle_stance_and_ability_hotkeys,
+                handle_right_click_orders.run_if(crate::controls::is_desktop_control_scheme),
+                handle_stance_and_ability_hotkeys.run_if(crate::controls::is_desktop_control_scheme),
                 update_and_draw_command_markers,
             )
                 .run_if(in_state(AppState::InGame)),

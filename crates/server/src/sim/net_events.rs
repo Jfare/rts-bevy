@@ -48,6 +48,7 @@ pub fn handle_incoming_network_events(
                         mode,
                         room_code,
                         faction_color,
+                        platform,
                     } => {
                         handle_join_lobby(
                             &mut commands,
@@ -58,6 +59,7 @@ pub fn handle_incoming_network_events(
                             mode,
                             room_code,
                             faction_color,
+                            platform,
                         );
                     }
                     shared::protocol::ClientMessage::CancelQueue => {

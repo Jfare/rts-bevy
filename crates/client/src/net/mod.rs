@@ -13,7 +13,7 @@ use shared::components::*;
 use shared::economy::PlayerEconomy;
 use shared::grid::NavGrid;
 use shared::protocol::{
-    decode_server_msg, encode_client_msg, ClientMessage, FactionColor, GameMode,
+    decode_server_msg, encode_client_msg, ClientMessage, ClientPlatform, FactionColor, GameMode,
 };
 
 use crate::audio_sfx::SoundEffect;
@@ -34,7 +34,7 @@ pub enum NetStatus {
     InGame,
 }
 
-#[allow(dead_code)]
+/// Global online telemetry cache
 #[derive(Resource, Default, Debug, Clone, Copy)]
 pub struct ServerTelemetry {
     pub queue_1v1: u32,
@@ -43,6 +43,7 @@ pub struct ServerTelemetry {
     pub active_solo_matches: u32,
     pub max_solo_matches: u32,
     pub total_online: u32,
+    #[allow(dead_code)]
     pub last_updated_ms: u64,
 }
 
@@ -54,6 +55,8 @@ pub struct NetClient {
     pub my_peer_id: u64,
     pub my_faction: Faction,
     pub my_color: FactionColor,
+    pub my_platform: ClientPlatform,
+    pub opponent_platform: Option<ClientPlatform>,
     pub player_name: String,
     pub current_room_code: Option<String>,
     pub current_mode: GameMode,
@@ -76,6 +79,8 @@ impl Default for NetClient {
             my_peer_id: 1,
             my_faction: Faction::Player1,
             my_color: FactionColor::Blue,
+            my_platform: ClientPlatform::Desktop,
+            opponent_platform: None,
             player_name: "Commander".to_string(),
             current_room_code: None,
             current_mode: GameMode::SoloVsAi,
@@ -289,6 +294,7 @@ pub fn poll_network_events(
                         mode,
                         room_code: None,
                         faction_color: Some(net_client.my_color),
+                        platform: Some(net_client.my_platform),
                     });
                 }
             }

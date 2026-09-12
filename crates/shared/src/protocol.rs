@@ -129,6 +129,29 @@ pub enum EntityKind {
     ResourceNode,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Reflect, Default)]
+pub enum ClientPlatform {
+    #[default]
+    Desktop,
+    Mobile,
+}
+
+impl ClientPlatform {
+    pub fn badge(&self) -> &'static str {
+        match self {
+            ClientPlatform::Desktop => "🖥️ Desktop",
+            ClientPlatform::Mobile => "📱 Mobile",
+        }
+    }
+
+    pub fn icon(&self) -> &'static str {
+        match self {
+            ClientPlatform::Desktop => "🖥️",
+            ClientPlatform::Mobile => "📱",
+        }
+    }
+}
+
 /// Messages sent from Client to Server
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ClientMessage {
@@ -137,6 +160,8 @@ pub enum ClientMessage {
         mode: GameMode,
         room_code: Option<String>,
         faction_color: Option<FactionColor>,
+        #[serde(default)]
+        platform: Option<ClientPlatform>,
     },
     RequestBuild {
         building_kind: BuildingKind,
@@ -228,6 +253,8 @@ pub enum ServerMessage {
         opponent_name: String,
         opponent_color: FactionColor,
         countdown_seconds: f32,
+        #[serde(default)]
+        opponent_platform: Option<ClientPlatform>,
     },
     QueueCancelled,
     LobbyStats {
@@ -368,3 +395,56 @@ pub fn encode_server_msg(msg: &ServerMessage) -> Result<Vec<u8>, bincode::Error>
 pub fn decode_server_msg(bytes: &[u8]) -> Result<ServerMessage, bincode::Error> {
     bincode::deserialize(bytes)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_client_platform_badges_and_icons() {
+        assert_eq!(ClientPlatform::Desktop.badge(), "🖥️ Desktop");
+        assert_eq!(ClientPlatform::Desktop.icon(), "🖥️");
+        assert_eq!(ClientPlatform::Mobile.badge(), "📱 Mobile");
+        assert_eq!(ClientPlatform::Mobile.icon(), "📱");
+    }
+
+    #[test]
+    fn test_client_message_join_lobby_platform_roundtrip() {
+        let msg = ClientMessage::JoinLobby {
+            player_name: "MobileCommander".to_string(),
+            mode: GameMode::Multiplayer1v1,
+            room_code: None,
+            faction_color: Some(FactionColor::Blue),
+            platform: Some(ClientPlatform::Mobile),
+        };
+
+        let encoded = encode_client_msg(&msg).expect("Failed to encode");
+        let decoded = decode_client_msg(&encoded).expect("Failed to decode");
+
+        if let ClientMessage::JoinLobby { platform, .. } = decoded {
+            assert_eq!(platform, Some(ClientPlatform::Mobile));
+        } else {
+            panic!("Decoded message was not JoinLobby");
+        }
+    }
+
+    #[test]
+    fn test_server_message_match_found_platform_roundtrip() {
+        let msg = ServerMessage::MatchFound {
+            opponent_name: "DesktopAce".to_string(),
+            opponent_color: FactionColor::Red,
+            countdown_seconds: 3.0,
+            opponent_platform: Some(ClientPlatform::Desktop),
+        };
+
+        let encoded = encode_server_msg(&msg).expect("Failed to encode");
+        let decoded = decode_server_msg(&encoded).expect("Failed to decode");
+
+        if let ServerMessage::MatchFound { opponent_platform, .. } = decoded {
+            assert_eq!(opponent_platform, Some(ClientPlatform::Desktop));
+        } else {
+            panic!("Decoded message was not MatchFound");
+        }
+    }
+}
+

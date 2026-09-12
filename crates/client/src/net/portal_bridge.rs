@@ -23,6 +23,14 @@ pub fn poll_web_portal_launch_requests(
 ) {
     #[cfg(target_arch = "wasm32")]
     {
+        if let Ok(val) = js_sys::eval("window.__rts_client_platform || ''") {
+            if let Some(plat_str) = val.as_string() {
+                if plat_str == "mobile" {
+                    net_client.my_platform = shared::protocol::ClientPlatform::Mobile;
+                }
+            }
+        }
+
         if let Ok(val) = js_sys::eval("window.__rts_cancel_queue || false") {
             if val.as_bool().unwrap_or(false) {
                 let _ = js_sys::eval("window.__rts_cancel_queue = false;");
@@ -51,6 +59,7 @@ pub fn poll_web_portal_launch_requests(
                                 mode: GameMode::Multiplayer1v1,
                                 room_code: None,
                                 faction_color: Some(net_client.my_color),
+                                platform: Some(net_client.my_platform),
                             });
                         }
                     } else if mode_str == "solo" {
@@ -83,6 +92,7 @@ pub fn poll_web_portal_launch_requests(
                                 mode: GameMode::SoloVsAi,
                                 room_code: None,
                                 faction_color: Some(net_client.my_color),
+                                platform: Some(net_client.my_platform),
                             });
                         }
                     }

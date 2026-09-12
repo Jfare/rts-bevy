@@ -4,7 +4,7 @@ use crate::session::{Matchmaker, PlayerSession, Room};
 use shared::components::*;
 use shared::economy::PlayerEconomy;
 use shared::grid::NavGrid;
-use shared::protocol::{ClientMessage, FactionColor, GameMode, PingType, ServerMessage};
+use shared::protocol::{ClientMessage, ClientPlatform, FactionColor, GameMode, PingType, ServerMessage};
 
 #[test]
 fn test_combat_system_strictly_isolates_rooms() {
@@ -201,6 +201,7 @@ fn test_disconnect_cleans_up_room_entities_and_telemetry() {
             room_id: 1,
             faction: Faction::Player1,
             color: FactionColor::Blue,
+            platform: ClientPlatform::Desktop,
         },
     );
     let mut r1 = Room::new(1, None, GameMode::SoloVsAi, Some(101), None);
@@ -261,6 +262,7 @@ fn test_forfeit_cleans_up_room_entities_and_telemetry() {
             room_id: 1,
             faction: Faction::Player1,
             color: FactionColor::Blue,
+            platform: ClientPlatform::Desktop,
         },
     );
     let mut r1 = Room::new(1, None, GameMode::SoloVsAi, Some(101), None);
@@ -319,6 +321,7 @@ fn test_tick_snapshots_are_partitioned_per_room() {
             room_id: 1,
             faction: Faction::Player1,
             color: FactionColor::Blue,
+            platform: ClientPlatform::Desktop,
         },
     );
     let mut r1 = Room::new(1, None, GameMode::SoloVsAi, Some(101), None);
@@ -335,6 +338,7 @@ fn test_tick_snapshots_are_partitioned_per_room() {
             room_id: 2,
             faction: Faction::Player1,
             color: FactionColor::Teal,
+            platform: ClientPlatform::Desktop,
         },
     );
     let mut r2 = Room::new(2, None, GameMode::SoloVsAi, Some(201), None);
@@ -425,6 +429,7 @@ fn test_custom_private_room_matching_by_code() {
             mode: GameMode::CustomPrivate,
             room_code: None,
             faction_color: Some(FactionColor::Teal),
+            platform: Some(ClientPlatform::Desktop),
         },
     }).unwrap();
 
@@ -451,6 +456,7 @@ fn test_custom_private_room_matching_by_code() {
             mode: GameMode::CustomPrivate,
             room_code: Some(generated_code.clone()),
             faction_color: Some(FactionColor::Red),
+            platform: Some(ClientPlatform::Desktop),
         },
     }).unwrap();
 
@@ -498,6 +504,7 @@ fn test_chat_and_ping_dispatching() {
             room_id: 1,
             faction: Faction::Player1,
             color: FactionColor::Blue,
+            platform: ClientPlatform::Desktop,
         },
     );
     matchmaker.players.insert(
@@ -508,6 +515,7 @@ fn test_chat_and_ping_dispatching() {
             room_id: 1,
             faction: Faction::Player2,
             color: FactionColor::Red,
+            platform: ClientPlatform::Desktop,
         },
     );
     let mut r1 = Room::new(1, None, GameMode::Multiplayer1v1, Some(101), Some(102));
@@ -907,6 +915,7 @@ fn test_queue_cancellation_and_telemetry() {
             mode: GameMode::Multiplayer1v1,
             room_code: None,
             faction_color: Some(FactionColor::Blue),
+            platform: Some(ClientPlatform::Desktop),
         },
     }).unwrap();
     app.update();
@@ -954,6 +963,7 @@ fn test_match_found_triggers_3s_countdown() {
             mode: GameMode::Multiplayer1v1,
             room_code: None,
             faction_color: Some(FactionColor::Blue),
+            platform: Some(ClientPlatform::Desktop),
         },
     }).unwrap();
     app.update();
@@ -966,6 +976,7 @@ fn test_match_found_triggers_3s_countdown() {
             mode: GameMode::Multiplayer1v1,
             room_code: None,
             faction_color: Some(FactionColor::Red),
+            platform: Some(ClientPlatform::Mobile),
         },
     }).unwrap();
     app.update();
@@ -1006,6 +1017,7 @@ fn test_room_economy_isolation() {
             mode: GameMode::SoloVsAi,
             room_code: None,
             faction_color: Some(FactionColor::Blue),
+            platform: Some(ClientPlatform::Desktop),
         },
     }).unwrap();
     app.update();
@@ -1018,6 +1030,7 @@ fn test_room_economy_isolation() {
             mode: GameMode::SoloVsAi,
             room_code: None,
             faction_color: Some(FactionColor::Teal),
+            platform: Some(ClientPlatform::Desktop),
         },
     }).unwrap();
     app.update();
@@ -1067,6 +1080,7 @@ fn test_consecutive_matches_have_fresh_economy() {
             mode: GameMode::SoloVsAi,
             room_code: None,
             faction_color: Some(FactionColor::Blue),
+            platform: Some(ClientPlatform::Desktop),
         },
     }).unwrap();
     app.update();
@@ -1106,6 +1120,7 @@ fn test_consecutive_matches_have_fresh_economy() {
             mode: GameMode::SoloVsAi,
             room_code: None,
             faction_color: Some(FactionColor::Blue),
+            platform: Some(ClientPlatform::Desktop),
         },
     }).unwrap();
     app.update();

@@ -12,6 +12,7 @@ mod net;
 mod particles;
 mod pings;
 mod placement;
+mod controls;
 mod production;
 mod render_units;
 mod selection;
@@ -27,6 +28,7 @@ use camera::{RtsCamera, RtsCameraPlugin};
 use chat::ChatPlugin;
 use combat::CombatPlugin;
 use command_marker::CommandMarkerPlugin;
+use controls::ControlsPlugin;
 use fog_of_war::FogOfWarPlugin;
 use mining::MiningPlugin;
 use minimap::MinimapPlugin;
@@ -93,6 +95,7 @@ fn main() {
         TacticalPingPlugin,
         NetClientPlugin,
         bot_ai::WaveAiPlugin,
+        ControlsPlugin,
     ));
 
 

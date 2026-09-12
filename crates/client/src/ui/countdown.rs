@@ -66,7 +66,11 @@ pub fn update_match_countdown_system(
     for mut subtext in &mut subtext_query {
         if countdown.remaining_seconds > 0.0 {
             if !countdown.opponent_name.is_empty() {
-                subtext.0 = format!("VS {}", countdown.opponent_name);
+                let plat_badge = countdown
+                    .opponent_platform
+                    .map(|p| format!(" [{}]", p.badge()))
+                    .unwrap_or_default();
+                subtext.0 = format!("VS {}{}", countdown.opponent_name, plat_badge);
             } else {
                 subtext.0 = "PREPARE FOR BATTLE".to_string();
             }

@@ -3,7 +3,7 @@ use bevy::ui::FocusPolicy;
 
 use super::{
     spawn_bottom_bar, spawn_countdown_overlay, spawn_game_menu_modal,
-    spawn_post_match_banner, spawn_top_bar,
+    spawn_mobile_quick_bar, spawn_post_match_banner, spawn_top_bar,
 };
 
 /// High-level HUD root setup.
@@ -28,6 +28,9 @@ pub fn setup_hud(mut commands: Commands) {
 
             // Top-Right Minimap Frame (Clean container without in-game headline)
             spawn_minimap_frame(root);
+
+            // Left Thumb Quick Action Bar (Mobile Touch only)
+            spawn_mobile_quick_bar(root);
 
             // Center Match Outcome Scoreboard (Hidden until Victory/Defeat)
             spawn_post_match_banner(root);

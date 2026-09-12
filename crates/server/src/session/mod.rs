@@ -3,7 +3,7 @@ pub mod spawner;
 use bevy::prelude::*;
 use shared::components::*;
 use shared::economy::PlayerEconomy;
-use shared::protocol::{FactionColor, GameMode};
+use shared::protocol::{ClientPlatform, FactionColor, GameMode};
 use std::collections::{HashMap, HashSet};
 
 #[allow(dead_code)]
@@ -14,6 +14,7 @@ pub struct PlayerSession {
     pub room_id: u32,
     pub faction: Faction,
     pub color: FactionColor,
+    pub platform: ClientPlatform,
 }
 
 #[allow(dead_code)]
@@ -262,6 +263,7 @@ mod tests {
                 room_id: 1,
                 faction: Faction::Player1,
                 color: FactionColor::Blue,
+                platform: ClientPlatform::Desktop,
             },
         );
         matchmaker.players.insert(
@@ -272,6 +274,7 @@ mod tests {
                 room_id: 1,
                 faction: Faction::Player2,
                 color: FactionColor::Red,
+                platform: ClientPlatform::Mobile,
             },
         );
         matchmaker.rooms.insert(
@@ -288,6 +291,7 @@ mod tests {
                 room_id: 2,
                 faction: Faction::Player1,
                 color: FactionColor::Teal,
+                platform: ClientPlatform::Desktop,
             },
         );
         matchmaker.rooms.insert(
@@ -329,6 +333,7 @@ mod tests {
                 room_id: 1,
                 faction: Faction::Player1,
                 color: FactionColor::Blue,
+                platform: ClientPlatform::Desktop,
             },
         );
         matchmaker.players.insert(
@@ -339,6 +344,7 @@ mod tests {
                 room_id: 1,
                 faction: Faction::Player2,
                 color: FactionColor::Red,
+                platform: ClientPlatform::Mobile,
             },
         );
 
@@ -354,6 +360,7 @@ mod tests {
                 room_id: 2,
                 faction: Faction::Player1,
                 color: FactionColor::Amber,
+                platform: ClientPlatform::Desktop,
             },
         );
 

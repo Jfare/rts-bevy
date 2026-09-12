@@ -56,25 +56,31 @@ pub fn handle_game_started(
 }
 
 pub fn handle_match_found(
+    net_client: &mut NetClient,
     countdown_opt: &mut Option<ResMut<crate::ui::MatchCountdown>>,
     sound_events: &mut EventWriter<SoundEffect>,
     opponent_name: String,
     opponent_color: FactionColor,
     countdown_seconds: f32,
+    opponent_platform: Option<shared::protocol::ClientPlatform>,
 ) {
     info!(
-        "⚔️ [NetClient] Match Found vs [{}] ({:?})! Countdown: {:.1}s",
-        opponent_name, opponent_color, countdown_seconds
+        "⚔️ [NetClient] Match Found vs [{}] ({:?}, platform: {:?})! Countdown: {:.1}s",
+        opponent_name, opponent_color, opponent_platform, countdown_seconds
     );
     sound_events.send(SoundEffect::CountdownBeep);
 
+    net_client.opponent_platform = opponent_platform;
+
     #[cfg(target_arch = "wasm32")]
     {
+        let plat_str = opponent_platform.map(|p| p.badge()).unwrap_or("🖥️ Desktop");
         let js_call = format!(
-            "if (window.__rts_on_match_found) {{ window.__rts_on_match_found('{}', '{}', {:.1}); }}",
+            "if (window.__rts_on_match_found) {{ window.__rts_on_match_found('{}', '{}', {:.1}, '{}'); }}",
             opponent_name.replace('\'', "\\'"),
             opponent_color.name(),
-            countdown_seconds
+            countdown_seconds,
+            plat_str
         );
         let _ = js_sys::eval(&js_call);
     }
@@ -84,6 +90,7 @@ pub fn handle_match_found(
         countdown.remaining_seconds = countdown_seconds;
         countdown.opponent_name = opponent_name;
         countdown.opponent_color = opponent_color;
+        countdown.opponent_platform = opponent_platform;
         countdown.last_announced_second = (countdown_seconds.ceil() as i32) + 1;
         countdown.has_played_go_sound = false;
     }

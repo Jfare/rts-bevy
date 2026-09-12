@@ -40,15 +40,19 @@ pub fn update_hud_network_status(
     for (mut text, mut color) in &mut text_query {
         match net_client.status {
             NetStatus::InGame => {
-                text.0 = format!("🟢 LIVE ({}ms)", net_client.rtt_ms);
+                let opp_badge = net_client
+                    .opponent_platform
+                    .map(|p| format!(" vs {}", p.badge()))
+                    .unwrap_or_default();
+                text.0 = format!("{} 🟢 LIVE ({}ms){}", net_client.my_platform.icon(), net_client.rtt_ms, opp_badge);
                 color.0 = Color::srgb(0.25, 0.95, 0.45);
             }
             NetStatus::InLobby => {
-                text.0 = "🟡 SEARCHING (1/2)".to_string();
+                text.0 = format!("{} 🟡 SEARCHING (1/2)", net_client.my_platform.icon());
                 color.0 = Color::srgb(0.95, 0.85, 0.25);
             }
             NetStatus::Connected => {
-                text.0 = "🟢 CONNECTED".to_string();
+                text.0 = format!("{} 🟢 CONNECTED", net_client.my_platform.icon());
                 color.0 = Color::srgb(0.25, 0.95, 0.45);
             }
             NetStatus::Connecting => {
@@ -56,7 +60,7 @@ pub fn update_hud_network_status(
                 color.0 = Color::srgb(0.95, 0.85, 0.25);
             }
             NetStatus::Disconnected => {
-                text.0 = "⚪ OFFLINE (SOLO)".to_string();
+                text.0 = format!("{} ⚪ OFFLINE (SOLO)", net_client.my_platform.icon());
                 color.0 = Color::srgb(0.60, 0.65, 0.70);
             }
         }
@@ -79,7 +83,9 @@ pub fn update_selection_info_text(
     mut title_query: Query<&mut Text, (With<SelectionTitleText>, Without<SelectionDetailsText>, Without<ProductionQueueText>)>,
     mut details_query: Query<&mut Text, (With<SelectionDetailsText>, Without<SelectionTitleText>, Without<ProductionQueueText>)>,
     mut queue_query: Query<&mut Text, (With<ProductionQueueText>, Without<SelectionTitleText>, Without<SelectionDetailsText>)>,
+    control_scheme: Option<Res<crate::controls::ControlScheme>>,
 ) {
+    let is_mobile = control_scheme.map_or(false, |s| *s == crate::controls::ControlScheme::MobileTouch);
     let mut selected_units = Vec::new();
     let mut selected_building = None;
     let mut selected_resource = None;
@@ -105,7 +111,11 @@ pub fn update_selection_info_text(
     }
 
     let mut title_str = "No Units Selected".to_string();
-    let mut details_str = "Drag left-click to select | Right-click Move / Attack | [S] Stop | [H] Hold".to_string();
+    let mut details_str = if is_mobile {
+        "Tap unit to select | Tap ground to Move, enemy to Attack | Tap [⚔️ ALL ARMY] to select all".to_string()
+    } else {
+        "Drag left-click to select | Right-click Move / Attack | [S] Stop | [H] Hold".to_string()
+    };
     let mut queue_str = String::new();
 
     if let Some((building, faction, health, prod_opt, turret_opt)) = selected_building {
@@ -118,9 +128,11 @@ pub fn update_selection_info_text(
             details_str = "Automated Twin-Cannon Defense | 360° Attack Arc (18 DMG, 220 Range)".to_string();
         } else if let Some(prod) = prod_opt {
             let train_prompt = if building.name.contains("Base HQ") {
-                "Press [V]/[W] to Train Worker (50 Gold, 1 Supply)"
+                if is_mobile { "Train Worker (50 Gold, 1 Supply)" } else { "Press [V]/[W] to Train Worker (50 Gold, 1 Supply)" }
             } else if building.name.contains("Barracks") {
-                "Press [R] Ranged Fighter (100 Gold, 2 Supply) | [F] Melee Fighter (75 Gold, 1 Supply)"
+                if is_mobile { "Train Ranged (100 Gold) / Melee Fighter (75 Gold)" } else { "Press [R] Ranged Fighter (100 Gold) | [F] Melee Fighter (75 Gold)" }
+            } else if is_mobile {
+                "Tap ground to set Rally Point"
             } else {
                 "Right-click ground to set Rally Point"
             };
@@ -138,33 +150,40 @@ pub fn update_selection_info_text(
         details_str = format!("Remaining Gold: {} / {}", resource.remaining_minerals, resource.max_minerals);
     } else if !selected_units.is_empty() {
         if selected_units.len() == 1 {
-            let (unit, faction, health, worker_opt, soldier_opt, melee_opt, stance_opt) = selected_units[0];
-            let fac_str = if *faction == Faction::Player1 { "Player 1" } else if *faction == Faction::Player2 { "Player 2" } else { "Hostile" };
-            title_str = format!("🎖️ {} ({}) - HP: {:.0}/{:.0}", unit.name, fac_str, health.current, health.max);
+            let (unit, _, health, worker_opt, soldier_opt, _, stance_opt) = selected_units[0];
+            title_str = format!("👤 {} - HP: {:.0}/{:.0}", unit.name, health.current, health.max);
 
             let stance_suffix = match stance_opt {
-                Some(TacticalStance::HoldPosition) => " [HOLDING POSITION]",
+                Some(TacticalStance::HoldPosition) => " [HOLD]",
                 _ => "",
             };
 
-            if let Some(worker) = worker_opt {
-                let state_str = match worker.state {
-                    shared::components::WorkerState::Idle => "Idle",
-                    shared::components::WorkerState::MovingToResource => "Moving to Gold Deposit",
-                    shared::components::WorkerState::Mining => "Mining Gold Rock",
-                    shared::components::WorkerState::MovingToBase => "Returning Gold to Base HQ",
+            if worker_opt.is_some() {
+                details_str = if is_mobile {
+                    "Worker Harvester | Tap mineral node to mine".to_string()
+                } else {
+                    "Worker Harvester | Right-Click mineral to harvest | [S] Stop".to_string()
                 };
-                details_str = format!("Worker: {}{} | Carried: {} 🪙 Gold | [S] Stop", state_str, stance_suffix, worker.carried_minerals);
-            } else if melee_opt.is_some() {
-                details_str = format!("Melee Fighter (24 DMG, 32 Rng, Sword Strike){} | Right-Click Move/Attack | [S] Stop | [H] Hold", stance_suffix);
             } else if soldier_opt.is_some() {
-                details_str = format!("Ranged Fighter (15 DMG, 150 Rng){} | Right-Click Move/Attack | [S] Stop | [H] Hold", stance_suffix);
+                details_str = if is_mobile {
+                    format!("Ranged Fighter (15 DMG, 150 Rng){} | Tap ground to Move, enemy to Attack", stance_suffix)
+                } else {
+                    format!("Ranged Fighter (15 DMG, 150 Rng){} | Right-Click Move/Attack | [S] Stop | [H] Hold", stance_suffix)
+                };
             } else {
-                details_str = "Combat Unit ready | Right-Click Move/Attack | [S] Stop | [H] Hold".to_string();
+                details_str = if is_mobile {
+                    "Combat Unit ready | Tap ground to Move, enemy to Attack".to_string()
+                } else {
+                    "Combat Unit ready | Right-Click Move/Attack | [S] Stop | [H] Hold".to_string()
+                };
             }
         } else {
             title_str = format!("Selected: {} Units", selected_units.len());
-            details_str = "Squad Command: Right-Click Move/Attack | [S] Stop | [H] Hold Position".to_string();
+            details_str = if is_mobile {
+                "Squad Command: Tap ground to Move, enemy to Attack".to_string()
+            } else {
+                "Squad Command: Right-Click Move/Attack | [S] Stop | [H] Hold Position".to_string()
+            };
         }
     }
 
@@ -181,15 +200,20 @@ pub fn update_selection_info_text(
 
 pub fn update_command_card_text(
     placement_state: Res<PlacementState>,
+    control_scheme: Option<Res<crate::controls::ControlScheme>>,
     mut text_query: Query<&mut Text, With<BuildMenuText>>,
 ) {
+    let is_mobile = control_scheme.map_or(false, |s| *s == crate::controls::ControlScheme::MobileTouch);
     for mut text in &mut text_query {
         if let Some(kind) = placement_state.active_kind {
-            let status = if placement_state.is_valid { "Valid Location (Left-Click to Place)" } else { "Blocked / Insufficient Tech or Gold" };
-            text.0 = format!("🏗️ Placing: {} ({} Gold) - {} | [Esc/Right-Click] Cancel", kind.name(), placement_state.mineral_cost, status);
+            let place_hint = if is_mobile { "Tap Ground to Place" } else { "Left-Click to Place" };
+            let cancel_hint = if is_mobile { "Tap [Cancel] below" } else { "[Esc/Right-Click] Cancel" };
+            let status = if placement_state.is_valid { place_hint } else { "Blocked / Invalid Location" };
+            text.0 = format!("🏗️ Placing: {} ({}🪙) - {} | {}", kind.name(), placement_state.mineral_cost, status, cancel_hint);
+        } else if is_mobile {
+            text.0 = "Barracks (150🪙) | Turret (125🪙) | Depot (100🪙) | HQ (400🪙)".to_string();
         } else {
             text.0 = "[B] Barracks (150🪙) | [U] Turret (125🪙, Req Barracks) | [P] Supply Depot (100🪙) | [H] Base HQ (400🪙)".to_string();
         }
     }
 }
-

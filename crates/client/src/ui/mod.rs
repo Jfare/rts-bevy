@@ -4,12 +4,13 @@ pub mod countdown;
 pub mod hud_systems;
 pub mod layout;
 pub mod menu_modal;
+pub mod mobile_hud;
 pub mod post_match;
 pub mod top_bar;
 
 use bevy::prelude::*;
 use shared::components::AppState;
-use shared::protocol::FactionColor;
+use shared::protocol::{ClientPlatform, FactionColor};
 
 pub use bottom_bar::spawn_bottom_bar;
 pub use command_card::{
@@ -26,6 +27,10 @@ pub use layout::setup_hud;
 pub use menu_modal::{
     close_menu_on_game_start, handle_lobby_button_interactions, spawn_game_menu_modal,
     update_lobby_modal_status_text,
+};
+pub use mobile_hud::{
+    handle_mobile_quick_action_interactions, spawn_mobile_quick_bar,
+    update_box_select_visuals_system, update_mobile_hud_visibility_system,
 };
 pub use post_match::{
     handle_play_again_button_interaction, handle_return_to_landing_button_interaction,
@@ -57,6 +62,9 @@ impl Plugin for RtsUiPlugin {
                     handle_play_again_button_interaction,
                     handle_return_to_landing_button_interaction,
                     update_lobby_modal_status_text,
+                    update_mobile_hud_visibility_system,
+                    update_box_select_visuals_system,
+                    handle_mobile_quick_action_interactions,
                 ),
             );
     }
@@ -68,6 +76,7 @@ pub struct MatchCountdown {
     pub remaining_seconds: f32,
     pub opponent_name: String,
     pub opponent_color: FactionColor,
+    pub opponent_platform: Option<ClientPlatform>,
     pub last_announced_second: i32,
     pub has_played_go_sound: bool,
 }

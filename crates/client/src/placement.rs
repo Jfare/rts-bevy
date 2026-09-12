@@ -40,6 +40,7 @@ fn handle_placement_input(
     mut commands: Commands,
     keyboard: Res<ButtonInput<KeyCode>>,
     mouse_button: Res<ButtonInput<MouseButton>>,
+    touches: Res<Touches>,
     net_client: Res<NetClient>,
     outcome_opt: Option<Res<MatchOutcome>>,
     mut economy: ResMut<PlayerEconomy>,
@@ -97,7 +98,8 @@ fn handle_placement_input(
     let Ok(window) = window_query.get_single() else {
         return;
     };
-    let Some(cursor_screen) = window.cursor_position() else {
+    let cursor_screen = window.cursor_position().or_else(|| touches.first_pressed_position());
+    let Some(cursor_screen) = cursor_screen else {
         return;
     };
 
@@ -110,8 +112,10 @@ fn handle_placement_input(
     let snap_pos = (raw_world_pos / 16.0).round() * 16.0;
     state.ghost_pos = snap_pos;
 
-    // 3. Confirm placement on Left-Click
-    if mouse_button.just_pressed(MouseButton::Left) && state.is_valid {
+    // 3. Confirm placement on Left-Click or Touch Tap
+    let is_confirm = mouse_button.just_pressed(MouseButton::Left)
+        || (touches.any_just_released() && cursor_screen.y < window.height() - 110.0);
+    if is_confirm && state.is_valid {
         let my_faction = net_client.my_faction;
         if economy.spend_minerals(my_faction, state.mineral_cost) {
             stats.record_action();

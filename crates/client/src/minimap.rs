@@ -275,6 +275,7 @@ fn handle_minimap_input(
     mut commands: Commands,
     mouse_button: Res<ButtonInput<MouseButton>>,
     keyboard: Res<ButtonInput<KeyCode>>,
+    touches: Res<Touches>,
     window_query: Query<&Window, With<PrimaryWindow>>,
     mut camera_query: Query<&mut Transform, With<RtsCamera>>,
     mut minimap_state: ResMut<MinimapState>,
@@ -296,7 +297,8 @@ fn handle_minimap_input(
         return;
     };
 
-    let Some(cursor_pos) = window.cursor_position() else {
+    let cursor_pos = window.cursor_position().or_else(|| touches.first_pressed_position());
+    let Some(cursor_pos) = cursor_pos else {
         minimap_state.is_dragging = false;
         return;
     };
@@ -310,15 +312,18 @@ fn handle_minimap_input(
         && cursor_pos.y >= mm_rect.min.y
         && cursor_pos.y <= mm_rect.max.y;
 
-    // 1. Left-Click or Drag: Pan Camera to Target World Coordinate
-    if mouse_button.just_pressed(MouseButton::Left) && is_inside {
+    let is_press = mouse_button.just_pressed(MouseButton::Left) || touches.any_just_pressed();
+    let is_held = mouse_button.pressed(MouseButton::Left) || touches.iter().next().is_some();
+
+    // 1. Left-Click / Touch Drag: Pan Camera to Target World Coordinate
+    if is_press && is_inside {
         minimap_state.is_dragging = true;
     }
-    if mouse_button.just_released(MouseButton::Left) || !mouse_button.pressed(MouseButton::Left) {
+    if !is_held {
         minimap_state.is_dragging = false;
     }
 
-    if minimap_state.is_dragging && mouse_button.pressed(MouseButton::Left) {
+    if minimap_state.is_dragging && is_held {
         let world_pos = minimap_screen_to_world(cursor_pos, config, &mm_rect);
         let padding = 100.0;
         cam_tf.translation.x = world_pos.x.clamp(config.min_bounds.x + padding, config.max_bounds.x - padding);

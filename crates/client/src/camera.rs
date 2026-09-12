@@ -35,7 +35,9 @@ impl Plugin for RtsCameraPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (camera_pan_system, camera_zoom_system).run_if(in_state(AppState::InGame)),
+            (camera_pan_system, camera_zoom_system)
+                .run_if(in_state(AppState::InGame))
+                .run_if(crate::controls::is_desktop_control_scheme),
         );
     }
 }
