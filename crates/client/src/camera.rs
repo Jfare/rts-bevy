@@ -46,6 +46,7 @@ fn camera_pan_system(
     keyboard: Res<ButtonInput<KeyCode>>,
     window_query: Query<&Window, With<PrimaryWindow>>,
     grid_config: Option<Res<WorldGridConfig>>,
+    minimap_opt: Option<Res<crate::minimap::MinimapState>>,
     mut camera_query: Query<(&RtsCamera, &mut Transform, Option<&OrthographicProjection>)>,
 ) {
     let Ok((rts_cam, mut transform, ortho_opt)) = camera_query.get_single_mut() else {
@@ -71,12 +72,21 @@ fn camera_pan_system(
         pan_direction.x += 1.0;
     }
 
-    // 2. Mouse Edge Panning (Only if cursor is within window bounds)
+    // 2. Mouse Edge Panning (Only if cursor is within window bounds and not over/dragging minimap)
     if let Some(cursor_pos) = window.cursor_position() {
         let win_w = window.width();
         let win_h = window.height();
 
-        if cursor_pos.x >= 0.0 && cursor_pos.x <= win_w && cursor_pos.y >= 0.0 && cursor_pos.y <= win_h {
+        let is_over_minimap = minimap_opt.as_ref().map_or(false, |mm| {
+            let mm_rect = crate::minimap::get_minimap_screen_rect(&window, mm);
+            mm.is_dragging
+                || (cursor_pos.x >= mm_rect.min.x
+                    && cursor_pos.x <= mm_rect.max.x
+                    && cursor_pos.y >= mm_rect.min.y
+                    && cursor_pos.y <= mm_rect.max.y)
+        });
+
+        if !is_over_minimap && cursor_pos.x >= 0.0 && cursor_pos.x <= win_w && cursor_pos.y >= 0.0 && cursor_pos.y <= win_h {
             if cursor_pos.x <= rts_cam.edge_margin {
                 pan_direction.x -= 1.0;
             } else if cursor_pos.x >= win_w - rts_cam.edge_margin {

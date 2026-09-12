@@ -55,6 +55,7 @@ fn handle_selection_input(
     mut stats: ResMut<MatchStats>,
     window_query: Query<&Window, With<PrimaryWindow>>,
     camera_query: Query<(&Camera, &Transform, Option<&OrthographicProjection>)>,
+    minimap_opt: Option<Res<MinimapState>>,
     mut selection_state: ResMut<SelectionState>,
     mut sound_events: EventWriter<SoundEffect>,
     mut selectable_query: Query<(
@@ -89,11 +90,14 @@ fn handle_selection_input(
         return;
     };
 
-    let mm_rect = get_minimap_screen_rect(window, &MinimapState::default());
-    let is_over_minimap = cursor_screen.x >= mm_rect.min.x
-        && cursor_screen.x <= mm_rect.max.x
-        && cursor_screen.y >= mm_rect.min.y
-        && cursor_screen.y <= mm_rect.max.y;
+    let default_mm = MinimapState::default();
+    let mm = minimap_opt.as_deref().unwrap_or(&default_mm);
+    let mm_rect = get_minimap_screen_rect(window, mm);
+    let is_over_minimap = mm.is_dragging
+        || (cursor_screen.x >= mm_rect.min.x
+            && cursor_screen.x <= mm_rect.max.x
+            && cursor_screen.y >= mm_rect.min.y
+            && cursor_screen.y <= mm_rect.max.y);
 
     let win_size = Vec2::new(window.width(), window.height());
     let cam_pos = cam_transform.translation.truncate();
@@ -126,7 +130,13 @@ fn handle_selection_input(
 
     // 3. Mouse Button Released (Commit Selection)
     if mouse_button.just_released(MouseButton::Left) {
-        let start_world = selection_state.drag_start_world.unwrap_or(cursor_world_pos);
+        let Some(start_world) = selection_state.drag_start_world.take() else {
+            selection_state.drag_start_screen = None;
+            selection_state.current_world_pos = None;
+            selection_state.is_dragging = false;
+            return;
+        };
+        selection_state.drag_start_screen = None;
         let current_world = cursor_world_pos;
 
         if !shift_held {

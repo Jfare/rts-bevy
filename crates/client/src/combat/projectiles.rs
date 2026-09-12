@@ -1,7 +1,9 @@
 use bevy::prelude::*;
 use shared::components::*;
 use shared::economy::PlayerEconomy;
+use shared::grid::WorldGridConfig;
 use crate::audio_sfx::SoundEffect;
+use crate::fog_of_war::{FogOfWarGrid, FogState};
 use crate::net::{NetClient, NetStatus};
 use crate::particles::ParticleEvent;
 use crate::stats::MatchStats;
@@ -175,12 +177,22 @@ pub fn death_and_elimination_system(
 /// Renders combat visual effects (tracers, muzzle flashes)
 pub fn draw_combat_gizmos(
     mut gizmos: Gizmos,
+    fog_opt: Option<Res<FogOfWarGrid>>,
+    grid_cfg: Option<Res<WorldGridConfig>>,
     projectiles: Query<(&Transform, &Projectile)>,
     flashes: Query<(&Transform, &MuzzleFlash)>,
 ) {
+    let default_cfg = WorldGridConfig::default();
+    let config = grid_cfg.as_deref().unwrap_or(&default_cfg);
+
     // 1. Draw Projectile Tracers
     for (transform, proj) in &projectiles {
         let current_pos = transform.translation.truncate();
+        if let Some(ref fog) = fog_opt {
+            if fog.get_state_at_world_pos(current_pos, config) != FogState::Visible {
+                continue;
+            }
+        }
         let dir = (proj.target_pos - proj.origin).normalize_or_zero();
         let tracer_len = 16.0;
         let start_tail = current_pos - dir * tracer_len;
@@ -199,6 +211,11 @@ pub fn draw_combat_gizmos(
     // 2. Draw Muzzle Flashes
     for (transform, flash) in &flashes {
         let pos = transform.translation.truncate();
+        if let Some(ref fog) = fog_opt {
+            if fog.get_state_at_world_pos(pos, config) != FogState::Visible {
+                continue;
+            }
+        }
         gizmos.circle_2d(pos, 5.0, flash.color);
         gizmos.circle_2d(pos, 2.5, Color::WHITE);
     }

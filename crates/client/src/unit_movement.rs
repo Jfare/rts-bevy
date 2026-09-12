@@ -120,7 +120,7 @@ fn unit_movement_system(
 
         // Final destination reached or cleanly settled against obstacle
         if is_final_waypoint
-            && (dist <= 12.0 || (dist <= 32.0 && move_target.stall_timer > 0.20) || move_target.stall_timer > 0.50) {
+            && (dist <= 12.0 || (dist <= 32.0 && move_target.stall_timer > 0.40) || move_target.stall_timer > 1.20) {
                 commands.entity(entity).remove::<MoveTarget>();
                 continue;
             }
@@ -231,8 +231,8 @@ fn unit_separation_and_collision_system(
                 let u1_active = snapshots[i].is_active_worker;
                 let u2_active = snapshots[j].is_active_worker;
 
-                // Active harvesting workers pass through each other to avoid mineral patch lockup
-                if u1_active && u2_active {
+                // Active harvesting workers pass through each other to avoid mineral patch lockup and repulsion
+                if u1_active || u2_active {
                     continue;
                 }
 

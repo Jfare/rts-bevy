@@ -13,6 +13,7 @@ pub fn handle_tick_snapshot_batch(
     economy: &mut PlayerEconomy,
     net_status: NetStatus,
     current_mode: GameMode,
+    my_faction: Faction,
     sound_events: &mut EventWriter<SoundEffect>,
     entity_query: &mut EntityNetQuery,
     snapshots: Vec<EntitySnapshot>,
@@ -38,20 +39,20 @@ pub fn handle_tick_snapshot_batch(
     // Index existing entities by Net ID for Health, Mining, and deadband position reconciliation
     let mut entity_map: HashMap<
         u32,
-        (Entity, Mut<Transform>, Mut<Health>, Option<Mut<Worker>>, bool),
+        (Entity, Mut<Transform>, Mut<Health>, Option<Mut<Worker>>, bool, Faction),
     > = HashMap::new();
 
-    for (entity, net_entity, _faction, transform, health, worker_opt, _, _, move_target_opt, ..) in
+    for (entity, net_entity, faction, transform, health, worker_opt, _, _, move_target_opt, ..) in
         entity_query.iter_mut()
     {
         let has_move = move_target_opt.is_some();
-        entity_map.insert(net_entity.net_id, (entity, transform, health, worker_opt, has_move));
+        entity_map.insert(net_entity.net_id, (entity, transform, health, worker_opt, has_move, *faction));
     }
 
     // Sync health, worker mining state, and deadband positions from server snapshot
     if net_status == NetStatus::InGame {
         for snap in snapshots {
-            if let Some((entity, mut tf, mut hp, mut worker_opt, has_move)) = entity_map.remove(&snap.net_id) {
+            if let Some((entity, mut tf, mut hp, mut worker_opt, has_move, faction)) = entity_map.remove(&snap.net_id) {
                 if snap.current_hp <= 0.0 {
                     commands.entity(entity).despawn_recursive();
                     continue;
@@ -60,14 +61,13 @@ pub fn handle_tick_snapshot_batch(
                 hp.current = snap.current_hp;
                 hp.max = snap.max_hp;
 
-                let is_worker = worker_opt.is_some();
                 if let Some(ref mut worker) = worker_opt {
                     if let Some(ws) = snap.worker_state {
                         worker.state = ws;
                     } else if snap.is_mining {
                         worker.state = WorkerState::Mining;
                     }
-                    if worker.carried_minerals == 0 && snap.carried_minerals > 0 {
+                    if faction == my_faction && worker.carried_minerals == 0 && snap.carried_minerals > 0 {
                         sound_events.send(SoundEffect::LaserMining);
                     }
                     worker.carried_minerals = snap.carried_minerals;
@@ -87,8 +87,8 @@ pub fn handle_tick_snapshot_batch(
                     }
                 }
 
-                // Synchronize facing rotation from authoritative server snapshot
-                if is_worker || !has_move {
+                // Synchronize facing rotation from authoritative server snapshot when not actively steering
+                if !has_move {
                     tf.rotation = Quat::from_rotation_z(snap.rotation);
                 }
             }

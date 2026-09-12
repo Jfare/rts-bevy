@@ -155,7 +155,7 @@ pub fn server_movement_system(
 
         // Final arrival or stall clean removal
         if is_final_waypoint
-            && (dist <= 12.0 || (dist <= 32.0 && move_target.stall_timer > 0.20) || move_target.stall_timer > 0.50) {
+            && (dist <= 12.0 || (dist <= 32.0 && move_target.stall_timer > 0.40) || move_target.stall_timer > 1.20) {
                 velocity.0 = Vec2::ZERO;
                 commands.entity(entity).remove::<MoveTarget>();
                 continue;
@@ -216,7 +216,7 @@ pub fn server_unit_separation_and_collision_system(
                 let u1_active = snapshots[i].is_active_worker;
                 let u2_active = snapshots[j].is_active_worker;
 
-                if u1_active && u2_active {
+                if u1_active || u2_active {
                     continue;
                 }
 

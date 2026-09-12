@@ -1,7 +1,9 @@
 use bevy::prelude::*;
 use bevy::render::camera::OrthographicProjection;
 use bevy::window::PrimaryWindow;
-use shared::components::{AppState, Building, Faction, Health, MatchOutcome, MoveTarget, ResourceNode, Selectable, Unit};
+use shared::components::{
+    AppState, Building, Faction, Health, MatchOutcome, MoveTarget, ResourceNode, Selectable, Unit, Worker, WorkerState,
+};
 use shared::grid::WorldGridConfig;
 use shared::protocol::ClientMessage;
 use crate::camera::RtsCamera;
@@ -16,7 +18,11 @@ impl Plugin for MinimapPlugin {
         app.init_resource::<MinimapState>()
             .add_systems(
                 Update,
-                (draw_minimap_system, handle_minimap_input).run_if(in_state(AppState::InGame)),
+                handle_minimap_input.run_if(in_state(AppState::InGame)),
+            )
+            .add_systems(
+                PostUpdate,
+                draw_minimap_system.run_if(in_state(AppState::InGame)),
             );
     }
 }
@@ -266,6 +272,7 @@ use shared::components::NetEntity;
 
 /// Handles clicking or dragging inside the minimap to pan camera or issue orders
 fn handle_minimap_input(
+    mut commands: Commands,
     mouse_button: Res<ButtonInput<MouseButton>>,
     keyboard: Res<ButtonInput<KeyCode>>,
     window_query: Query<&Window, With<PrimaryWindow>>,
@@ -276,7 +283,7 @@ fn handle_minimap_input(
     outcome_opt: Option<Res<MatchOutcome>>,
     mut stats: ResMut<MatchStats>,
     mut attack_move_pending: ResMut<crate::ui::AttackMovePending>,
-    mut unit_query: Query<(Entity, &Faction, &Selectable, &mut MoveTarget, Option<&NetEntity>), (With<Unit>, Without<Building>)>,
+    mut unit_query: Query<(Entity, &Faction, &Selectable, Option<&mut MoveTarget>, Option<&mut Worker>, Option<&NetEntity>), (With<Unit>, Without<Building>)>,
 ) {
     if outcome_opt.as_deref() == Some(&MatchOutcome::Victory) || outcome_opt.as_deref() == Some(&MatchOutcome::Defeat) {
         return;
@@ -307,14 +314,15 @@ fn handle_minimap_input(
     if mouse_button.just_pressed(MouseButton::Left) && is_inside {
         minimap_state.is_dragging = true;
     }
-    if mouse_button.just_released(MouseButton::Left) {
+    if mouse_button.just_released(MouseButton::Left) || !mouse_button.pressed(MouseButton::Left) {
         minimap_state.is_dragging = false;
     }
 
     if minimap_state.is_dragging && mouse_button.pressed(MouseButton::Left) {
         let world_pos = minimap_screen_to_world(cursor_pos, config, &mm_rect);
-        cam_tf.translation.x = world_pos.x;
-        cam_tf.translation.y = world_pos.y;
+        let padding = 100.0;
+        cam_tf.translation.x = world_pos.x.clamp(config.min_bounds.x + padding, config.max_bounds.x - padding);
+        cam_tf.translation.y = world_pos.y.clamp(config.min_bounds.y + padding, config.max_bounds.y - padding);
     }
 
     // 2. Right-Click: Issue Squad Move / Attack Order via Minimap
@@ -326,13 +334,25 @@ fn handle_minimap_input(
 
         let mut unit_net_ids = Vec::new();
         let mut any_ordered = false;
-        for (_, faction, selectable, mut mt, net_opt) in &mut unit_query {
+        for (entity, faction, selectable, move_target_opt, worker_opt, net_opt) in &mut unit_query {
             if *faction == my_faction && selectable.is_selected {
                 any_ordered = true;
-                mt.destination = target_world_pos;
-                mt.is_attack_move = is_attack_move;
-                mt.waypoints = vec![target_world_pos];
-                mt.current_waypoint_idx = 0;
+                if let Some(mut worker) = worker_opt {
+                    worker.state = WorkerState::Idle;
+                    worker.target_node = None;
+                }
+                if let Some(mut mt) = move_target_opt {
+                    mt.destination = target_world_pos;
+                    mt.is_attack_move = is_attack_move;
+                    mt.waypoints = vec![target_world_pos];
+                    mt.current_waypoint_idx = 0;
+                } else {
+                    commands.entity(entity).insert(MoveTarget::with_waypoints(
+                        target_world_pos,
+                        is_attack_move,
+                        vec![target_world_pos],
+                    ));
+                }
                 if let Some(net) = net_opt {
                     unit_net_ids.push(net.net_id);
                 }
@@ -352,3 +372,52 @@ fn handle_minimap_input(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_minimap_screen_rect_top_right() {
+        let mut window = Window::default();
+        window.resolution.set(1920.0, 1080.0);
+        let state = MinimapState::default();
+        let rect = get_minimap_screen_rect(&window, &state);
+
+        assert_eq!(rect.max.x, 1920.0 - 12.0);
+        assert_eq!(rect.min.x, 1920.0 - 12.0 - 170.0);
+        assert_eq!(rect.min.y, 70.0);
+        assert_eq!(rect.max.y, 70.0 + 170.0);
+    }
+
+    #[test]
+    fn test_minimap_coordinates_round_trip() {
+        let config = WorldGridConfig::default();
+        let mut window = Window::default();
+        window.resolution.set(1920.0, 1080.0);
+        let state = MinimapState::default();
+        let rect = get_minimap_screen_rect(&window, &state);
+
+        // Center of world (0, 0)
+        let screen_pt = world_to_minimap_screen(Vec2::ZERO, &config, &rect);
+        let world_pt = minimap_screen_to_world(screen_pt, &config, &rect);
+
+        assert!((world_pt.x - 0.0).abs() < 1.0, "Expected x around 0, got {}", world_pt.x);
+        assert!((world_pt.y - 0.0).abs() < 1.0, "Expected y around 0, got {}", world_pt.y);
+    }
+
+    #[test]
+    fn test_minimap_clamping_outside_screen() {
+        let config = WorldGridConfig::default();
+        let mut window = Window::default();
+        window.resolution.set(1920.0, 1080.0);
+        let state = MinimapState::default();
+        let rect = get_minimap_screen_rect(&window, &state);
+
+        // Point far outside rect
+        let world_pt = minimap_screen_to_world(Vec2::new(-500.0, -500.0), &config, &rect);
+        assert_eq!(world_pt.x, config.min_bounds.x);
+        assert_eq!(world_pt.y, config.max_bounds.y);
+    }
+}
+

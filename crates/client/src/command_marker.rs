@@ -3,7 +3,7 @@ use bevy::render::camera::OrthographicProjection;
 use bevy::window::PrimaryWindow;
 use shared::components::{
     AppState, Faction, Health, MatchOutcome, MeleeFighter, MoveTarget, NetEntity, Radius, ResourceNode, Selectable,
-    Soldier, SoldierState, TacticalStance, Worker,
+    Soldier, SoldierState, TacticalStance, Worker, WorkerState,
 };
 use shared::grid::{NavGrid, WorldGridConfig};
 use shared::protocol::ClientMessage;
@@ -64,7 +64,7 @@ fn handle_right_click_orders(
         Option<&NetEntity>,
         Option<&mut MoveTarget>,
         Option<&mut TacticalStance>,
-        Option<&Worker>,
+        Option<&mut Worker>,
         Option<&mut Soldier>,
         Option<&mut MeleeFighter>,
     )>,
@@ -176,9 +176,13 @@ fn handle_right_click_orders(
         }
 
         // Set attack target and remove ground MoveTarget so unit chases/attacks the target
-        for (entity, _, faction, selectable, _, _, _, _, soldier_opt, melee_opt) in &mut unit_query {
+        for (entity, _, faction, selectable, _, _, _, worker_opt, soldier_opt, melee_opt) in &mut unit_query {
             if *faction == net_client.my_faction && selectable.is_selected {
                 commands.entity(entity).remove::<MoveTarget>();
+                if let Some(mut worker) = worker_opt {
+                    worker.state = WorkerState::Idle;
+                    worker.target_node = None;
+                }
                 if let Some(mut soldier) = soldier_opt {
                     soldier.target = Some(target_entity);
                     soldier.state = SoldierState::ChasingTarget;
@@ -223,7 +227,12 @@ fn handle_right_click_orders(
         let destination = target_world_pos + formation_offset;
         let waypoints = nav_grid.find_path(*unit_pos, destination);
 
-        if let Ok((_, _, _, _, _, move_target_opt, stance_opt, _, soldier_opt, melee_opt)) = unit_query.get_mut(*entity) {
+        if let Ok((_, _, _, _, _, move_target_opt, stance_opt, worker_opt, soldier_opt, melee_opt)) = unit_query.get_mut(*entity) {
+            // Cancel worker mining loop immediately on move order!
+            if let Some(mut worker) = worker_opt {
+                worker.state = WorkerState::Idle;
+                worker.target_node = None;
+            }
             // Ground Move cancels any current attack target immediately!
             if let Some(mut soldier) = soldier_opt {
                 soldier.target = None;

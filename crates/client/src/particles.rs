@@ -1,5 +1,7 @@
 use bevy::prelude::*;
 use shared::components::{Building, Faction, Health};
+use shared::grid::WorldGridConfig;
+use crate::fog_of_war::{FogOfWarGrid, FogState};
 
 #[derive(Component)]
 pub struct Particle {
@@ -189,6 +191,9 @@ fn structure_damage_smoke_system(
     mut particle_events: EventWriter<ParticleEvent>,
     time: Res<Time>,
     mut timer: Local<f32>,
+    fog: Option<Res<FogOfWarGrid>>,
+    grid_cfg: Option<Res<WorldGridConfig>>,
+    net_client: Option<Res<crate::net::NetClient>>,
     building_query: Query<(&Transform, &Health, &Faction), With<Building>>,
 ) {
     *timer += time.delta_secs();
@@ -197,13 +202,23 @@ fn structure_damage_smoke_system(
     }
     *timer = 0.0;
 
-    for (transform, health, _) in &building_query {
+    let default_cfg = WorldGridConfig::default();
+    let config = grid_cfg.as_deref().unwrap_or(&default_cfg);
+
+    for (transform, health, faction) in &building_query {
         if health.is_dead() {
             continue;
         }
+        let pos = transform.translation.truncate();
+        if let (Some(ref fog), Some(ref net_client)) = (fog.as_ref(), net_client.as_ref()) {
+            if *faction != net_client.my_faction && *faction != Faction::Neutral
+                && fog.get_state_at_world_pos(pos, config) != FogState::Visible
+            {
+                continue;
+            }
+        }
         let ratio = health.current / health.max;
         if ratio < 0.50 {
-            let pos = transform.translation.truncate();
             let offset = Vec2::new(
                 (rand_pseudo(pos.x + *timer) * 30.0) - 15.0,
                 rand_pseudo(pos.y + *timer) * 20.0,
@@ -232,24 +247,41 @@ fn rand_pseudo(seed: f32) -> f32 {
 /// Draws active particles and expanding shockwaves with Gizmos
 fn draw_particles_system(
     mut gizmos: Gizmos,
+    fog: Option<Res<FogOfWarGrid>>,
+    grid_cfg: Option<Res<WorldGridConfig>>,
     particles: Query<(&Transform, &Particle)>,
     shockwaves: Query<(&Transform, &Shockwave)>,
 ) {
+    let default_cfg = WorldGridConfig::default();
+    let config = grid_cfg.as_deref().unwrap_or(&default_cfg);
+
     for (transform, p) in &particles {
+        let pos = transform.translation.truncate();
+        if let Some(ref fog) = fog {
+            if fog.get_state_at_world_pos(pos, config) != FogState::Visible {
+                continue;
+            }
+        }
         let t = (p.lifetime / p.max_lifetime).clamp(0.0, 1.0);
         let size = p.start_size + (p.end_size - p.start_size) * t;
         let color = lerp_color(p.start_color, p.end_color, t);
-        gizmos.circle_2d(transform.translation.truncate(), size, color);
+        gizmos.circle_2d(pos, size, color);
     }
 
     for (transform, s) in &shockwaves {
+        let pos = transform.translation.truncate();
+        if let Some(ref fog) = fog {
+            if fog.get_state_at_world_pos(pos, config) != FogState::Visible {
+                continue;
+            }
+        }
         let t = (s.lifetime / s.max_lifetime).clamp(0.0, 1.0);
         let radius = s.max_radius * (1.0 - (1.0 - t).powi(2));
         let alpha_fade = (1.0 - t).max(0.0);
         let mut color = s.color;
         let [r, g, b, a] = color.to_srgba().to_f32_array();
         color = Color::srgba(r, g, b, a * alpha_fade);
-        gizmos.circle_2d(transform.translation.truncate(), radius, color);
+        gizmos.circle_2d(pos, radius, color);
     }
 }
 

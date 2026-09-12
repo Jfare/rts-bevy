@@ -17,9 +17,12 @@ impl Plugin for TacticalPingPlugin {
             (
                 handle_tactical_ping_input,
                 draw_tactical_pings_world_system,
-                draw_tactical_pings_minimap_system,
             )
                 .run_if(in_state(AppState::InGame)),
+        )
+        .add_systems(
+            PostUpdate,
+            draw_tactical_pings_minimap_system.run_if(in_state(AppState::InGame)),
         );
     }
 }
@@ -160,11 +163,15 @@ fn draw_tactical_pings_world_system(
 fn draw_tactical_pings_minimap_system(
     mut gizmos: Gizmos,
     window_query: Query<&Window, With<PrimaryWindow>>,
+    camera_query: Query<(&Transform, Option<&OrthographicProjection>), With<RtsCamera>>,
     minimap_state: Res<MinimapState>,
     grid_cfg: Option<Res<WorldGridConfig>>,
     ping_query: Query<&TacticalPingVisual>,
 ) {
     let Ok(window) = window_query.get_single() else {
+        return;
+    };
+    let Ok((cam_tf, ortho_opt)) = camera_query.get_single() else {
         return;
     };
     let default_cfg = WorldGridConfig::default();
@@ -173,17 +180,20 @@ fn draw_tactical_pings_minimap_system(
 
     let half_w = window.width() * 0.5;
     let half_h = window.height() * 0.5;
+    let cam_pos = cam_tf.translation.truncate();
+    let cam_scale = ortho_opt.map(|o| o.scale).unwrap_or(1.0);
 
     for ping in &ping_query {
         let screen_pt = world_to_minimap_screen(ping.position, config, &minimap_rect);
-        let bevy_ui_pt = Vec2::new(screen_pt.x - half_w, half_h - screen_pt.y);
+        let centered = Vec2::new(screen_pt.x - half_w, half_h - screen_pt.y);
+        let wp = cam_pos + centered * cam_scale;
 
         let pulse = (ping.lifetime * 6.0).sin().abs();
-        let size = 5.0 + pulse * 4.0;
+        let size = (5.0 + pulse * 4.0) * cam_scale;
         let color = ping.ping_type.to_color();
 
         gizmos.rect_2d(
-            bevy_ui_pt,
+            wp,
             Vec2::splat(size),
             color,
         );

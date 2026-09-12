@@ -5,7 +5,7 @@ use crate::session::Matchmaker;
 
 /// Worker mining and resource dropoff loop
 pub fn server_mining_system(
-    mut commands: Commands,
+    _commands: Commands,
     time: Res<Time>,
     mut matchmaker: ResMut<Matchmaker>,
     mut workers: Query<(Entity, &mut Transform, &MoveSpeed, &Faction, &RoomId, &mut Worker, Option<&MoveTarget>)>,
@@ -13,14 +13,16 @@ pub fn server_mining_system(
     bases: Query<(&Transform, &Faction, &RoomId), (With<BaseHQ>, Without<Worker>, Without<ResourceNode>)>,
 ) {
     let dt = time.delta_secs();
-    for (worker_e, mut transform, speed, faction, worker_room, mut worker, move_target_opt) in &mut workers {
+    for (_worker_e, mut transform, speed, faction, worker_room, mut worker, move_target_opt) in &mut workers {
         let is_room_active = matchmaker.rooms.get(&worker_room.0).map(|r| r.is_active && r.countdown_timer <= 0.0).unwrap_or(true);
         if !is_room_active {
             continue;
         }
 
-        if worker.state != WorkerState::Idle && move_target_opt.is_some() {
-            commands.entity(worker_e).remove::<MoveTarget>();
+        // If worker received a manual move order, cancel automated mining loop
+        if move_target_opt.is_some() && worker.state != WorkerState::Idle {
+            worker.state = WorkerState::Idle;
+            worker.target_node = None;
         }
 
         match worker.state {

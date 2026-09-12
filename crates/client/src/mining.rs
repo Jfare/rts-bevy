@@ -3,8 +3,10 @@ use bevy::render::camera::OrthographicProjection;
 use bevy::window::PrimaryWindow;
 use shared::components::*;
 use shared::economy::PlayerEconomy;
+use shared::grid::WorldGridConfig;
 use shared::protocol::ClientMessage;
 use crate::audio_sfx::SoundEffect;
+use crate::fog_of_war::{FogOfWarGrid, FogState};
 use crate::net::{NetClient, NetStatus};
 use crate::selection::screen_to_world_2d;
 use crate::stats::MatchStats;
@@ -110,7 +112,7 @@ fn handle_mining_click_orders(
 
 /// Worker Mining State Machine
 fn worker_mining_state_machine(
-    mut commands: Commands,
+    _commands: Commands,
     time: Res<Time>,
     net_client: Res<NetClient>,
     mut economy: ResMut<PlayerEconomy>,
@@ -134,10 +136,11 @@ fn worker_mining_state_machine(
 
     let dt = time.delta_secs();
 
-    for (worker_entity, mut worker, mut worker_transform, move_speed, faction, move_target_opt) in &mut worker_query {
-        // If worker is active in mining loop, ensure ground MoveTarget is removed
-        if worker.state != WorkerState::Idle && move_target_opt.is_some() {
-            commands.entity(worker_entity).remove::<MoveTarget>();
+    for (_worker_entity, mut worker, mut worker_transform, move_speed, faction, move_target_opt) in &mut worker_query {
+        // If player ordered a manual move, cancel the automated mining loop
+        if move_target_opt.is_some() && worker.state != WorkerState::Idle {
+            worker.state = WorkerState::Idle;
+            worker.target_node = None;
         }
 
         match worker.state {
@@ -219,7 +222,9 @@ fn worker_mining_state_machine(
                     worker.carried_minerals = harvested;
                     worker.harvest_timer = 0.0;
                     worker.state = WorkerState::MovingToBase;
-                    sound_events.send(SoundEffect::LaserMining);
+                    if *faction == net_client.my_faction {
+                        sound_events.send(SoundEffect::LaserMining);
+                    }
 
                     // Find nearest friendly Base HQ
                     let worker_pos = worker_transform.translation.truncate();
@@ -338,17 +343,44 @@ fn worker_mining_state_machine(
     }
 }
 
+/// Determines if a worker's mining visuals (pickaxe animation, sparks, carried gold nugget)
+/// should be rendered based on player faction and fog of war visibility.
+pub fn should_render_mining_visuals(
+    faction: Faction,
+    worker_pos: Vec2,
+    my_faction: Faction,
+    fog: &FogOfWarGrid,
+    config: &WorldGridConfig,
+) -> bool {
+    // Shroud hostile workers outside active friendly vision
+    if faction != my_faction && faction != Faction::Neutral
+        && fog.get_state_at_world_pos(worker_pos, config) != FogState::Visible
+    {
+        return false;
+    }
+    true
+}
+
 /// Renders the pulsating golden mining laser and carried gold nugget
 fn draw_mining_visuals(
     time: Res<Time>,
     mut gizmos: Gizmos,
-    worker_query: Query<(&Transform, &Worker)>,
+    fog: Res<FogOfWarGrid>,
+    grid_cfg: Option<Res<WorldGridConfig>>,
+    net_client: Res<NetClient>,
+    worker_query: Query<(&Transform, &Worker, &Faction)>,
     _node_query: Query<(Entity, &Transform, &ResourceNode)>,
 ) {
     let t = time.elapsed_secs();
+    let default_cfg = WorldGridConfig::default();
+    let config = grid_cfg.as_deref().unwrap_or(&default_cfg);
 
-    for (worker_transform, worker) in &worker_query {
+    for (worker_transform, worker, faction) in &worker_query {
         let worker_pos = worker_transform.translation.truncate();
+
+        if !should_render_mining_visuals(*faction, worker_pos, net_client.my_faction, &fog, config) {
+            continue;
+        }
 
         let rot = worker_transform.rotation.to_euler(EulerRot::ZYX).0;
         let forward = Vec2::new(rot.cos(), rot.sin());
@@ -490,5 +522,47 @@ fn draw_mining_visuals(
             gizmos.line_2d(apex, pts[5], gold_bright);
             gizmos.circle_2d(apex, 1.5, Color::srgb(1.0, 1.0, 0.9));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_friendly_and_neutral_workers_always_render_mining_visuals() {
+        let fog = FogOfWarGrid::default();
+        let config = WorldGridConfig::default();
+        let pos = Vec2::new(0.0, 500.0);
+
+        // Friendly worker renders regardless of fog
+        assert!(should_render_mining_visuals(Faction::Player1, pos, Faction::Player1, &fog, &config));
+
+        // Neutral entity renders
+        assert!(should_render_mining_visuals(Faction::Neutral, pos, Faction::Player1, &fog, &config));
+    }
+
+    #[test]
+    fn test_hostile_worker_mining_visuals_culled_in_fog_of_war() {
+        let mut fog = FogOfWarGrid::default();
+        let config = WorldGridConfig::default();
+        let hostile_pos = Vec2::new(0.0, 500.0);
+
+        let (cx, cy) = fog.world_to_grid(hostile_pos, &config).expect("Valid grid coords");
+
+        // 1. Unexplored fog (cell = 0) -> Shrouded
+        fog.set_state(cx, cy, FogState::Unexplored);
+        assert!(!should_render_mining_visuals(Faction::Player2, hostile_pos, Faction::Player1, &fog, &config));
+        assert!(!should_render_mining_visuals(Faction::HostileAi, hostile_pos, Faction::Player1, &fog, &config));
+
+        // 2. Explored fog / Shroud of war (cell = 1) -> Shrouded
+        fog.set_state(cx, cy, FogState::Explored);
+        assert!(!should_render_mining_visuals(Faction::Player2, hostile_pos, Faction::Player1, &fog, &config));
+        assert!(!should_render_mining_visuals(Faction::HostileAi, hostile_pos, Faction::Player1, &fog, &config));
+
+        // 3. Actively visible under friendly vision (cell = 2) -> Rendered
+        fog.set_state(cx, cy, FogState::Visible);
+        assert!(should_render_mining_visuals(Faction::Player2, hostile_pos, Faction::Player1, &fog, &config));
+        assert!(should_render_mining_visuals(Faction::HostileAi, hostile_pos, Faction::Player1, &fog, &config));
     }
 }

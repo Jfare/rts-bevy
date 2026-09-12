@@ -141,6 +141,7 @@ pub fn handle_server_message(
             economy,
             net_client.status,
             net_client.current_mode,
+            net_client.my_faction,
             sound_events,
             entity_query,
             snapshots,
