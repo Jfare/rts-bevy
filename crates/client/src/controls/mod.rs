@@ -33,12 +33,13 @@ impl Default for ControlScheme {
 #[derive(Resource, Default, Debug, Clone, Copy)]
 pub struct BoxSelectMode(pub bool);
 
-/// Resource tracking touch double-tap timing for selecting all units of same type
+/// Resource tracking touch double-tap timing for selecting visible units
 #[derive(Resource, Default, Debug)]
 pub struct DoubleTapTracker {
     pub last_entity: Option<Entity>,
     pub last_tap_time: f32,
     pub last_tap_pos: Vec2,
+    pub last_is_worker: bool,
 }
 
 /// Run condition checking if desktop controls are active

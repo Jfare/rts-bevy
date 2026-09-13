@@ -85,6 +85,22 @@ pub fn is_mobile_ui_hit(
     false
 }
 
+/// Helper checking if a 2D world position with given radius is visible on screen
+pub fn is_world_pos_on_screen(
+    pos: Vec2,
+    radius: f32,
+    cam_pos: Vec2,
+    cam_scale: f32,
+    win_size: Vec2,
+) -> bool {
+    let half_w = win_size.x * 0.5 * cam_scale;
+    let half_h = win_size.y * 0.5 * cam_scale;
+    pos.x + radius >= cam_pos.x - half_w
+        && pos.x - radius <= cam_pos.x + half_w
+        && pos.y + radius >= cam_pos.y - half_h
+        && pos.y - radius <= cam_pos.y + half_h
+}
+
 pub struct MobileControlsPlugin;
 
 impl Plugin for MobileControlsPlugin {
@@ -480,33 +496,68 @@ fn mobile_touch_interaction_system(
         }
 
         if let Some((target_entity, kind)) = tapped_friendly_unit {
-            // Check for Double-Tap: select all of the same kind
+            let is_worker = kind == 1;
             let now = time.elapsed_secs();
-            let is_double_tap = double_tap.last_entity == Some(target_entity)
+            let is_double_tap = (double_tap.last_entity == Some(target_entity)
+                || (double_tap.last_entity.is_some()
+                    && double_tap.last_is_worker == is_worker
+                    && double_tap.last_tap_pos.distance(start_pos) < 32.0))
                 && (now - double_tap.last_tap_time) < 0.35
-                && double_tap.last_tap_pos.distance(start_pos) < 24.0;
-
-            double_tap.last_entity = Some(target_entity);
-            double_tap.last_tap_time = now;
-            double_tap.last_tap_pos = start_pos;
+                && double_tap.last_tap_pos.distance(start_pos) < 32.0;
 
             if is_double_tap {
-                // Double tap: select all of same kind on screen
-                for (_, _tf, _, faction, mut sel, _, _, _, worker_opt, soldier_opt, melee_opt, bldg_opt) in &mut selectable_query {
-                    if *faction == net_client.my_faction && bldg_opt.is_none() {
-                        let matches = match kind {
-                            1 => worker_opt.is_some(),
-                            2 => soldier_opt.is_some(),
-                            _ => melee_opt.is_some(),
-                        };
-                        if matches {
-                            sel.is_selected = true;
+                let mut selected_any = false;
+                let mut has_soldier = false;
+
+                if is_worker {
+                    // Double tap on worker: select all friendly workers visible on screen
+                    for (_, tf, radius, faction, mut sel, _, _, _, worker_opt, _, _, bldg_opt) in &mut selectable_query {
+                        if *faction == net_client.my_faction && bldg_opt.is_none() && worker_opt.is_some() {
+                            let pos = tf.translation.truncate();
+                            let is_visible = is_world_pos_on_screen(pos, radius.0, cam_pos, cam_scale, win_size);
+                            sel.is_selected = is_visible;
+                            if is_visible {
+                                selected_any = true;
+                            }
+                        } else {
+                            sel.is_selected = false;
                         }
                     }
+                    if selected_any {
+                        stats.record_action();
+                        sound_events.send(SoundEffect::WorkerSelect);
+                    }
+                    info!("📱 [Touch] Double-tap on worker: Selected all workers visible on screen");
+                } else {
+                    // Double tap on combat unit: select all friendly units visible on screen EXCEPT workers
+                    for (_, tf, radius, faction, mut sel, _, _, _, worker_opt, soldier_opt, _, bldg_opt) in &mut selectable_query {
+                        if *faction == net_client.my_faction && bldg_opt.is_none() && worker_opt.is_none() {
+                            let pos = tf.translation.truncate();
+                            let is_visible = is_world_pos_on_screen(pos, radius.0, cam_pos, cam_scale, win_size);
+                            sel.is_selected = is_visible;
+                            if is_visible {
+                                selected_any = true;
+                                if soldier_opt.is_some() {
+                                    has_soldier = true;
+                                }
+                            }
+                        } else {
+                            sel.is_selected = false;
+                        }
+                    }
+                    if selected_any {
+                        stats.record_action();
+                        if has_soldier {
+                            sound_events.send(SoundEffect::MarineSelect);
+                        } else {
+                            sound_events.send(SoundEffect::MeleeSelect);
+                        }
+                    }
+                    info!("📱 [Touch] Double-tap: Selected all combat units visible on screen (except workers)");
                 }
-                stats.record_action();
-                sound_events.send(SoundEffect::MarineSelect);
-                info!("📱 [Touch] Double-tap: Selected all units of type {}", kind);
+
+                double_tap.last_entity = None;
+                double_tap.last_tap_time = 0.0;
                 return;
             }
 
@@ -514,6 +565,11 @@ fn mobile_touch_interaction_system(
             for (entity, _, _, _, mut sel, ..) in &mut selectable_query {
                 sel.is_selected = entity == target_entity;
             }
+            double_tap.last_entity = Some(target_entity);
+            double_tap.last_tap_time = now;
+            double_tap.last_tap_pos = start_pos;
+            double_tap.last_is_worker = is_worker;
+
             stats.record_action();
             info!("📱 [Touch] Selected unit {:?}", target_entity);
             if kind == 1 {
@@ -530,6 +586,8 @@ fn mobile_touch_interaction_system(
             for (entity, _, _, _, mut sel, ..) in &mut selectable_query {
                 sel.is_selected = entity == bldg_entity;
             }
+            double_tap.last_entity = None;
+            double_tap.last_tap_time = 0.0;
             stats.record_action();
             info!("📱 [Touch] Selected building {:?}", bldg_entity);
             sound_events.send(SoundEffect::MarineSelect);
@@ -603,6 +661,8 @@ fn mobile_touch_interaction_system(
                             });
                         }
                     }
+                    double_tap.last_entity = None;
+                    double_tap.last_tap_time = 0.0;
                     return;
                 }
             }
@@ -645,6 +705,8 @@ fn mobile_touch_interaction_system(
                             });
                         }
                     }
+                    double_tap.last_entity = None;
+                    double_tap.last_tap_time = 0.0;
                     return;
                 }
             }
@@ -746,14 +808,59 @@ fn mobile_touch_interaction_system(
                     },
                     Transform::from_xyz(tap_world_pos.x, tap_world_pos.y, 1.0),
                 ));
+                double_tap.last_entity = None;
+                double_tap.last_tap_time = 0.0;
                 return;
             }
         }
 
-        // ── STEP C: Tapped empty ground with nothing selected -> clear selection ──
+        // ── STEP C: Tapped empty ground with nothing selected ──
+        let now = time.elapsed_secs();
+        let is_ground_double_tap = double_tap.last_entity.is_none()
+            && double_tap.last_tap_time > 0.0
+            && (now - double_tap.last_tap_time) < 0.35
+            && double_tap.last_tap_pos.distance(start_pos) < 32.0;
+
+        if is_ground_double_tap {
+            let mut selected_any = false;
+            let mut has_soldier = false;
+            for (_, tf, radius, faction, mut sel, _, _, _, worker_opt, soldier_opt, _, bldg_opt) in &mut selectable_query {
+                if *faction == net_client.my_faction && bldg_opt.is_none() && worker_opt.is_none() {
+                    let pos = tf.translation.truncate();
+                    let is_visible = is_world_pos_on_screen(pos, radius.0, cam_pos, cam_scale, win_size);
+                    sel.is_selected = is_visible;
+                    if is_visible {
+                        selected_any = true;
+                        if soldier_opt.is_some() {
+                            has_soldier = true;
+                        }
+                    }
+                } else {
+                    sel.is_selected = false;
+                }
+            }
+            if selected_any {
+                stats.record_action();
+                if has_soldier {
+                    sound_events.send(SoundEffect::MarineSelect);
+                } else {
+                    sound_events.send(SoundEffect::MeleeSelect);
+                }
+            }
+            double_tap.last_entity = None;
+            double_tap.last_tap_time = 0.0;
+            info!("📱 [Touch] Ground double-tap: Selected all combat units visible on screen (except workers)");
+            return;
+        }
+
+        // Single tap on empty ground with nothing selected -> clear selection
         for (_, _, _, _, mut sel, ..) in &mut selectable_query {
             sel.is_selected = false;
         }
+        double_tap.last_entity = None;
+        double_tap.last_tap_time = now;
+        double_tap.last_tap_pos = start_pos;
+        double_tap.last_is_worker = false;
     }
 }
 
@@ -857,5 +964,246 @@ mod tests {
 
         let sel = app.world().get::<Selectable>(worker_ent).unwrap();
         assert!(sel.is_selected, "Worker under cursor should be selected after tap release");
+    }
+
+    #[test]
+    fn test_is_world_pos_on_screen_bounds() {
+        let cam_pos = Vec2::new(0.0, 0.0);
+        let cam_scale = 1.0;
+        let win_size = Vec2::new(955.0, 440.0);
+
+        // Center
+        assert!(is_world_pos_on_screen(Vec2::new(0.0, 0.0), 16.0, cam_pos, cam_scale, win_size));
+        // Near right edge inside
+        assert!(is_world_pos_on_screen(Vec2::new(450.0, 0.0), 16.0, cam_pos, cam_scale, win_size));
+        // Off screen to the right
+        assert!(!is_world_pos_on_screen(Vec2::new(600.0, 0.0), 16.0, cam_pos, cam_scale, win_size));
+        // Off screen to the top
+        assert!(!is_world_pos_on_screen(Vec2::new(0.0, 300.0), 16.0, cam_pos, cam_scale, win_size));
+        // Partially visible on left edge (center at -480, radius 16 touches -464 which is > -477.5)
+        assert!(is_world_pos_on_screen(Vec2::new(-480.0, 0.0), 16.0, cam_pos, cam_scale, win_size));
+    }
+
+    fn setup_mobile_test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(Time::<()>::default());
+        app.init_resource::<ButtonInput<MouseButton>>();
+        app.init_resource::<Touches>();
+        app.init_resource::<TouchGestureState>();
+        app.init_resource::<DoubleTapTracker>();
+        app.init_resource::<BoxSelectMode>();
+        app.init_resource::<SelectionState>();
+        app.init_resource::<MatchStats>();
+        app.init_resource::<AttackMovePending>();
+        app.init_resource::<PlacementState>();
+        app.init_resource::<FogOfWarGrid>();
+        app.init_resource::<NavGrid>();
+        app.add_event::<SoundEffect>();
+
+        let mut net_client = NetClient::default();
+        net_client.my_faction = Faction::Player1;
+        app.insert_resource(net_client);
+
+        let mut window = Window::default();
+        window.resolution = WindowResolution::new(955.0, 440.0);
+        app.world_mut().spawn((window, PrimaryWindow));
+
+        app.world_mut().spawn((
+            Camera::default(),
+            Camera2d,
+            Transform::from_xyz(0.0, 0.0, 0.0),
+        ));
+
+        app
+    }
+
+    fn simulate_tap(app: &mut App, screen_pos: Vec2, tap_time: f32) {
+        {
+            let mut time = app.world_mut().resource_mut::<Time>();
+            // advance time to tap_time
+            let dt = tap_time - time.elapsed_secs();
+            if dt > 0.0 {
+                time.advance_by(std::time::Duration::from_secs_f32(dt));
+            }
+        }
+        {
+            let mut gesture = app.world_mut().resource_mut::<TouchGestureState>();
+            gesture.touch_start_pos = Some(screen_pos);
+            gesture.touch_start_time = tap_time;
+            gesture.max_displacement = 0.0;
+            gesture.is_multi_touch = false;
+        }
+        app.world_mut().resource_mut::<ButtonInput<MouseButton>>().press(MouseButton::Left);
+        app.world_mut().resource_mut::<ButtonInput<MouseButton>>().release(MouseButton::Left);
+        app.world_mut().run_system_once(mobile_touch_interaction_system).unwrap();
+    }
+
+    #[test]
+    fn test_mobile_double_tap_on_soldier_selects_visible_combat_units_except_workers() {
+        let mut app = setup_mobile_test_app();
+
+        // Friendly soldier on screen at (0.0, 0.0) -> center screen (477.5, 220.0)
+        let soldier_screen = app.world_mut().spawn((
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            Radius(16.0),
+            Faction::Player1,
+            Selectable { is_selected: false },
+            Soldier::default(),
+        )).id();
+
+        // Friendly melee fighter on screen at (100.0, 50.0)
+        let melee_screen = app.world_mut().spawn((
+            Transform::from_xyz(100.0, 50.0, 0.0),
+            Radius(16.0),
+            Faction::Player1,
+            Selectable { is_selected: false },
+            MeleeFighter::default(),
+        )).id();
+
+        // Friendly worker on screen at (-50.0, 0.0)
+        let worker_screen = app.world_mut().spawn((
+            Transform::from_xyz(-50.0, 0.0, 0.0),
+            Radius(16.0),
+            Faction::Player1,
+            Selectable { is_selected: false },
+            Worker::default(),
+        )).id();
+
+        // Friendly soldier OFF SCREEN at (1500.0, 1500.0)
+        let soldier_offscreen = app.world_mut().spawn((
+            Transform::from_xyz(1500.0, 1500.0, 0.0),
+            Radius(16.0),
+            Faction::Player1,
+            Selectable { is_selected: false },
+            Soldier::default(),
+        )).id();
+
+        let center_screen = Vec2::new(477.5, 220.0);
+
+        // Tap 1: single tap on soldier at t=0.1
+        simulate_tap(&mut app, center_screen, 0.1);
+        assert!(app.world().get::<Selectable>(soldier_screen).unwrap().is_selected);
+        assert!(!app.world().get::<Selectable>(melee_screen).unwrap().is_selected);
+        assert!(!app.world().get::<Selectable>(worker_screen).unwrap().is_selected);
+        assert!(!app.world().get::<Selectable>(soldier_offscreen).unwrap().is_selected);
+
+        // Tap 2: double tap on soldier at t=0.25 (< 0.35s delta)
+        simulate_tap(&mut app, center_screen, 0.25);
+        // Both on-screen combat units should now be selected
+        assert!(app.world().get::<Selectable>(soldier_screen).unwrap().is_selected, "Soldier on screen must be selected");
+        assert!(app.world().get::<Selectable>(melee_screen).unwrap().is_selected, "Melee on screen must be selected");
+        // Worker must NOT be selected
+        assert!(!app.world().get::<Selectable>(worker_screen).unwrap().is_selected, "Worker must NOT be selected on combat double-tap");
+        // Off-screen soldier must NOT be selected
+        assert!(!app.world().get::<Selectable>(soldier_offscreen).unwrap().is_selected, "Off-screen soldier must NOT be selected");
+    }
+
+    #[test]
+    fn test_mobile_double_tap_on_worker_selects_visible_workers() {
+        let mut app = setup_mobile_test_app();
+
+        // Friendly worker 1 on screen at (0.0, 0.0) -> center screen (477.5, 220.0)
+        let worker1 = app.world_mut().spawn((
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            Radius(16.0),
+            Faction::Player1,
+            Selectable { is_selected: false },
+            Worker::default(),
+        )).id();
+
+        // Friendly worker 2 on screen at (100.0, 50.0)
+        let worker2 = app.world_mut().spawn((
+            Transform::from_xyz(100.0, 50.0, 0.0),
+            Radius(16.0),
+            Faction::Player1,
+            Selectable { is_selected: false },
+            Worker::default(),
+        )).id();
+
+        // Friendly soldier on screen at (-50.0, 0.0)
+        let soldier_screen = app.world_mut().spawn((
+            Transform::from_xyz(-50.0, 0.0, 0.0),
+            Radius(16.0),
+            Faction::Player1,
+            Selectable { is_selected: false },
+            Soldier::default(),
+        )).id();
+
+        // Friendly worker 3 OFF SCREEN at (1500.0, 1500.0)
+        let worker_offscreen = app.world_mut().spawn((
+            Transform::from_xyz(1500.0, 1500.0, 0.0),
+            Radius(16.0),
+            Faction::Player1,
+            Selectable { is_selected: false },
+            Worker::default(),
+        )).id();
+
+        let center_screen = Vec2::new(477.5, 220.0);
+
+        // Tap 1: single tap on worker at t=0.1
+        simulate_tap(&mut app, center_screen, 0.1);
+        assert!(app.world().get::<Selectable>(worker1).unwrap().is_selected);
+        assert!(!app.world().get::<Selectable>(worker2).unwrap().is_selected);
+        assert!(!app.world().get::<Selectable>(soldier_screen).unwrap().is_selected);
+
+        // Tap 2: double tap on worker at t=0.25 (< 0.35s delta)
+        simulate_tap(&mut app, center_screen, 0.25);
+        // Both on-screen workers should now be selected
+        assert!(app.world().get::<Selectable>(worker1).unwrap().is_selected, "Worker 1 on screen must be selected");
+        assert!(app.world().get::<Selectable>(worker2).unwrap().is_selected, "Worker 2 on screen must be selected");
+        // Soldier must NOT be selected
+        assert!(!app.world().get::<Selectable>(soldier_screen).unwrap().is_selected, "Soldier must NOT be selected on worker double-tap");
+        // Off-screen worker must NOT be selected
+        assert!(!app.world().get::<Selectable>(worker_offscreen).unwrap().is_selected, "Off-screen worker must NOT be selected");
+    }
+
+    #[test]
+    fn test_mobile_double_tap_on_ground_selects_visible_combat_units() {
+        let mut app = setup_mobile_test_app();
+
+        // Friendly soldier on screen at (100.0, 100.0)
+        let soldier_screen = app.world_mut().spawn((
+            Transform::from_xyz(100.0, 100.0, 0.0),
+            Radius(16.0),
+            Faction::Player1,
+            Selectable { is_selected: false },
+            Soldier::default(),
+        )).id();
+
+        // Friendly worker on screen at (50.0, 50.0)
+        let worker_screen = app.world_mut().spawn((
+            Transform::from_xyz(50.0, 50.0, 0.0),
+            Radius(16.0),
+            Faction::Player1,
+            Selectable { is_selected: false },
+            Worker::default(),
+        )).id();
+
+        // Friendly soldier OFF SCREEN at (1500.0, 1500.0)
+        let soldier_offscreen = app.world_mut().spawn((
+            Transform::from_xyz(1500.0, 1500.0, 0.0),
+            Radius(16.0),
+            Faction::Player1,
+            Selectable { is_selected: false },
+            Soldier::default(),
+        )).id();
+
+        // Empty ground at center screen (477.5, 220.0) maps to (0.0, 0.0) where no units are
+        let center_screen = Vec2::new(477.5, 220.0);
+
+        // Tap 1: tap empty ground at t=0.1
+        simulate_tap(&mut app, center_screen, 0.1);
+        assert!(!app.world().get::<Selectable>(soldier_screen).unwrap().is_selected);
+        assert!(!app.world().get::<Selectable>(worker_screen).unwrap().is_selected);
+
+        // Tap 2: double tap empty ground at t=0.25 (< 0.35s delta)
+        simulate_tap(&mut app, center_screen, 0.25);
+        // On-screen soldier should now be selected
+        assert!(app.world().get::<Selectable>(soldier_screen).unwrap().is_selected, "On-screen soldier must be selected on ground double-tap");
+        // Worker must NOT be selected
+        assert!(!app.world().get::<Selectable>(worker_screen).unwrap().is_selected, "Worker must NOT be selected on ground double-tap");
+        // Off-screen soldier must NOT be selected
+        assert!(!app.world().get::<Selectable>(soldier_offscreen).unwrap().is_selected, "Off-screen soldier must NOT be selected");
     }
 }
