@@ -30,11 +30,13 @@ pub use menu_modal::{
 };
 pub use mobile_hud::{
     handle_mobile_build_menu_interactions, handle_mobile_deselect_button_interaction,
-    handle_mobile_quick_action_interactions, spawn_mobile_build_menu,
+    handle_mobile_quick_action_interactions, handle_mobile_unit_menu_close_interaction,
+    handle_mobile_unit_production_interactions, spawn_mobile_build_menu,
     spawn_mobile_deselect_button, spawn_mobile_placement_prompt, spawn_mobile_quick_bar,
-    update_build_menu_visuals_system, update_mobile_build_menu_visibility_system,
-    update_mobile_deselect_button_visibility_system, update_mobile_hud_visibility_system,
-    update_mobile_placement_prompt_system, MobileBuildMenuOpen,
+    spawn_mobile_unit_production_menu, update_build_menu_visuals_system,
+    update_mobile_build_menu_visibility_system, update_mobile_deselect_button_visibility_system,
+    update_mobile_hud_visibility_system, update_mobile_placement_prompt_system,
+    update_mobile_unit_production_visibility_system, MobileBuildMenuOpen, MobileUnitProductionOpen,
 };
 pub use post_match::{
     handle_play_again_button_interaction, handle_return_to_landing_button_interaction,
@@ -49,6 +51,7 @@ impl Plugin for RtsUiPlugin {
         app.init_resource::<MatchCountdown>()
             .init_resource::<AttackMovePending>()
             .init_resource::<MobileBuildMenuOpen>()
+            .init_resource::<MobileUnitProductionOpen>()
             .add_systems(Startup, setup_hud)
             .add_systems(OnEnter(AppState::InGame), close_menu_on_game_start)
             .add_systems(
@@ -81,6 +84,9 @@ impl Plugin for RtsUiPlugin {
                     update_mobile_deselect_button_visibility_system,
                     handle_mobile_deselect_button_interaction,
                     update_mobile_placement_prompt_system,
+                    update_mobile_unit_production_visibility_system,
+                    handle_mobile_unit_production_interactions,
+                    handle_mobile_unit_menu_close_interaction,
                 ),
             );
     }

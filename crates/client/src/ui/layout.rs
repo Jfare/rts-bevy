@@ -4,7 +4,8 @@ use bevy::ui::FocusPolicy;
 use super::{
     spawn_bottom_bar, spawn_countdown_overlay, spawn_game_menu_modal,
     spawn_mobile_build_menu, spawn_mobile_deselect_button, spawn_mobile_placement_prompt,
-    spawn_mobile_quick_bar, spawn_post_match_banner, spawn_top_bar,
+    spawn_mobile_quick_bar, spawn_mobile_unit_production_menu, spawn_post_match_banner,
+    spawn_top_bar,
 };
 
 /// Marker component for the high-level HUD root UI overlay container
@@ -44,6 +45,9 @@ pub fn setup_hud(mut commands: Commands) {
 
             // Mobile Build Menu Panel (Displays all buildings when BUILD is toggled)
             spawn_mobile_build_menu(root);
+
+            // Mobile Unit Production Menu Panel (Right center popup when BaseHQ or Barracks tapped)
+            spawn_mobile_unit_production_menu(root);
 
             // Mobile Placement Prompt Pill (Top center, active when placing on mobile)
             spawn_mobile_placement_prompt(root);

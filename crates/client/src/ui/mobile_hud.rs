@@ -1,11 +1,16 @@
 use bevy::prelude::*;
 use bevy::ui::FocusPolicy;
-use shared::components::{MeleeFighter, Selectable, Soldier, Unit, Worker};
+use shared::components::{
+    Barracks, BaseHQ, Building, Faction, MatchOutcome, MeleeFighter, NetEntity,
+    ProductionBuilding, QueuedUnit, Selectable, Soldier, Unit, Worker,
+};
+use shared::economy::PlayerEconomy;
 use shared::grid::BuildingKind;
+use shared::protocol::{ClientMessage, UnitKind};
 
 use crate::audio_sfx::SoundEffect;
 use crate::controls::ControlScheme;
-use crate::net::NetClient;
+use crate::net::{NetClient, NetStatus};
 use crate::placement::PlacementState;
 use crate::stats::MatchStats;
 
@@ -23,6 +28,10 @@ pub struct MobileDeselectButton;
 #[derive(Resource, Default, Debug, Clone, Copy)]
 pub struct MobileBuildMenuOpen(pub bool);
 
+/// Resource tracking whether the mobile unit production menu (right center) is open
+#[derive(Resource, Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MobileUnitProductionOpen(pub bool);
+
 /// Marker component for the container holding mobile quick action buttons (Build button)
 #[derive(Component)]
 pub struct MobileQuickActionContainer;
@@ -38,6 +47,34 @@ pub struct MobileBuildMenuPanel;
 /// Action component attached to each building button in the mobile build menu
 #[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
 pub struct MobileBuildOption(pub BuildingKind);
+
+/// Marker component for the mobile unit production popup panel (right center)
+#[derive(Component)]
+pub struct MobileUnitProductionPanel;
+
+/// Marker component for the unit production popup panel title text
+#[derive(Component)]
+pub struct MobileUnitMenuTitleText;
+
+/// Marker component for the unit production popup panel queue status text
+#[derive(Component)]
+pub struct MobileUnitMenuQueueText;
+
+/// Marker component for the close button on the mobile unit production menu
+#[derive(Component)]
+pub struct MobileUnitMenuCloseButton;
+
+/// Marker component for the Base HQ unit production action section
+#[derive(Component)]
+pub struct MobileHqProductionSection;
+
+/// Marker component for the Barracks unit production action section
+#[derive(Component)]
+pub struct MobileBarracksProductionSection;
+
+/// Action component attached to each unit train button in the mobile unit production menu
+#[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
+pub struct MobileTrainUnitButton(pub UnitKind);
 
 /// Spawns the mobile BUILD action button on the right side, positioned above the round Deselect "X" button
 pub fn spawn_mobile_quick_bar(parent: &mut ChildBuilder) {
@@ -379,7 +416,7 @@ pub fn spawn_mobile_deselect_button(parent: &mut ChildBuilder) {
         });
 }
 
-/// Updates visibility of the mobile round Deselect button based on platform, unit selection, and placement state
+/// Updates visibility of the mobile round Deselect button based on platform, entity selection, and placement state
 pub fn update_mobile_deselect_button_visibility_system(
     scheme: Res<ControlScheme>,
     net_client: Res<NetClient>,
@@ -390,6 +427,7 @@ pub fn update_mobile_deselect_button_visibility_system(
         Option<&Worker>,
         Option<&Soldier>,
         Option<&MeleeFighter>,
+        Option<&Building>,
     )>,
     placement_state: Res<PlacementState>,
     mut button_query: Query<&mut Node, With<MobileDeselectButton>>,
@@ -401,12 +439,12 @@ pub fn update_mobile_deselect_button_visibility_system(
         || net_client.my_platform == shared::protocol::ClientPlatform::Mobile
         || win_mobile;
 
-    let has_selected_unit = selectable_query.iter().any(|(sel, u, w, s, m)| {
-        sel.is_selected && (u.is_some() || w.is_some() || s.is_some() || m.is_some())
+    let has_selected_entity = selectable_query.iter().any(|(sel, u, w, s, m, b)| {
+        sel.is_selected && (u.is_some() || w.is_some() || s.is_some() || m.is_some() || b.is_some())
     });
 
     let is_placing = placement_state.active_kind.is_some();
-    let should_show = is_mobile && (has_selected_unit || is_placing);
+    let should_show = is_mobile && (has_selected_entity || is_placing);
 
     for mut node in &mut button_query {
         node.display = if should_show {
@@ -544,6 +582,591 @@ pub fn update_mobile_placement_prompt_system(
         if let Some(kind) = placement_state.active_kind {
             for mut text in &mut text_query {
                 text.0 = format!("Tap map to place {} (${})", kind.name(), placement_state.mineral_cost);
+            }
+        }
+    }
+}
+
+/// Spawns the mobile unit production popup menu on the right center of the screen
+pub fn spawn_mobile_unit_production_menu(parent: &mut ChildBuilder) {
+    parent
+        .spawn((
+            MobileUnitProductionPanel,
+            Node {
+                position_type: PositionType::Absolute,
+                right: Val::Px(10.0),
+                top: Val::Percent(50.0),
+                margin: UiRect::top(Val::Px(-80.0)),
+                width: Val::Px(152.0),
+                flex_direction: FlexDirection::Column,
+                padding: UiRect::all(Val::Px(8.0)),
+                row_gap: Val::Px(6.0),
+                border: UiRect::all(Val::Px(1.5)),
+                display: Display::None,
+                ..default()
+            },
+            BorderRadius::all(Val::Px(8.0)),
+            BackgroundColor(Color::srgba(0.06, 0.09, 0.14, 0.95)),
+            BorderColor(Color::srgba(0.25, 0.50, 0.75, 0.90)),
+            FocusPolicy::Pass,
+        ))
+        .with_children(|panel| {
+            // Header Row: Title + Queue info on left, Close "✕" button on right
+            panel
+                .spawn((
+                    Node {
+                        width: Val::Percent(100.0),
+                        flex_direction: FlexDirection::Row,
+                        justify_content: JustifyContent::SpaceBetween,
+                        align_items: AlignItems::Center,
+                        margin: UiRect::bottom(Val::Px(2.0)),
+                        ..default()
+                    },
+                    FocusPolicy::Pass,
+                ))
+                .with_children(|header| {
+                    header
+                        .spawn((
+                            Node {
+                                flex_direction: FlexDirection::Column,
+                                ..default()
+                            },
+                            FocusPolicy::Pass,
+                        ))
+                        .with_children(|col| {
+                            col.spawn((
+                                MobileUnitMenuTitleText,
+                                Text::new("BARRACKS"),
+                                TextFont {
+                                    font_size: 11.5,
+                                    ..default()
+                                },
+                                TextColor(Color::srgb(0.35, 0.85, 1.0)),
+                                FocusPolicy::Pass,
+                            ));
+                            col.spawn((
+                                MobileUnitMenuQueueText,
+                                Text::new("Queue: 0/5"),
+                                TextFont {
+                                    font_size: 9.5,
+                                    ..default()
+                                },
+                                TextColor(Color::srgb(0.65, 0.75, 0.85)),
+                                FocusPolicy::Pass,
+                            ));
+                        });
+
+                    header
+                        .spawn((
+                            Button,
+                            MobileUnitMenuCloseButton,
+                            Node {
+                                width: Val::Px(20.0),
+                                height: Val::Px(20.0),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                border: UiRect::all(Val::Px(1.0)),
+                                ..default()
+                            },
+                            BorderRadius::all(Val::Px(4.0)),
+                            BackgroundColor(Color::srgba(0.18, 0.24, 0.32, 0.85)),
+                            BorderColor(Color::srgba(0.35, 0.50, 0.65, 0.75)),
+                        ))
+                        .with_children(|btn| {
+                            btn.spawn((
+                                Text::new("✕"),
+                                TextFont {
+                                    font_size: 11.0,
+                                    ..default()
+                                },
+                                TextColor(Color::srgb(0.85, 0.85, 0.90)),
+                                FocusPolicy::Pass,
+                            ));
+                        });
+                });
+
+            // 1. Base HQ Section (Train Worker)
+            panel
+                .spawn((
+                    MobileHqProductionSection,
+                    Node {
+                        width: Val::Percent(100.0),
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(5.0),
+                        display: Display::None,
+                        ..default()
+                    },
+                    FocusPolicy::Pass,
+                ))
+                .with_children(|sec| {
+                    spawn_mobile_train_button(sec, UnitKind::Worker, "Train Worker", 50, 1);
+                });
+
+            // 2. Barracks Section (Train Ranged / Melee)
+            panel
+                .spawn((
+                    MobileBarracksProductionSection,
+                    Node {
+                        width: Val::Percent(100.0),
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(5.0),
+                        display: Display::None,
+                        ..default()
+                    },
+                    FocusPolicy::Pass,
+                ))
+                .with_children(|sec| {
+                    spawn_mobile_train_button(sec, UnitKind::RangedFighter, "Ranged Fighter", 100, 2);
+                    spawn_mobile_train_button(sec, UnitKind::MeleeFighter, "Melee Fighter", 75, 1);
+                });
+        });
+}
+
+fn spawn_mobile_train_button(
+    parent: &mut ChildBuilder,
+    unit_kind: UnitKind,
+    name: &str,
+    cost: u32,
+    supply: u32,
+) {
+    parent
+        .spawn((
+            Button,
+            MobileTrainUnitButton(unit_kind),
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Px(42.0),
+                flex_direction: FlexDirection::Column,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                padding: UiRect::axes(Val::Px(4.0), Val::Px(2.0)),
+                border: UiRect::all(Val::Px(1.0)),
+                ..default()
+            },
+            BorderRadius::all(Val::Px(6.0)),
+            BackgroundColor(Color::srgba(0.12, 0.18, 0.28, 0.95)),
+            BorderColor(Color::srgba(0.30, 0.50, 0.70, 0.80)),
+        ))
+        .with_children(|btn| {
+            btn.spawn((
+                Text::new(name),
+                TextFont {
+                    font_size: 11.0,
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+                FocusPolicy::Pass,
+            ));
+            btn.spawn((
+                Text::new(format!("{} Min | {} Sup", cost, supply)),
+                TextFont {
+                    font_size: 9.5,
+                    ..default()
+                },
+                TextColor(Color::srgb(1.0, 0.85, 0.30)),
+                FocusPolicy::Pass,
+            ));
+        });
+}
+
+/// Updates visibility and content of the mobile unit production menu based on platform and selection
+pub fn update_mobile_unit_production_visibility_system(
+    scheme: Res<ControlScheme>,
+    net_client: Res<NetClient>,
+    placement_state: Res<PlacementState>,
+    window_query: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    building_query: Query<(
+        &Faction,
+        &Selectable,
+        &Building,
+        Option<&BaseHQ>,
+        Option<&Barracks>,
+        Option<&ProductionBuilding>,
+    )>,
+    mut panel_query: Query<
+        &mut Node,
+        (
+            With<MobileUnitProductionPanel>,
+            Without<MobileHqProductionSection>,
+            Without<MobileBarracksProductionSection>,
+        ),
+    >,
+    mut hq_section_query: Query<
+        &mut Node,
+        (
+            With<MobileHqProductionSection>,
+            Without<MobileUnitProductionPanel>,
+            Without<MobileBarracksProductionSection>,
+        ),
+    >,
+    mut barracks_section_query: Query<
+        &mut Node,
+        (
+            With<MobileBarracksProductionSection>,
+            Without<MobileUnitProductionPanel>,
+            Without<MobileHqProductionSection>,
+        ),
+    >,
+    mut title_query: Query<
+        &mut Text,
+        (With<MobileUnitMenuTitleText>, Without<MobileUnitMenuQueueText>),
+    >,
+    mut queue_query: Query<
+        &mut Text,
+        (With<MobileUnitMenuQueueText>, Without<MobileUnitMenuTitleText>),
+    >,
+    mut unit_menu_open: ResMut<MobileUnitProductionOpen>,
+) {
+    let win_mobile = window_query
+        .get_single()
+        .map_or(false, |w| w.width() < 960.0 || w.height() < 550.0);
+    let is_mobile = *scheme == ControlScheme::MobileTouch
+        || net_client.my_platform == shared::protocol::ClientPlatform::Mobile
+        || win_mobile;
+
+    let is_placing = placement_state.active_kind.is_some();
+
+    if !is_mobile || is_placing {
+        for mut node in &mut panel_query {
+            node.display = Display::None;
+        }
+        for mut node in &mut hq_section_query {
+            node.display = Display::None;
+        }
+        for mut node in &mut barracks_section_query {
+            node.display = Display::None;
+        }
+        unit_menu_open.0 = false;
+        return;
+    }
+
+    let mut selected_hq = None;
+    let mut selected_barracks = None;
+
+    for (faction, selectable, building, hq_opt, barracks_opt, prod_opt) in &building_query {
+        if *faction == net_client.my_faction && selectable.is_selected && building.is_constructed {
+            if hq_opt.is_some() {
+                selected_hq = Some((building, prod_opt));
+                break;
+            }
+            if barracks_opt.is_some() {
+                selected_barracks = Some((building, prod_opt));
+                break;
+            }
+        }
+    }
+
+    let has_menu = selected_hq.is_some() || selected_barracks.is_some();
+    unit_menu_open.0 = has_menu;
+
+    for mut node in &mut panel_query {
+        node.display = if has_menu {
+            Display::Flex
+        } else {
+            Display::None
+        };
+    }
+
+    if let Some((bldg, prod_opt)) = selected_hq {
+        for mut node in &mut hq_section_query {
+            node.display = Display::Flex;
+        }
+        for mut node in &mut barracks_section_query {
+            node.display = Display::None;
+        }
+        for mut text in &mut title_query {
+            text.0 = bldg.name.to_uppercase();
+        }
+        let queue_str = if let Some(prod) = prod_opt {
+            if !prod.queue.is_empty() {
+                let first = &prod.queue[0];
+                let pct = ((prod.current_timer / first.build_duration).clamp(0.0, 1.0) * 100.0) as u32;
+                format!("Queue: {}/{} ({}%)", prod.queue.len(), prod.max_queue_size, pct)
+            } else {
+                format!("Queue: 0/{}", prod.max_queue_size)
+            }
+        } else {
+            "Queue: 0/5".to_string()
+        };
+        for mut text in &mut queue_query {
+            text.0 = queue_str.clone();
+        }
+    } else if let Some((bldg, prod_opt)) = selected_barracks {
+        for mut node in &mut hq_section_query {
+            node.display = Display::None;
+        }
+        for mut node in &mut barracks_section_query {
+            node.display = Display::Flex;
+        }
+        for mut text in &mut title_query {
+            text.0 = bldg.name.to_uppercase();
+        }
+        let queue_str = if let Some(prod) = prod_opt {
+            if !prod.queue.is_empty() {
+                let first = &prod.queue[0];
+                let pct = ((prod.current_timer / first.build_duration).clamp(0.0, 1.0) * 100.0) as u32;
+                format!("Queue: {}/{} ({}%)", prod.queue.len(), prod.max_queue_size, pct)
+            } else {
+                format!("Queue: 0/{}", prod.max_queue_size)
+            }
+        } else {
+            "Queue: 0/5".to_string()
+        };
+        for mut text in &mut queue_query {
+            text.0 = queue_str.clone();
+        }
+    } else {
+        for mut node in &mut hq_section_query {
+            node.display = Display::None;
+        }
+        for mut node in &mut barracks_section_query {
+            node.display = Display::None;
+        }
+    }
+}
+
+/// Handles close button tap on the mobile unit production menu
+pub fn handle_mobile_unit_menu_close_interaction(
+    mut close_query: Query<
+        (&Interaction, &mut BackgroundColor, &mut BorderColor),
+        (Changed<Interaction>, With<Button>, With<MobileUnitMenuCloseButton>),
+    >,
+    mut selectable_query: Query<(
+        &Faction,
+        &mut Selectable,
+        Option<&BaseHQ>,
+        Option<&Barracks>,
+    )>,
+    net_client: Res<NetClient>,
+    mut stats: ResMut<MatchStats>,
+    mut sound_events: EventWriter<SoundEffect>,
+) {
+    for (interaction, mut bg, mut border) in &mut close_query {
+        match *interaction {
+            Interaction::Pressed => {
+                for (fac, mut sel, hq, barracks) in &mut selectable_query {
+                    if *fac == net_client.my_faction && (hq.is_some() || barracks.is_some()) {
+                        sel.is_selected = false;
+                    }
+                }
+                stats.record_action();
+                sound_events.send(SoundEffect::OrderIssued);
+                info!("📱 [Mobile Production] Closed unit production menu");
+                return;
+            }
+            Interaction::Hovered => {
+                bg.0 = Color::srgba(0.35, 0.45, 0.55, 0.95);
+                border.0 = Color::srgba(0.55, 0.75, 1.0, 1.0);
+            }
+            Interaction::None => {
+                bg.0 = Color::srgba(0.18, 0.24, 0.32, 0.85);
+                border.0 = Color::srgba(0.35, 0.50, 0.65, 0.75);
+            }
+        }
+    }
+}
+
+/// Handles interactions with the mobile unit production buttons
+pub fn handle_mobile_unit_production_interactions(
+    mut interaction_query: Query<
+        (&Interaction, &MobileTrainUnitButton, &mut BackgroundColor, &mut BorderColor),
+        (Changed<Interaction>, With<Button>),
+    >,
+    net_client: Res<NetClient>,
+    outcome_opt: Option<Res<MatchOutcome>>,
+    mut economy: ResMut<PlayerEconomy>,
+    mut stats: ResMut<MatchStats>,
+    mut sound_events: EventWriter<SoundEffect>,
+    mut prod_query: Query<(
+        &mut ProductionBuilding,
+        &Building,
+        &Faction,
+        &Selectable,
+        Option<&NetEntity>,
+        Option<&BaseHQ>,
+        Option<&Barracks>,
+    )>,
+) {
+    if outcome_opt.as_deref() == Some(&MatchOutcome::Victory)
+        || outcome_opt.as_deref() == Some(&MatchOutcome::Defeat)
+    {
+        return;
+    }
+
+    let my_faction = net_client.my_faction;
+
+    for (interaction, action, mut bg, mut border) in &mut interaction_query {
+        match *interaction {
+            Interaction::Pressed => {
+                bg.0 = Color::srgba(0.15, 0.60, 0.85, 0.95);
+                border.0 = Color::srgb(1.0, 1.0, 1.0);
+                stats.record_action();
+
+                match action.0 {
+                    UnitKind::Worker => {
+                        for (mut prod, building, faction, selectable, net_entity_opt, base_hq, _) in
+                            &mut prod_query
+                        {
+                            if *faction == my_faction
+                                && selectable.is_selected
+                                && building.is_constructed
+                                && base_hq.is_some()
+                                && prod.queue.len() < prod.max_queue_size
+                            {
+                                if !economy.has_minerals(*faction, 50) {
+                                    info!("⚠️ [Economy] Not enough Gold for Worker (Requires 50 🪙)!");
+                                    continue;
+                                }
+
+                                if !economy.has_supply(*faction, 1) {
+                                    sound_events.send(SoundEffect::SupplyBlocked);
+                                    info!("⚠️ [Economy] Not enough supply for Worker (Requires 1 ⚡) - Build a Supply Depot!");
+                                    continue;
+                                }
+
+                                economy.spend_minerals(*faction, 50);
+                                economy.register_supply(*faction, 1);
+                                if *faction == Faction::Player1 {
+                                    stats.minerals_spent += 50;
+                                    stats.units_trained += 1;
+                                }
+                                sound_events.send(SoundEffect::UnitTrained);
+
+                                prod.queue.push(QueuedUnit {
+                                    name: "Worker".to_string(),
+                                    mineral_cost: 50,
+                                    supply_cost: 1,
+                                    build_duration: 3.0,
+                                });
+
+                                if let Some(net) = net_entity_opt {
+                                    if net_client.status != NetStatus::Disconnected {
+                                        net_client.send(&ClientMessage::RequestTrainUnit {
+                                            building_net_id: net.net_id,
+                                            unit_kind: UnitKind::Worker,
+                                        });
+                                    }
+                                }
+
+                                info!("⛏️ [Mobile Production] Worker queued! Queue size: {}", prod.queue.len());
+                            }
+                        }
+                    }
+                    UnitKind::RangedFighter => {
+                        for (mut prod, building, faction, selectable, net_entity_opt, _, barracks) in
+                            &mut prod_query
+                        {
+                            if *faction == my_faction
+                                && selectable.is_selected
+                                && building.is_constructed
+                                && barracks.is_some()
+                            {
+                                if prod.queue.len() >= prod.max_queue_size {
+                                    info!("⚠️ [Mobile Production] Production queue is full!");
+                                    continue;
+                                }
+
+                                if !economy.has_minerals(*faction, 100) {
+                                    info!("⚠️ [Economy] Not enough Gold for Ranged Fighter (Requires 100 🪙)!");
+                                    continue;
+                                }
+
+                                if !economy.has_supply(*faction, 2) {
+                                    sound_events.send(SoundEffect::SupplyBlocked);
+                                    info!("⚠️ [Economy] Not enough supply for Ranged Fighter (Requires 2 ⚡) - Build a Supply Depot!");
+                                    continue;
+                                }
+
+                                economy.spend_minerals(*faction, 100);
+                                economy.register_supply(*faction, 2);
+                                if *faction == Faction::Player1 {
+                                    stats.minerals_spent += 100;
+                                    stats.units_trained += 1;
+                                }
+                                sound_events.send(SoundEffect::UnitTrained);
+
+                                prod.queue.push(QueuedUnit {
+                                    name: "Ranged Fighter".to_string(),
+                                    mineral_cost: 100,
+                                    supply_cost: 2,
+                                    build_duration: 4.0,
+                                });
+
+                                if let Some(net) = net_entity_opt {
+                                    if net_client.status != NetStatus::Disconnected {
+                                        net_client.send(&ClientMessage::RequestTrainUnit {
+                                            building_net_id: net.net_id,
+                                            unit_kind: UnitKind::RangedFighter,
+                                        });
+                                    }
+                                }
+
+                                info!("🏹 [Mobile Production] Ranged Fighter queued! Queue size: {}", prod.queue.len());
+                            }
+                        }
+                    }
+                    UnitKind::MeleeFighter => {
+                        for (mut prod, building, faction, selectable, net_entity_opt, _, barracks) in
+                            &mut prod_query
+                        {
+                            if *faction == my_faction
+                                && selectable.is_selected
+                                && building.is_constructed
+                                && barracks.is_some()
+                            {
+                                if prod.queue.len() >= prod.max_queue_size {
+                                    info!("⚠️ [Mobile Production] Production queue is full!");
+                                    continue;
+                                }
+
+                                if !economy.has_minerals(*faction, 75) {
+                                    info!("⚠️ [Economy] Not enough Gold for Melee Fighter (Requires 75 🪙)!");
+                                    continue;
+                                }
+
+                                if !economy.has_supply(*faction, 1) {
+                                    sound_events.send(SoundEffect::SupplyBlocked);
+                                    info!("⚠️ [Economy] Not enough supply for Melee Fighter (Requires 1 ⚡) - Build a Supply Depot!");
+                                    continue;
+                                }
+
+                                economy.spend_minerals(*faction, 75);
+                                economy.register_supply(*faction, 1);
+                                if *faction == Faction::Player1 {
+                                    stats.minerals_spent += 75;
+                                    stats.units_trained += 1;
+                                }
+                                sound_events.send(SoundEffect::UnitTrained);
+
+                                prod.queue.push(QueuedUnit {
+                                    name: "Melee Fighter".to_string(),
+                                    mineral_cost: 75,
+                                    supply_cost: 1,
+                                    build_duration: 3.5,
+                                });
+
+                                if let Some(net) = net_entity_opt {
+                                    if net_client.status != NetStatus::Disconnected {
+                                        net_client.send(&ClientMessage::RequestTrainUnit {
+                                            building_net_id: net.net_id,
+                                            unit_kind: UnitKind::MeleeFighter,
+                                        });
+                                    }
+                                }
+
+                                info!("⚔️ [Mobile Production] Melee Fighter queued! Queue size: {}", prod.queue.len());
+                            }
+                        }
+                    }
+                }
+            }
+            Interaction::Hovered => {
+                bg.0 = Color::srgba(0.20, 0.35, 0.55, 0.95);
+                border.0 = Color::srgba(0.45, 0.75, 1.0, 1.0);
+            }
+            Interaction::None => {
+                bg.0 = Color::srgba(0.12, 0.18, 0.28, 0.95);
+                border.0 = Color::srgba(0.30, 0.50, 0.70, 0.80);
             }
         }
     }
@@ -797,5 +1420,382 @@ mod tests {
             app.world().get::<Text>(text_entity).unwrap().0,
             "Tap map to place Barracks ($150)"
         );
+    }
+
+    #[test]
+    fn test_mobile_unit_production_menu_visibility_for_hq() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(ControlScheme::MobileTouch);
+        let mut net_client = NetClient::default();
+        net_client.my_faction = Faction::Player1;
+        app.insert_resource(net_client);
+        app.init_resource::<PlacementState>();
+        app.init_resource::<MobileUnitProductionOpen>();
+
+        let mut window = Window::default();
+        window.resolution = WindowResolution::new(955.0, 440.0);
+        app.world_mut().spawn((window, PrimaryWindow));
+
+        // Spawn HUD hierarchy entities
+        let panel_entity = app
+            .world_mut()
+            .spawn((
+                MobileUnitProductionPanel,
+                Node { display: Display::None, ..default() },
+            ))
+            .id();
+        let hq_sec_entity = app
+            .world_mut()
+            .spawn((
+                MobileHqProductionSection,
+                Node { display: Display::None, ..default() },
+            ))
+            .id();
+        let barracks_sec_entity = app
+            .world_mut()
+            .spawn((
+                MobileBarracksProductionSection,
+                Node { display: Display::None, ..default() },
+            ))
+            .id();
+        let title_entity = app
+            .world_mut()
+            .spawn((MobileUnitMenuTitleText, Text::new("")))
+            .id();
+        let queue_entity = app
+            .world_mut()
+            .spawn((MobileUnitMenuQueueText, Text::new("")))
+            .id();
+
+        // 1. Initially without building selected -> Menu is hidden
+        app.world_mut()
+            .run_system_once(update_mobile_unit_production_visibility_system)
+            .unwrap();
+        assert_eq!(app.world().get::<Node>(panel_entity).unwrap().display, Display::None);
+        assert!(!app.world().resource::<MobileUnitProductionOpen>().0);
+
+        // 2. Select constructed BaseHQ -> Menu opens with HQ section and "BASE HQ" title
+        let _hq_entity = app
+            .world_mut()
+            .spawn((
+                Faction::Player1,
+                Selectable { is_selected: true },
+                Building::new("Base HQ", Vec2::new(110.0, 110.0), 5.0, true),
+                BaseHQ::default(),
+                ProductionBuilding::default(),
+            ))
+            .id();
+
+        app.world_mut()
+            .run_system_once(update_mobile_unit_production_visibility_system)
+            .unwrap();
+
+        assert_eq!(app.world().get::<Node>(panel_entity).unwrap().display, Display::Flex);
+        assert_eq!(app.world().get::<Node>(hq_sec_entity).unwrap().display, Display::Flex);
+        assert_eq!(app.world().get::<Node>(barracks_sec_entity).unwrap().display, Display::None);
+        assert_eq!(app.world().get::<Text>(title_entity).unwrap().0, "BASE HQ");
+        assert_eq!(app.world().get::<Text>(queue_entity).unwrap().0, "Queue: 0/5");
+        assert!(app.world().resource::<MobileUnitProductionOpen>().0);
+    }
+
+    #[test]
+    fn test_mobile_unit_production_menu_visibility_for_barracks() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(ControlScheme::MobileTouch);
+        let mut net_client = NetClient::default();
+        net_client.my_faction = Faction::Player1;
+        app.insert_resource(net_client);
+        app.init_resource::<PlacementState>();
+        app.init_resource::<MobileUnitProductionOpen>();
+
+        let mut window = Window::default();
+        window.resolution = WindowResolution::new(955.0, 440.0);
+        app.world_mut().spawn((window, PrimaryWindow));
+
+        let panel_entity = app
+            .world_mut()
+            .spawn((
+                MobileUnitProductionPanel,
+                Node { display: Display::None, ..default() },
+            ))
+            .id();
+        let hq_sec_entity = app
+            .world_mut()
+            .spawn((
+                MobileHqProductionSection,
+                Node { display: Display::None, ..default() },
+            ))
+            .id();
+        let barracks_sec_entity = app
+            .world_mut()
+            .spawn((
+                MobileBarracksProductionSection,
+                Node { display: Display::None, ..default() },
+            ))
+            .id();
+        let title_entity = app
+            .world_mut()
+            .spawn((MobileUnitMenuTitleText, Text::new("")))
+            .id();
+        let queue_entity = app
+            .world_mut()
+            .spawn((MobileUnitMenuQueueText, Text::new("")))
+            .id();
+
+        // Select constructed Barracks
+        let _barracks_entity = app
+            .world_mut()
+            .spawn((
+                Faction::Player1,
+                Selectable { is_selected: true },
+                Building::new("Barracks", Vec2::new(90.0, 90.0), 5.0, true),
+                Barracks,
+                ProductionBuilding::default(),
+            ))
+            .id();
+
+        app.world_mut()
+            .run_system_once(update_mobile_unit_production_visibility_system)
+            .unwrap();
+
+        assert_eq!(app.world().get::<Node>(panel_entity).unwrap().display, Display::Flex);
+        assert_eq!(app.world().get::<Node>(hq_sec_entity).unwrap().display, Display::None);
+        assert_eq!(app.world().get::<Node>(barracks_sec_entity).unwrap().display, Display::Flex);
+        assert_eq!(app.world().get::<Text>(title_entity).unwrap().0, "BARRACKS");
+        assert_eq!(app.world().get::<Text>(queue_entity).unwrap().0, "Queue: 0/5");
+        assert!(app.world().resource::<MobileUnitProductionOpen>().0);
+    }
+
+    #[test]
+    fn test_mobile_unit_production_train_worker() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        let mut net_client = NetClient::default();
+        net_client.my_faction = Faction::Player1;
+        app.insert_resource(net_client);
+        let mut economy = PlayerEconomy::default();
+        economy.set_minerals(Faction::Player1, 200);
+        economy.set_supply(Faction::Player1, 0, 10);
+        app.insert_resource(economy);
+        app.init_resource::<MatchStats>();
+        app.add_event::<SoundEffect>();
+
+        // Spawn selected BaseHQ
+        let hq_entity = app
+            .world_mut()
+            .spawn((
+                Faction::Player1,
+                Selectable { is_selected: true },
+                Building::new("Base HQ", Vec2::new(110.0, 110.0), 5.0, true),
+                BaseHQ::default(),
+                ProductionBuilding::default(),
+            ))
+            .id();
+
+        // Spawn Train Worker button in pressed state
+        let _btn = app
+            .world_mut()
+            .spawn((
+                Button,
+                MobileTrainUnitButton(UnitKind::Worker),
+                Interaction::Pressed,
+                BackgroundColor(Color::BLACK),
+                BorderColor(Color::BLACK),
+            ))
+            .id();
+
+        app.world_mut()
+            .run_system_once(handle_mobile_unit_production_interactions)
+            .unwrap();
+
+        // 50 gold spent, 1 supply registered
+        let eco = app.world().resource::<PlayerEconomy>();
+        assert_eq!(eco.get_minerals(Faction::Player1), 150);
+        assert_eq!(eco.get(Faction::Player1).current_supply, 1);
+
+        // Worker queued in BaseHQ
+        let prod = app.world().get::<ProductionBuilding>(hq_entity).unwrap();
+        assert_eq!(prod.queue.len(), 1);
+        assert_eq!(prod.queue[0].name, "Worker");
+    }
+
+    #[test]
+    fn test_mobile_unit_production_train_ranged_and_melee() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        let mut net_client = NetClient::default();
+        net_client.my_faction = Faction::Player1;
+        app.insert_resource(net_client);
+        let mut economy = PlayerEconomy::default();
+        economy.set_minerals(Faction::Player1, 300);
+        economy.set_supply(Faction::Player1, 0, 10);
+        app.insert_resource(economy);
+        app.init_resource::<MatchStats>();
+        app.add_event::<SoundEffect>();
+
+        let b_entity = app
+            .world_mut()
+            .spawn((
+                Faction::Player1,
+                Selectable { is_selected: true },
+                Building::new("Barracks", Vec2::new(90.0, 90.0), 5.0, true),
+                Barracks,
+                ProductionBuilding::default(),
+            ))
+            .id();
+
+        // 1. Train Ranged Fighter (100 gold, 2 supply)
+        let ranged_btn = app
+            .world_mut()
+            .spawn((
+                Button,
+                MobileTrainUnitButton(UnitKind::RangedFighter),
+                Interaction::Pressed,
+                BackgroundColor(Color::BLACK),
+                BorderColor(Color::BLACK),
+            ))
+            .id();
+
+        app.world_mut()
+            .run_system_once(handle_mobile_unit_production_interactions)
+            .unwrap();
+
+        let eco = app.world().resource::<PlayerEconomy>();
+        assert_eq!(eco.get_minerals(Faction::Player1), 200);
+        assert_eq!(eco.get(Faction::Player1).current_supply, 2);
+
+        // Clear interaction on ranged button
+        *app.world_mut().get_mut::<Interaction>(ranged_btn).unwrap() = Interaction::None;
+
+        // 2. Train Melee Fighter (75 gold, 1 supply)
+        let _melee_btn = app
+            .world_mut()
+            .spawn((
+                Button,
+                MobileTrainUnitButton(UnitKind::MeleeFighter),
+                Interaction::Pressed,
+                BackgroundColor(Color::BLACK),
+                BorderColor(Color::BLACK),
+            ))
+            .id();
+
+        app.world_mut()
+            .run_system_once(handle_mobile_unit_production_interactions)
+            .unwrap();
+
+        let eco2 = app.world().resource::<PlayerEconomy>();
+        assert_eq!(eco2.get_minerals(Faction::Player1), 125);
+        assert_eq!(eco2.get(Faction::Player1).current_supply, 3);
+
+        let prod = app.world().get::<ProductionBuilding>(b_entity).unwrap();
+        assert_eq!(prod.queue.len(), 2);
+        assert_eq!(prod.queue[0].name, "Ranged Fighter");
+        assert_eq!(prod.queue[1].name, "Melee Fighter");
+    }
+
+    #[test]
+    fn test_mobile_unit_production_close_button_deselects_building() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        let mut net_client = NetClient::default();
+        net_client.my_faction = Faction::Player1;
+        app.insert_resource(net_client);
+        app.init_resource::<PlayerEconomy>();
+        app.init_resource::<MatchStats>();
+        app.add_event::<SoundEffect>();
+
+        let b_entity = app
+            .world_mut()
+            .spawn((
+                Faction::Player1,
+                Selectable { is_selected: true },
+                Building::new("Barracks", Vec2::new(90.0, 90.0), 5.0, true),
+                Barracks,
+                ProductionBuilding::default(),
+            ))
+            .id();
+
+        let _close_btn = app
+            .world_mut()
+            .spawn((
+                Button,
+                MobileUnitMenuCloseButton,
+                Interaction::Pressed,
+                BackgroundColor(Color::BLACK),
+                BorderColor(Color::BLACK),
+            ))
+            .id();
+
+        app.world_mut()
+            .run_system_once(handle_mobile_unit_menu_close_interaction)
+            .unwrap();
+
+        // Building should be deselected
+        assert!(!app.world().get::<Selectable>(b_entity).unwrap().is_selected);
+    }
+
+    #[test]
+    fn test_mobile_unit_production_menu_hidden_on_desktop() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(ControlScheme::DesktopMouseKeyboard);
+        let mut net_client = NetClient::default();
+        net_client.my_faction = Faction::Player1;
+        app.insert_resource(net_client);
+        app.init_resource::<PlacementState>();
+        app.init_resource::<MobileUnitProductionOpen>();
+
+        let mut window = Window::default();
+        window.resolution = WindowResolution::new(1920.0, 1080.0);
+        app.world_mut().spawn((window, PrimaryWindow));
+
+        let panel_entity = app
+            .world_mut()
+            .spawn((
+                MobileUnitProductionPanel,
+                Node { display: Display::None, ..default() },
+            ))
+            .id();
+        let _hq_sec_entity = app
+            .world_mut()
+            .spawn((
+                MobileHqProductionSection,
+                Node { display: Display::None, ..default() },
+            ))
+            .id();
+        let _barracks_sec_entity = app
+            .world_mut()
+            .spawn((
+                MobileBarracksProductionSection,
+                Node { display: Display::None, ..default() },
+            ))
+            .id();
+        let _title_entity = app
+            .world_mut()
+            .spawn((MobileUnitMenuTitleText, Text::new("")))
+            .id();
+        let _queue_entity = app
+            .world_mut()
+            .spawn((MobileUnitMenuQueueText, Text::new("")))
+            .id();
+
+        // Select BaseHQ on desktop
+        app.world_mut().spawn((
+            Faction::Player1,
+            Selectable { is_selected: true },
+            Building::new("Base HQ", Vec2::new(110.0, 110.0), 5.0, true),
+            BaseHQ::default(),
+            ProductionBuilding::default(),
+        ));
+
+        app.world_mut()
+            .run_system_once(update_mobile_unit_production_visibility_system)
+            .unwrap();
+
+        // On desktop, the mobile popup menu remains hidden
+        assert_eq!(app.world().get::<Node>(panel_entity).unwrap().display, Display::None);
+        assert!(!app.world().resource::<MobileUnitProductionOpen>().0);
     }
 }

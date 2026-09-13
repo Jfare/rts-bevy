@@ -58,6 +58,7 @@ pub struct PlacementInputParams<'w, 's> {
     pub state: ResMut<'w, PlacementState>,
     pub control_scheme: Option<Res<'w, crate::controls::ControlScheme>>,
     pub mobile_build_menu: Option<Res<'w, crate::ui::mobile_hud::MobileBuildMenuOpen>>,
+    pub mobile_unit_menu: Option<Res<'w, crate::ui::mobile_hud::MobileUnitProductionOpen>>,
     pub minimap_opt: Option<Res<'w, crate::minimap::MinimapState>>,
 }
 
@@ -166,6 +167,7 @@ fn handle_placement_input(
 
     // Avoid updating ghost or confirming placement if clicking/tapping on HUD UI chrome
     let build_menu_open = p.mobile_build_menu.map_or(false, |m| m.0);
+    let unit_menu_open = p.mobile_unit_menu.map_or(false, |m| m.0);
     let has_any_friendly_selection = selectable_query
         .iter()
         .any(|(fac, sel)| *fac == p.net_client.my_faction && sel.is_selected);
@@ -177,6 +179,7 @@ fn handle_placement_input(
             p.minimap_opt.as_deref(),
             has_any_friendly_selection,
             build_menu_open,
+            unit_menu_open,
         )
     } else {
         cursor_screen.y <= 36.0 // top bar
