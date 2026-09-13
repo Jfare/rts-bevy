@@ -306,6 +306,7 @@ pub fn update_responsive_hud_layout_system(
         for mut node in &mut selection_panel_query {
             node.max_width = Val::Px(240.0);
             node.padding = UiRect::all(Val::Px(6.0));
+            node.margin = UiRect::left(Val::Px(105.0));
         }
     } else {
         for mut node in &mut root_query {
@@ -353,6 +354,7 @@ pub fn update_responsive_hud_layout_system(
         for mut node in &mut selection_panel_query {
             node.max_width = Val::Px(460.0);
             node.padding = UiRect::all(Val::Px(14.0));
+            node.margin = UiRect::default();
         }
     }
 }

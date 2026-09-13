@@ -248,6 +248,7 @@ pub fn handle_mobile_quick_action_interactions(
     )>,
 ) {
     for (interaction, action) in &mut interaction_query {
+        info!("📱 [Quick Action] Interaction changed: {:?} for action {:?}", interaction, action);
         if *interaction == Interaction::Pressed {
             match action {
                 MobileQuickAction::SelectAllArmy => {

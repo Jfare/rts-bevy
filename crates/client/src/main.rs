@@ -54,9 +54,6 @@ fn main() {
 
     let economy = PlayerEconomy::new();
 
-    #[cfg(target_arch = "wasm32")]
-    let window_res = WindowResolution::new(1280.0, 720.0).with_scale_factor_override(1.0);
-    #[cfg(not(target_arch = "wasm32"))]
     let window_res = WindowResolution::new(1280.0, 720.0);
 
     app.add_plugins(
@@ -125,20 +122,28 @@ fn setup_demo_scene(mut commands: Commands) {
     ));
 }
 
-/// Synchronizes the Bevy window physical resolution and scale factor override with the browser window inner dimensions
+/// Synchronizes the Bevy window physical resolution with the browser window inner dimensions and device pixel ratio
 #[cfg(target_arch = "wasm32")]
 fn sync_browser_canvas_resolution(
-    mut window_query: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
+    mut window_query: Query<&mut Window>,
+    mut logged_init: Local<bool>,
 ) {
-    if let Ok(mut window) = window_query.get_single_mut() {
+    for mut window in &mut window_query {
         if let Some(web_win) = web_sys::window() {
+            let dpr = web_win.device_pixel_ratio();
             if let (Ok(w), Ok(h)) = (web_win.inner_width(), web_win.inner_height()) {
                 if let (Some(w_val), Some(h_val)) = (w.as_f64(), h.as_f64()) {
-                    let w = w_val as f32;
-                    let h = h_val as f32;
-                    if (window.physical_width() as f32 - w).abs() > 1.0 || (window.physical_height() as f32 - h).abs() > 1.0 {
-                        window.resolution.set_scale_factor_override(Some(1.0));
-                        window.resolution.set_physical_resolution(w as u32, h as u32);
+                    let target_phys_w = (w_val * dpr).round().max(1.0) as u32;
+                    let target_phys_h = (h_val * dpr).round().max(1.0) as u32;
+                    if !*logged_init {
+                        *logged_init = true;
+                        info!("📐 [Window Sync Init] DPR={}, inner_size=({}x{}), cur_phys=({}x{}), target_phys=({}x{})", dpr, w_val, h_val, window.physical_width(), window.physical_height(), target_phys_w, target_phys_h);
+                    }
+                    if window.physical_width() != target_phys_w || window.physical_height() != target_phys_h {
+                        window.resolution.set_scale_factor_override(None);
+                        window.resolution.set_scale_factor(dpr as f32);
+                        window.resolution.set_physical_resolution(target_phys_w, target_phys_h);
+                        info!("📐 [Window Sync Changed] DPR={}, Logical=({}x{}), Physical=({}x{})", dpr, window.width(), window.height(), window.physical_width(), window.physical_height());
                     }
                 }
             }

@@ -29,6 +29,48 @@ pub struct TouchGestureState {
     pub touch_start_time: f32,
     pub max_displacement: f32,
     pub is_multi_touch: bool,
+    pub last_pan_pos: Option<Vec2>,
+}
+
+/// Helper checking if a screen position falls inside mobile HUD UI chrome
+pub fn is_mobile_ui_hit(
+    pos: Vec2,
+    window: &Window,
+    minimap_opt: Option<&MinimapState>,
+    has_bottom_card: bool,
+) -> bool {
+    // 1. Top resource bar (30px on mobile)
+    if pos.y <= 34.0 {
+        return true;
+    }
+
+    // 2. Minimap frame (top right)
+    if let Some(mm) = minimap_opt {
+        let mm_rect = get_minimap_screen_rect(window, mm);
+        if pos.x >= mm_rect.min.x && pos.x <= mm_rect.max.x && pos.y >= mm_rect.min.y && pos.y <= mm_rect.max.y {
+            return true;
+        }
+    }
+
+    // 3. Mobile quick action thumb bar (bottom left: 10px left, 85px width, 170px height)
+    if pos.x <= 105.0 && pos.y >= window.height() - 195.0 {
+        return true;
+    }
+
+    // 4. Bottom HUD panels (only present when a unit is selected or build menu is open):
+    if has_bottom_card {
+        // Selection info card (bottom-left, shifted 105px from left edge, width ~240px)
+        if pos.x >= 105.0 && pos.x <= 350.0 && pos.y >= window.height() - 90.0 {
+            return true;
+        }
+        // Command card (bottom-right, width ~280px)
+        let cmd_start_x = (window.width() - 290.0).max(350.0);
+        if pos.x >= cmd_start_x && pos.y >= window.height() - 115.0 {
+            return true;
+        }
+    }
+
+    false
 }
 
 pub struct MobileControlsPlugin;
@@ -49,17 +91,22 @@ impl Plugin for MobileControlsPlugin {
     }
 }
 
-/// 1-finger touch pan: Smoothly drags camera when touching empty battlefield
+/// Smoothly pans camera when dragging empty battlefield via single touch or mouse drag
 fn mobile_camera_pan_system(
     touches: Res<Touches>,
+    mouse_button: Res<ButtonInput<MouseButton>>,
     window_query: Query<&Window, With<PrimaryWindow>>,
     grid_config: Option<Res<WorldGridConfig>>,
     minimap_opt: Option<Res<MinimapState>>,
     box_select: Res<BoxSelectMode>,
+    mobile_build_menu: Option<Res<crate::ui::mobile_hud::MobileBuildMenuOpen>>,
+    selectable_query: Query<(&Faction, &Selectable)>,
+    net_client: Res<NetClient>,
+    mut gesture_state: ResMut<TouchGestureState>,
     mut camera_query: Query<(&mut Transform, Option<&OrthographicProjection>), With<Camera2d>>,
 ) {
-    // If box selection mode is active or multi-touch (pinch), do not pan camera
-    if box_select.0 || touches.iter().count() != 1 {
+    if box_select.0 {
+        gesture_state.last_pan_pos = None;
         return;
     }
 
@@ -70,50 +117,71 @@ fn mobile_camera_pan_system(
         return;
     };
 
-    let Some(touch) = touches.iter().next() else {
-        return;
-    };
+    let has_any_friendly_selection = selectable_query
+        .iter()
+        .any(|(fac, sel)| *fac == net_client.my_faction && sel.is_selected);
+    let build_menu_open = mobile_build_menu.map_or(false, |m| m.0);
+    let has_bottom_card = has_any_friendly_selection || build_menu_open;
 
-    let pos = touch.position();
-
-    // Ignore touches over the minimap
-    if let Some(ref mm) = minimap_opt {
-        let mm_rect = get_minimap_screen_rect(window, mm);
-        if pos.x >= mm_rect.min.x && pos.x <= mm_rect.max.x && pos.y >= mm_rect.min.y && pos.y <= mm_rect.max.y {
+    // 1. Touch Panning (1 finger)
+    if touches.iter().count() == 1 {
+        gesture_state.last_pan_pos = None;
+        let Some(touch) = touches.iter().next() else { return; };
+        let pos = touch.position();
+        if is_mobile_ui_hit(pos, window, minimap_opt.as_deref(), has_bottom_card) {
             return;
         }
-    }
 
-    // Ignore touches at the bottom HUD area or top resource bar
-    if pos.y >= window.height() - 120.0 || pos.y <= 50.0 {
+        let delta = touch.delta();
+        if delta.length_squared() > 0.0 {
+            apply_pan_delta(&mut transform, delta, ortho_opt, grid_config.as_deref());
+        }
         return;
     }
 
-    // Ignore touches at the left thumb quick action bar
-    if pos.x <= 160.0 && pos.y >= window.height() - 360.0 {
-        return;
+    // 2. Mouse Drag Panning (when no touches active, e.g. testing in browser with mouse)
+    if touches.iter().count() == 0 {
+        if mouse_button.pressed(MouseButton::Left) {
+            if let Some(cursor_pos) = window.cursor_position() {
+                if let Some(last_pos) = gesture_state.last_pan_pos {
+                    let delta = cursor_pos - last_pos;
+                    if delta.length_squared() > 0.0 {
+                        apply_pan_delta(&mut transform, delta, ortho_opt, grid_config.as_deref());
+                    }
+                    gesture_state.last_pan_pos = Some(cursor_pos);
+                } else if !is_mobile_ui_hit(cursor_pos, window, minimap_opt.as_deref(), has_bottom_card) {
+                    gesture_state.last_pan_pos = Some(cursor_pos);
+                }
+            }
+        } else {
+            gesture_state.last_pan_pos = None;
+        }
     }
+}
 
-    let delta = touch.delta();
-    if delta.length_squared() > 0.0 {
-        let scale = ortho_opt.map(|o| o.scale).unwrap_or(1.0);
-        // Dragging finger right moves world right (camera moves left)
-        transform.translation.x -= delta.x * scale;
-        // Screen Y is Down, World Y is Up -> dragging down moves camera down
-        transform.translation.y += delta.y * scale;
+fn apply_pan_delta(
+    transform: &mut Transform,
+    delta: Vec2,
+    ortho_opt: Option<&OrthographicProjection>,
+    grid_config: Option<&WorldGridConfig>,
+) {
+    let scale = ortho_opt.map(|o| o.scale).unwrap_or(1.0);
+    // Dragging finger/mouse right moves world right (camera moves left)
+    transform.translation.x -= delta.x * scale;
+    // Screen Y is Down, World Y is Up -> dragging down moves camera down
+    transform.translation.y += delta.y * scale;
 
-        let default_config = WorldGridConfig::default();
-        let config = grid_config.as_deref().unwrap_or(&default_config);
-        let padding = 100.0;
-        transform.translation.x = transform
-            .translation
-            .x
-            .clamp(config.min_bounds.x + padding, config.max_bounds.x - padding);
-        transform.translation.y = transform
-            .translation
-            .y
-            .clamp(config.min_bounds.y + padding, config.max_bounds.y - padding);
-    }
+    let default_config = WorldGridConfig::default();
+    let config = grid_config.unwrap_or(&default_config);
+    let padding = 100.0;
+    transform.translation.x = transform
+        .translation
+        .x
+        .clamp(config.min_bounds.x + padding, config.max_bounds.x - padding);
+    transform.translation.y = transform
+        .translation
+        .y
+        .clamp(config.min_bounds.y + padding, config.max_bounds.y - padding);
 }
 
 /// 2-finger touch pinch zoom: Smoothly adjusts orthographic camera target zoom
@@ -149,6 +217,7 @@ pub struct MobileTouchParams<'w, 's> {
     pub commands: Commands<'w, 's>,
     pub time: Res<'w, Time>,
     pub touches: Res<'w, Touches>,
+    pub mouse_button: Res<'w, ButtonInput<MouseButton>>,
     pub grid_cfg: Option<Res<'w, WorldGridConfig>>,
     pub fog: Res<'w, FogOfWarGrid>,
     pub net_client: Res<'w, NetClient>,
@@ -162,9 +231,10 @@ pub struct MobileTouchParams<'w, 's> {
     pub sound_events: EventWriter<'w, SoundEffect>,
     pub nav_grid: Res<'w, NavGrid>,
     pub minimap_opt: Option<Res<'w, MinimapState>>,
+    pub mobile_build_menu: Option<Res<'w, crate::ui::mobile_hud::MobileBuildMenuOpen>>,
 }
 
-/// Touch tap interaction: Selects entities or issues contextual Move/Attack/Harvest orders
+/// Touch/Mouse tap interaction: Selects entities or issues contextual Move/Attack/Harvest orders
 fn mobile_touch_interaction_system(
     p: MobileTouchParams,
     window_query: Query<&Window, With<PrimaryWindow>>,
@@ -190,6 +260,7 @@ fn mobile_touch_interaction_system(
         mut commands,
         time,
         touches,
+        mouse_button,
         grid_cfg,
         fog,
         net_client,
@@ -203,6 +274,7 @@ fn mobile_touch_interaction_system(
         mut sound_events,
         nav_grid,
         minimap_opt,
+        mobile_build_menu,
     } = p;
     if outcome_opt.as_deref() == Some(&MatchOutcome::Victory)
         || outcome_opt.as_deref() == Some(&MatchOutcome::Defeat)
@@ -220,6 +292,8 @@ fn mobile_touch_interaction_system(
     let default_cfg = WorldGridConfig::default();
     let config = grid_cfg.as_deref().unwrap_or(&default_cfg);
 
+    let has_touches = touches.iter().count() > 0;
+
     // Multi-touch tracking: if 2+ fingers touch, cancel tap tracking
     if touches.iter().count() > 1 {
         gesture_state.is_multi_touch = true;
@@ -229,20 +303,28 @@ fn mobile_touch_interaction_system(
         return;
     }
 
-    // 1. Touch Pressed
-    if touches.any_just_pressed() {
-        if let Some(touch) = touches.iter().next() {
-            let pos = touch.position();
+    let has_any_friendly_selection = selectable_query
+        .iter()
+        .any(|(_, _, _, fac, sel, ..)| *fac == net_client.my_faction && sel.is_selected);
+    let build_menu_open = mobile_build_menu.map_or(false, |m| m.0);
+    let has_bottom_card = has_any_friendly_selection || build_menu_open;
 
-            // Check if touch is in minimap or UI bar
-            let is_minimap = minimap_opt.as_ref().map_or(false, |mm| {
-                let rect = get_minimap_screen_rect(window, mm);
-                pos.x >= rect.min.x && pos.x <= rect.max.x && pos.y >= rect.min.y && pos.y <= rect.max.y
-            });
-            let is_hud = pos.y >= window.height() - 110.0 || pos.y <= 50.0;
-            let is_quick_bar = pos.x <= 160.0 && pos.y >= window.height() - 360.0;
+    let just_pressed = touches.any_just_pressed() || (!has_touches && mouse_button.just_pressed(MouseButton::Left));
+    let is_held = (has_touches && touches.iter().count() == 1) || (!has_touches && mouse_button.pressed(MouseButton::Left));
+    let just_released = touches.any_just_released() || (!has_touches && mouse_button.just_released(MouseButton::Left));
 
-            if !is_minimap && !is_hud && !is_quick_bar {
+    let current_pos_opt = if has_touches {
+        touches.iter().next().map(|t| t.position())
+    } else {
+        window.cursor_position()
+    };
+
+    // 1. Touch / Mouse Pressed
+    if just_pressed {
+        if let Some(pos) = current_pos_opt {
+            let ui_hit = is_mobile_ui_hit(pos, window, minimap_opt.as_deref(), has_bottom_card);
+            info!("📱 [Mobile Input] Pressed at pos={:?}, touches={}, is_ui_hit={}", pos, touches.iter().count(), ui_hit);
+            if !ui_hit {
                 gesture_state.touch_start_pos = Some(pos);
                 gesture_state.touch_start_time = time.elapsed_secs();
                 gesture_state.max_displacement = 0.0;
@@ -259,25 +341,27 @@ fn mobile_touch_interaction_system(
         }
     }
 
-    // 2. Touch Active / Moved
-    if let Some(start_pos) = gesture_state.touch_start_pos {
-        if let Some(touch) = touches.iter().next() {
-            let current_pos = touch.position();
-            let dist = start_pos.distance(current_pos);
-            if dist > gesture_state.max_displacement {
-                gesture_state.max_displacement = dist;
-            }
+    // 2. Touch / Mouse Active / Moved
+    if is_held {
+        if let Some(start_pos) = gesture_state.touch_start_pos {
+            if let Some(current_pos) = current_pos_opt {
+                let dist = start_pos.distance(current_pos);
+                if dist > gesture_state.max_displacement {
+                    gesture_state.max_displacement = dist;
+                }
 
-            if box_select.0 && dist > 10.0 {
-                let world_pos = screen_to_world_2d(current_pos, win_size, cam_pos, cam_scale);
-                selection_state.is_dragging = true;
-                selection_state.current_world_pos = Some(world_pos);
+                if box_select.0 && dist > 10.0 {
+                    let world_pos = screen_to_world_2d(current_pos, win_size, cam_pos, cam_scale);
+                    selection_state.is_dragging = true;
+                    selection_state.current_world_pos = Some(world_pos);
+                }
             }
         }
     }
 
-    // 3. Touch Released
-    if touches.any_just_released() {
+    // 3. Touch / Mouse Released
+    if just_released {
+        info!("📱 [Mobile Input] Released (start_pos was {:?})", gesture_state.touch_start_pos);
         let Some(start_pos) = gesture_state.touch_start_pos.take() else {
             return;
         };
@@ -402,6 +486,7 @@ fn mobile_touch_interaction_system(
                 sel.is_selected = entity == target_entity;
             }
             stats.record_action();
+            info!("📱 [Touch] Selected unit {:?}", target_entity);
             if kind == 1 {
                 sound_events.send(SoundEffect::WorkerSelect);
             } else if kind == 2 {
@@ -417,6 +502,7 @@ fn mobile_touch_interaction_system(
                 sel.is_selected = entity == bldg_entity;
             }
             stats.record_action();
+            info!("📱 [Touch] Selected building {:?}", bldg_entity);
             sound_events.send(SoundEffect::MarineSelect);
             return;
         }
@@ -639,5 +725,108 @@ fn mobile_touch_interaction_system(
         for (_, _, _, _, mut sel, ..) in &mut selectable_query {
             sel.is_selected = false;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::ecs::system::RunSystemOnce;
+    use bevy::window::WindowResolution;
+
+    #[test]
+    fn test_is_mobile_ui_hit_detection() {
+        let mut window = Window::default();
+        window.resolution = WindowResolution::new(955.0, 440.0);
+
+        // 1. Top bar: y <= 34 is UI, y = 35 is battlefield
+        assert!(is_mobile_ui_hit(Vec2::new(200.0, 20.0), &window, None, false));
+        assert!(!is_mobile_ui_hit(Vec2::new(200.0, 45.0), &window, None, false));
+
+        // 2. Left quick bar: x <= 105.0, y >= 440 - 195 = 245
+        assert!(is_mobile_ui_hit(Vec2::new(50.0, 300.0), &window, None, false));
+        // Right next to quick bar (x = 120.0, y = 300.0) is free battlefield when no bottom card
+        assert!(!is_mobile_ui_hit(Vec2::new(120.0, 300.0), &window, None, false));
+
+        // 3. Bottom HUD cards: only hit if has_bottom_card is true
+        let bottom_info_pos = Vec2::new(250.0, 400.0);
+        let bottom_cmd_pos = Vec2::new(800.0, 400.0);
+        let bottom_center_pos = Vec2::new(500.0, 400.0);
+
+        // When no bottom cards active, all lower areas are free battlefield
+        assert!(!is_mobile_ui_hit(bottom_info_pos, &window, None, false));
+        assert!(!is_mobile_ui_hit(bottom_cmd_pos, &window, None, false));
+        assert!(!is_mobile_ui_hit(bottom_center_pos, &window, None, false));
+
+        // When bottom cards active: info panel (left) and cmd card (right) are UI, but center is open!
+        assert!(is_mobile_ui_hit(bottom_info_pos, &window, None, true));
+        assert!(is_mobile_ui_hit(bottom_cmd_pos, &window, None, true));
+        assert!(!is_mobile_ui_hit(bottom_center_pos, &window, None, true));
+    }
+
+    #[test]
+    fn test_mobile_tap_selects_friendly_unit_and_building() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(Time::<()>::default());
+        app.init_resource::<ButtonInput<MouseButton>>();
+        app.init_resource::<Touches>();
+        app.init_resource::<TouchGestureState>();
+        app.init_resource::<DoubleTapTracker>();
+        app.init_resource::<BoxSelectMode>();
+        app.init_resource::<SelectionState>();
+        app.init_resource::<MatchStats>();
+        app.init_resource::<AttackMovePending>();
+        app.init_resource::<FogOfWarGrid>();
+        app.init_resource::<NavGrid>();
+        app.add_event::<SoundEffect>();
+
+        let mut net_client = NetClient::default();
+        net_client.my_faction = Faction::Player1;
+        app.insert_resource(net_client);
+
+        // Window: 955x440
+        let mut window = Window::default();
+        window.resolution = WindowResolution::new(955.0, 440.0);
+        app.world_mut().spawn((window, PrimaryWindow));
+
+        // Camera: 2D Camera centered at (0.0, 0.0)
+        app.world_mut().spawn((
+            Camera::default(),
+            Camera2d,
+            Transform::from_xyz(0.0, 0.0, 0.0),
+        ));
+
+        // Spawn a friendly Worker at (0.0, 0.0)
+        let worker_ent = app.world_mut().spawn((
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            Radius(16.0),
+            Faction::Player1,
+            Selectable { is_selected: false },
+            Worker::default(),
+        )).id();
+
+        // Simulate a stationary tap right in the center of the screen (477.5, 220.0)
+        // Screen center (477.5, 220.0) maps to camera center (0.0, 0.0)
+        let center_screen = Vec2::new(477.5, 220.0);
+
+        // 1. Press
+        {
+            let mut gesture = app.world_mut().resource_mut::<TouchGestureState>();
+            gesture.touch_start_pos = Some(center_screen);
+            gesture.touch_start_time = 0.0;
+            gesture.max_displacement = 0.0;
+            gesture.is_multi_touch = false;
+        }
+
+        // 2. Release via mouse or touch
+        app.world_mut().resource_mut::<ButtonInput<MouseButton>>().press(MouseButton::Left);
+        app.world_mut().resource_mut::<ButtonInput<MouseButton>>().release(MouseButton::Left);
+
+        // Run system
+        app.world_mut().run_system_once(mobile_touch_interaction_system).unwrap();
+
+        let sel = app.world().get::<Selectable>(worker_ent).unwrap();
+        assert!(sel.is_selected, "Worker under cursor should be selected after tap release");
     }
 }
