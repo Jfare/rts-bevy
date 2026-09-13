@@ -54,13 +54,18 @@ fn main() {
 
     let economy = PlayerEconomy::new();
 
+    #[cfg(target_arch = "wasm32")]
+    let window_res = WindowResolution::new(1280.0, 720.0).with_scale_factor_override(1.0);
+    #[cfg(not(target_arch = "wasm32"))]
+    let window_res = WindowResolution::new(1280.0, 720.0);
+
     app.add_plugins(
         DefaultPlugins
             .set(WindowPlugin {
                 primary_window: Some(Window {
                     title: "Mini-RTS (Bevy 0.15)".to_string(),
                     canvas: Some("#bevy-canvas".to_string()),
-                    resolution: WindowResolution::new(1280.0, 720.0),
+                    resolution: window_res,
                     fit_canvas_to_parent: true,
                     prevent_default_event_handling: false,
                     ..default()
@@ -103,6 +108,9 @@ fn main() {
     #[cfg(not(target_arch = "wasm32"))]
     app.add_plugins(bevy::remote::RemotePlugin::default());
 
+    #[cfg(target_arch = "wasm32")]
+    app.add_systems(Update, sync_browser_canvas_resolution);
+
     app.add_systems(Startup, setup_demo_scene);
 
     app.run();
@@ -115,4 +123,25 @@ fn setup_demo_scene(mut commands: Commands) {
         RtsCamera::default(),
         Transform::from_xyz(shared::map::P1_BASE_POS.x, shared::map::P1_BASE_POS.y, 0.0),
     ));
+}
+
+/// Synchronizes the Bevy window physical resolution and scale factor override with the browser window inner dimensions
+#[cfg(target_arch = "wasm32")]
+fn sync_browser_canvas_resolution(
+    mut window_query: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
+) {
+    if let Ok(mut window) = window_query.get_single_mut() {
+        if let Some(web_win) = web_sys::window() {
+            if let (Ok(w), Ok(h)) = (web_win.inner_width(), web_win.inner_height()) {
+                if let (Some(w_val), Some(h_val)) = (w.as_f64(), h.as_f64()) {
+                    let w = w_val as f32;
+                    let h = h_val as f32;
+                    if (window.physical_width() as f32 - w).abs() > 1.0 || (window.physical_height() as f32 - h).abs() > 1.0 {
+                        window.resolution.set_scale_factor_override(Some(1.0));
+                        window.resolution.set_physical_resolution(w as u32, h as u32);
+                    }
+                }
+            }
+        }
+    }
 }

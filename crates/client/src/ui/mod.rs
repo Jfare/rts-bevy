@@ -21,7 +21,7 @@ pub use command_card::{
 pub use countdown::{spawn_countdown_overlay, update_match_countdown_system};
 pub use hud_systems::{
     update_command_card_text, update_hud_economy_text, update_hud_network_status,
-    update_selection_info_text,
+    update_responsive_hud_layout_system, update_selection_info_text,
 };
 pub use layout::setup_hud;
 pub use menu_modal::{
@@ -30,7 +30,8 @@ pub use menu_modal::{
 };
 pub use mobile_hud::{
     handle_mobile_quick_action_interactions, spawn_mobile_quick_bar,
-    update_box_select_visuals_system, update_mobile_hud_visibility_system,
+    update_box_select_visuals_system, update_build_menu_visuals_system,
+    update_mobile_hud_visibility_system, MobileBuildMenuOpen,
 };
 pub use post_match::{
     handle_play_again_button_interaction, handle_return_to_landing_button_interaction,
@@ -44,6 +45,7 @@ impl Plugin for RtsUiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MatchCountdown>()
             .init_resource::<AttackMovePending>()
+            .init_resource::<MobileBuildMenuOpen>()
             .add_systems(Startup, setup_hud)
             .add_systems(OnEnter(AppState::InGame), close_menu_on_game_start)
             .add_systems(
@@ -64,7 +66,9 @@ impl Plugin for RtsUiPlugin {
                     update_lobby_modal_status_text,
                     update_mobile_hud_visibility_system,
                     update_box_select_visuals_system,
+                    update_build_menu_visuals_system,
                     handle_mobile_quick_action_interactions,
+                    update_responsive_hud_layout_system,
                 ),
             );
     }

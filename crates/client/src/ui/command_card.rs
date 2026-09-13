@@ -63,10 +63,19 @@ pub struct AttackMoveButton;
 #[derive(Resource, Default, Debug, Clone, Copy)]
 pub struct AttackMovePending(pub bool);
 
+/// Marker component for the Command Card root container
+#[derive(Component)]
+pub struct CommandCardRoot;
+
+/// Marker component for the Command Card header container
+#[derive(Component)]
+pub struct CommandCardHeader;
+
 /// Spawns the entire Command Card UI hierarchy inside the bottom HUD right panel
 pub fn spawn_command_card_ui(parent: &mut ChildBuilder) {
     parent
         .spawn((
+            CommandCardRoot,
             Node {
                 min_width: Val::Px(330.0),
                 max_width: Val::Px(390.0),
@@ -87,6 +96,7 @@ pub fn spawn_command_card_ui(parent: &mut ChildBuilder) {
         .with_children(|card| {
             // Header: Title & Context Status Subtitle
             card.spawn((
+                CommandCardHeader,
                 Node {
                     flex_direction: FlexDirection::Column,
                     row_gap: Val::Px(2.0),
@@ -106,7 +116,7 @@ pub fn spawn_command_card_ui(parent: &mut ChildBuilder) {
                     FocusPolicy::Pass,
                 ));
                 header.spawn((
-                    Text::new("[B] Barracks (150🪙) | [U] Turret (125🪙) | [P] Depot (100🪙) | [H] HQ (400🪙)"),
+                    Text::new("[B] Barracks (150) | [U] Turret (125) | [P] Depot (100) | [H] HQ (400)"),
                     TextFont {
                         font_size: 10.5,
                         ..default()
@@ -148,7 +158,7 @@ pub fn spawn_command_card_ui(parent: &mut ChildBuilder) {
                     spawn_action_button(
                         sec,
                         CommandCardAction::CancelPlacement,
-                        "❌ Cancel Placement",
+                        "Cancel Placement",
                         "[Esc]",
                         None,
                         true,
@@ -173,7 +183,7 @@ pub fn spawn_command_card_ui(parent: &mut ChildBuilder) {
                     spawn_action_button(
                         sec,
                         CommandCardAction::TrainWorker,
-                        "⛏️ Train Worker",
+                        "Train Worker",
                         "[V]",
                         Some(50),
                         false,
@@ -198,7 +208,7 @@ pub fn spawn_command_card_ui(parent: &mut ChildBuilder) {
                     spawn_action_button(
                         sec,
                         CommandCardAction::TrainRangedFighter,
-                        "🏹 Ranged Fighter",
+                        "Ranged Fighter",
                         "[R]",
                         Some(100),
                         false,
@@ -206,7 +216,7 @@ pub fn spawn_command_card_ui(parent: &mut ChildBuilder) {
                     spawn_action_button(
                         sec,
                         CommandCardAction::TrainMeleeFighter,
-                        "⚔️ Melee Fighter",
+                        "Melee Fighter",
                         "[F]",
                         Some(75),
                         false,
@@ -231,7 +241,7 @@ pub fn spawn_command_card_ui(parent: &mut ChildBuilder) {
                     spawn_action_button(
                         sec,
                         CommandCardAction::Stop,
-                        "🛑 Stop",
+                        "Stop",
                         "[S]",
                         None,
                         false,
@@ -239,7 +249,7 @@ pub fn spawn_command_card_ui(parent: &mut ChildBuilder) {
                     spawn_action_button(
                         sec,
                         CommandCardAction::HoldPosition,
-                        "🛡️ Hold",
+                        "Hold",
                         "[H]",
                         None,
                         false,
@@ -247,7 +257,7 @@ pub fn spawn_command_card_ui(parent: &mut ChildBuilder) {
                     spawn_action_button(
                         sec,
                         CommandCardAction::AttackMove,
-                        "⚔️ Attack",
+                        "Attack",
                         "[A]",
                         None,
                         false,
@@ -272,7 +282,7 @@ pub fn spawn_command_card_ui(parent: &mut ChildBuilder) {
                     spawn_action_button(
                         sec,
                         CommandCardAction::BuildBarracks,
-                        "⚔️ Barracks",
+                        "Barracks",
                         "[B]",
                         Some(150),
                         false,
@@ -280,7 +290,7 @@ pub fn spawn_command_card_ui(parent: &mut ChildBuilder) {
                     spawn_action_button(
                         sec,
                         CommandCardAction::BuildTurret,
-                        "🛡️ Turret",
+                        "Turret",
                         "[U]",
                         Some(125),
                         false,
@@ -288,7 +298,7 @@ pub fn spawn_command_card_ui(parent: &mut ChildBuilder) {
                     spawn_action_button(
                         sec,
                         CommandCardAction::BuildSupplyDepot,
-                        "⚡ Depot",
+                        "Depot",
                         "[P]",
                         Some(100),
                         false,
@@ -296,7 +306,7 @@ pub fn spawn_command_card_ui(parent: &mut ChildBuilder) {
                     spawn_action_button(
                         sec,
                         CommandCardAction::BuildHQ,
-                        "🏛️ Base HQ",
+                        "Base HQ",
                         "[H]",
                         Some(400),
                         false,
@@ -327,7 +337,7 @@ fn spawn_action_button(
     };
 
     let label_text = if let Some(cost) = mineral_cost {
-        format!("{} ({}🪙) {}", title, cost, shortcut)
+        format!("{} ({}) {}", title, cost, shortcut)
     } else {
         format!("{} {}", title, shortcut)
     };
@@ -390,10 +400,22 @@ pub fn update_command_card_visibility_system(
             Option<&Barracks>,
         ),
     >,
+    mut card_root_query: Query<
+        &mut Node,
+        (
+            With<CommandCardRoot>,
+            Without<HqActionSection>,
+            Without<BarracksActionSection>,
+            Without<UnitTacticsSection>,
+            Without<BuildStructuresSection>,
+            Without<PlacementCancelSection>,
+        ),
+    >,
     mut hq_section_query: Query<
         &mut Node,
         (
             With<HqActionSection>,
+            Without<CommandCardRoot>,
             Without<BarracksActionSection>,
             Without<UnitTacticsSection>,
             Without<BuildStructuresSection>,
@@ -404,6 +426,7 @@ pub fn update_command_card_visibility_system(
         &mut Node,
         (
             With<BarracksActionSection>,
+            Without<CommandCardRoot>,
             Without<HqActionSection>,
             Without<UnitTacticsSection>,
             Without<BuildStructuresSection>,
@@ -414,6 +437,7 @@ pub fn update_command_card_visibility_system(
         &mut Node,
         (
             With<UnitTacticsSection>,
+            Without<CommandCardRoot>,
             Without<HqActionSection>,
             Without<BarracksActionSection>,
             Without<BuildStructuresSection>,
@@ -424,6 +448,7 @@ pub fn update_command_card_visibility_system(
         &mut Node,
         (
             With<BuildStructuresSection>,
+            Without<CommandCardRoot>,
             Without<HqActionSection>,
             Without<BarracksActionSection>,
             Without<UnitTacticsSection>,
@@ -434,15 +459,24 @@ pub fn update_command_card_visibility_system(
         &mut Node,
         (
             With<PlacementCancelSection>,
+            Without<CommandCardRoot>,
             Without<HqActionSection>,
             Without<BarracksActionSection>,
             Without<UnitTacticsSection>,
             Without<BuildStructuresSection>,
         ),
     >,
+    control_scheme: Option<Res<crate::controls::ControlScheme>>,
+    mobile_build_menu: Option<Res<crate::ui::mobile_hud::MobileBuildMenuOpen>>,
+    window_query: Query<&Window, With<bevy::window::PrimaryWindow>>,
 ) {
-    let my_faction = net_client.my_faction;
+    let win_mobile = window_query.get_single().map_or(false, |w| w.width() < 960.0 || w.height() < 550.0);
+    let is_mobile = control_scheme.map_or(false, |s| *s == crate::controls::ControlScheme::MobileTouch)
+        || net_client.my_platform == shared::protocol::ClientPlatform::Mobile
+        || win_mobile;
+    let build_menu_open = mobile_build_menu.map_or(false, |m| m.0);
 
+    let my_faction = net_client.my_faction;
     let is_placing = placement_state.active_kind.is_some();
 
     // 1. Placement Cancel Section takes precedence when active
@@ -455,6 +489,9 @@ pub fn update_command_card_visibility_system(
     }
 
     if is_placing {
+        for mut node in &mut card_root_query {
+            node.display = Display::Flex;
+        }
         // Hide all other action sub-panels when in placement mode
         for mut node in &mut hq_section_query {
             node.display = Display::None;
@@ -530,12 +567,31 @@ pub fn update_command_card_visibility_system(
         };
     }
 
-    // 5. Structure Placement Section (Worker or Default/None selected)
+    // 5. Structure Placement Section (Worker or Default/None selected on desktop, or mobile build menu open)
+    let show_build = if is_mobile {
+        has_selected_worker || (!has_any_selection && build_menu_open)
+    } else {
+        has_selected_worker || !has_any_selection
+    };
+
     for mut node in &mut build_section_query {
-        node.display = if has_selected_worker || !has_any_selection {
+        node.display = if show_build {
             Display::Flex
         } else {
             Display::None
+        };
+    }
+
+    // Root Command Card visibility: On desktop always visible, on mobile only visible when selection or build menu active
+    for mut node in &mut card_root_query {
+        node.display = if is_mobile {
+            if has_any_selection || build_menu_open {
+                Display::Flex
+            } else {
+                Display::None
+            }
+        } else {
+            Display::Flex
         };
     }
 }
@@ -559,6 +615,7 @@ pub fn handle_command_card_interactions_system(
     mut sound_events: EventWriter<SoundEffect>,
     mut placement_state: ResMut<PlacementState>,
     mut attack_move_pending: ResMut<AttackMovePending>,
+    mut mobile_build_menu: Option<ResMut<crate::ui::mobile_hud::MobileBuildMenuOpen>>,
     mut prod_query: Query<(
         &mut ProductionBuilding,
         &Building,
@@ -593,11 +650,17 @@ pub fn handle_command_card_interactions_system(
             Interaction::Pressed => {
                 stats.record_action();
                 bg_color.0 = if is_cancel {
-                    Color::srgba(0.70, 0.10, 0.10, 1.0)
+                    Color::srgb(0.70, 0.15, 0.15)
                 } else {
-                    Color::srgba(0.10, 0.50, 0.85, 1.0)
+                    Color::srgb(0.20, 0.45, 0.70)
                 };
                 border_color.0 = Color::srgb(1.0, 1.0, 1.0);
+
+                if let Some(ref mut m) = mobile_build_menu {
+                    if is_cancel || matches!(action, CommandCardAction::BuildHQ | CommandCardAction::BuildBarracks | CommandCardAction::BuildSupplyDepot | CommandCardAction::BuildTurret) {
+                        m.0 = false;
+                    }
+                }
 
                 match action {
                     CommandCardAction::TrainWorker => {

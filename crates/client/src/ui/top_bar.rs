@@ -3,10 +3,27 @@ use bevy::ui::FocusPolicy;
 
 use super::{ApmText, LobbyButtonAction, MineralsText, NetworkStatusText, SupplyText};
 
+/// Marker component for the top bar root container
+#[derive(Component)]
+pub struct TopBarContainer;
+
+/// Marker component for the title text to allow responsive toggling
+#[derive(Component)]
+pub struct TopBarTitleText;
+
+/// Marker component for the menu button container
+#[derive(Component)]
+pub struct TopBarMenuButton;
+
+/// Marker component for the right-side resource and network info cluster
+#[derive(Component)]
+pub struct TopBarResourceGroup;
+
 /// Spawns the top HUD bar containing branding, Game Menu button, economy counters, APM, and network latency
 pub fn spawn_top_bar(parent: &mut ChildBuilder) {
     parent
         .spawn((
+            TopBarContainer,
             Node {
                 width: Val::Percent(100.0),
                 height: Val::Px(50.0),
@@ -33,9 +50,10 @@ pub fn spawn_top_bar(parent: &mut ChildBuilder) {
                 ))
                 .with_children(|title_group| {
                     title_group.spawn((
-                        Text::new("⚔️ MINI-RTS"),
+                        TopBarTitleText,
+                        Text::new("MINI-RTS"),
                         TextFont {
-                            font_size: 22.0,
+                            font_size: 20.0,
                             ..default()
                         },
                         TextColor(Color::srgb(0.35, 0.82, 1.0)),
@@ -46,6 +64,7 @@ pub fn spawn_top_bar(parent: &mut ChildBuilder) {
                     title_group
                         .spawn((
                             Button,
+                            TopBarMenuButton,
                             Node {
                                 padding: UiRect::axes(Val::Px(12.0), Val::Px(6.0)),
                                 justify_content: JustifyContent::Center,
@@ -60,7 +79,7 @@ pub fn spawn_top_bar(parent: &mut ChildBuilder) {
                         ))
                         .with_children(|btn| {
                             btn.spawn((
-                                Text::new("⚙️ GAME MENU"),
+                                Text::new("GAME MENU"),
                                 TextFont {
                                     font_size: 12.0,
                                     ..default()
@@ -74,6 +93,7 @@ pub fn spawn_top_bar(parent: &mut ChildBuilder) {
             // Resource & Network Display (Gold, Supply, APM, Net Status)
             top_bar
                 .spawn((
+                    TopBarResourceGroup,
                     Node {
                         align_items: AlignItems::Center,
                         column_gap: Val::Px(24.0),
@@ -83,9 +103,9 @@ pub fn spawn_top_bar(parent: &mut ChildBuilder) {
                 ))
                 .with_children(|res_group| {
                     res_group.spawn((
-                        Text::new("🪙 Gold: 200"),
+                        Text::new("Gold: 200"),
                         TextFont {
-                            font_size: 17.0,
+                            font_size: 16.0,
                             ..default()
                         },
                         TextColor(Color::srgb(1.0, 0.84, 0.18)),
@@ -93,9 +113,9 @@ pub fn spawn_top_bar(parent: &mut ChildBuilder) {
                         FocusPolicy::Pass,
                     ));
                     res_group.spawn((
-                        Text::new("⚡ Supply: 11 / 20"),
+                        Text::new("Supply: 11 / 20"),
                         TextFont {
-                            font_size: 17.0,
+                            font_size: 16.0,
                             ..default()
                         },
                         TextColor(Color::srgb(0.95, 0.85, 0.25)),
@@ -103,9 +123,9 @@ pub fn spawn_top_bar(parent: &mut ChildBuilder) {
                         FocusPolicy::Pass,
                     ));
                     res_group.spawn((
-                        Text::new("⚡ APM: 0"),
+                        Text::new("APM: 0"),
                         TextFont {
-                            font_size: 15.0,
+                            font_size: 14.0,
                             ..default()
                         },
                         TextColor(Color::srgb(1.0, 0.75, 0.2)),
@@ -113,9 +133,9 @@ pub fn spawn_top_bar(parent: &mut ChildBuilder) {
                         FocusPolicy::Pass,
                     ));
                     res_group.spawn((
-                        Text::new("🌐 Connecting..."),
+                        Text::new("Connecting..."),
                         TextFont {
-                            font_size: 14.0,
+                            font_size: 13.0,
                             ..default()
                         },
                         TextColor(Color::srgb(0.40, 0.85, 0.45)),

@@ -27,6 +27,8 @@ pub fn poll_web_portal_launch_requests(
             if let Some(plat_str) = val.as_string() {
                 if plat_str == "mobile" {
                     net_client.my_platform = shared::protocol::ClientPlatform::Mobile;
+                } else if plat_str == "desktop" {
+                    net_client.my_platform = shared::protocol::ClientPlatform::Desktop;
                 }
             }
         }

@@ -6,12 +6,21 @@ use super::{
     spawn_mobile_quick_bar, spawn_post_match_banner, spawn_top_bar,
 };
 
+/// Marker component for the high-level HUD root UI overlay container
+#[derive(Component)]
+pub struct RootUiContainer;
+
+/// Marker component for the top-right minimap backdrop container
+#[derive(Component)]
+pub struct MinimapFrame;
+
 /// High-level HUD root setup.
 /// Orchestrates the top bar, center overlays/modals, and bottom control console.
 pub fn setup_hud(mut commands: Commands) {
     // Root UI container overlay (FocusPolicy::Pass allows mouse clicks to pass to the 2D world)
     commands
         .spawn((
+            RootUiContainer,
             Node {
                 width: Val::Percent(100.0),
                 height: Val::Percent(100.0),
@@ -49,6 +58,7 @@ pub fn setup_hud(mut commands: Commands) {
 /// Spawns the top-right minimap backdrop frame without an in-game headline
 pub fn spawn_minimap_frame(parent: &mut ChildBuilder) {
     parent.spawn((
+        MinimapFrame,
         Node {
             position_type: PositionType::Absolute,
             right: Val::Px(12.0),

@@ -85,7 +85,7 @@ fn setup_chat_ui(mut commands: Commands) {
         .with_children(|chat_box| {
             // Chat message history text
             chat_box.spawn((
-                Text::new("💬 Press [ENTER] to chat"),
+                Text::new("> Press [ENTER] to chat"),
                 TextFont {
                     font_size: 12.0,
                     ..default()
@@ -241,16 +241,16 @@ fn update_chat_display_system(
     for mut text in log_query.iter_mut() {
         if chat_log.entries.is_empty() {
             text.0 = if chat_log.is_input_active {
-                "💬 Type your message below...".to_string()
+                "> Type your message below...".to_string()
             } else {
-                "💬 Press [ENTER] to chat".to_string()
+                "> Press [ENTER] to chat".to_string()
             };
         } else {
             let start = chat_log.entries.len().saturating_sub(6);
             let mut formatted = String::new();
             for entry in &chat_log.entries[start..] {
                 if entry.is_system {
-                    formatted.push_str(&format!("🔔 {}\n", entry.text));
+                    formatted.push_str(&format!("[SYS] {}\n", entry.text));
                 } else {
                     formatted.push_str(&format!("[{}] {}: {}\n", entry.color.name(), entry.sender_name, entry.text));
                 }

@@ -18,12 +18,40 @@ impl Plugin for MinimapPlugin {
         app.init_resource::<MinimapState>()
             .add_systems(
                 Update,
-                handle_minimap_input.run_if(in_state(AppState::InGame)),
+                (
+                    handle_minimap_input.run_if(in_state(AppState::InGame)),
+                    update_minimap_responsive_state_system,
+                ),
             )
             .add_systems(
                 PostUpdate,
                 draw_minimap_system.run_if(in_state(AppState::InGame)),
             );
+    }
+}
+
+/// Dynamically updates minimap coordinates and dimensions to adapt to mobile/desktop screens
+pub fn update_minimap_responsive_state_system(
+    control_scheme: Option<Res<crate::controls::ControlScheme>>,
+    net_client: Res<NetClient>,
+    window_query: Query<&Window, With<PrimaryWindow>>,
+    mut minimap_state: ResMut<MinimapState>,
+) {
+    let win_mobile = window_query.get_single().map_or(false, |w| w.width() < 960.0 || w.height() < 550.0);
+    let is_mobile = control_scheme.map_or(false, |s| *s == crate::controls::ControlScheme::MobileTouch)
+        || net_client.my_platform == shared::protocol::ClientPlatform::Mobile
+        || win_mobile;
+
+    if is_mobile {
+        minimap_state.width = 95.0;
+        minimap_state.height = 95.0;
+        minimap_state.top_offset = 36.0;
+        minimap_state.padding = 8.0;
+    } else {
+        minimap_state.width = 170.0;
+        minimap_state.height = 170.0;
+        minimap_state.top_offset = 70.0;
+        minimap_state.padding = 12.0;
     }
 }
 

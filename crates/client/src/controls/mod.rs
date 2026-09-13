@@ -75,6 +75,9 @@ fn auto_detect_control_scheme(
     if net_client.my_platform == ClientPlatform::Mobile && *scheme != ControlScheme::MobileTouch {
         *scheme = ControlScheme::MobileTouch;
         info!("📱 [Controls] Switched to MobileTouch control scheme based on platform detection");
+    } else if net_client.my_platform == ClientPlatform::Desktop && *scheme != ControlScheme::DesktopMouseKeyboard && touches.iter().next().is_none() {
+        *scheme = ControlScheme::DesktopMouseKeyboard;
+        info!("🖥️ [Controls] Switched to DesktopMouseKeyboard control scheme based on platform detection");
     } else if touches.iter().next().is_some() && *scheme != ControlScheme::MobileTouch {
         *scheme = ControlScheme::MobileTouch;
         info!("📱 [Controls] Active touch detected; switched to MobileTouch control scheme");

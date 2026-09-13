@@ -903,6 +903,10 @@
         // Mobile & Touch Device Detection
         // ─────────────────────────────────────────────────────────────
         function isMobileDevice() {
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.get('platform') === 'desktop' || urlParams.get('desktop') === '1') return false;
+            if (urlParams.get('platform') === 'mobile' || urlParams.get('mobile') === '1') return true;
+
             const userAgent = navigator.userAgent || navigator.vendor || window.opera || '';
 
             // 1. Check standard mobile user-agent patterns

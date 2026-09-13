@@ -5,10 +5,19 @@ use super::{
     spawn_command_card_ui, ProductionQueueText, SelectionDetailsText, SelectionTitleText,
 };
 
+/// Marker component for the bottom row container
+#[derive(Component)]
+pub struct BottomBarRow;
+
+/// Marker component for the left-side selection info card panel
+#[derive(Component)]
+pub struct SelectionCardPanel;
+
 /// Spawns the bottom HUD bar containing the selection/queue info card and command card
 pub fn spawn_bottom_bar(parent: &mut ChildBuilder) {
     parent
         .spawn((
+            BottomBarRow,
             Node {
                 width: Val::Percent(100.0),
                 justify_content: JustifyContent::SpaceBetween,
@@ -22,6 +31,7 @@ pub fn spawn_bottom_bar(parent: &mut ChildBuilder) {
             // Left Panel: Selection Info & Production Queue
             bottom_row
                 .spawn((
+                    SelectionCardPanel,
                     Node {
                         flex_grow: 1.0,
                         max_width: Val::Px(460.0),

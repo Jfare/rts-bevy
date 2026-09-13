@@ -34,18 +34,18 @@ pub fn update_match_outcome_banner(
         MatchOutcome::Victory => {
             node.display = Display::Flex;
             *border = BorderColor(Color::srgb(0.20, 0.95, 0.45));
-            text.0 = "🏆 VICTORY - MISSION COMPLETE!".to_string();
+            text.0 = "VICTORY - MISSION COMPLETE!".to_string();
             *color = TextColor(Color::srgb(0.25, 0.95, 0.50));
 
             let mins = (stats.elapsed_seconds / 60.0) as u32;
             let secs = (stats.elapsed_seconds % 60.0) as u32;
 
             summary_text.0 = format!(
-                "⏱️ Match Duration: {:02}:{:02} | ⚡ APM: {} ({} Actions)\n\
-                 🪙 Gold Mined: {} | Spent: {}\n\
-                 🎖️ Units Trained: {} | Units Lost: {} | Kills: {}\n\
-                 💥 Enemy Bases Destroyed: {} | Damage Dealt: {:.0}\n\
-                 🎯 Kill / Death Ratio: {:.2}",
+                "Match Duration: {:02}:{:02} | APM: {} ({} Actions)\n\
+                 Gold Mined: {} | Spent: {}\n\
+                 Units Trained: {} | Units Lost: {} | Kills: {}\n\
+                 Enemy Bases Destroyed: {} | Damage Dealt: {:.0}\n\
+                 Kill / Death Ratio: {:.2}",
                 mins,
                 secs,
                 stats.current_apm(),
@@ -63,18 +63,18 @@ pub fn update_match_outcome_banner(
         MatchOutcome::Defeat => {
             node.display = Display::Flex;
             *border = BorderColor(Color::srgb(0.95, 0.25, 0.25));
-            text.0 = "💥 DEFEAT - BASE OVERRUN!".to_string();
+            text.0 = "DEFEAT - BASE OVERRUN!".to_string();
             *color = TextColor(Color::srgb(0.95, 0.35, 0.35));
 
             let mins = (stats.elapsed_seconds / 60.0) as u32;
             let secs = (stats.elapsed_seconds % 60.0) as u32;
 
             summary_text.0 = format!(
-                "⏱️ Match Duration: {:02}:{:02} | ⚡ APM: {} ({} Actions)\n\
-                 🪙 Gold Mined: {} | Spent: {}\n\
-                 🎖️ Units Trained: {} | Units Lost: {} | Kills: {}\n\
-                 💥 Enemy Bases Destroyed: {} | Damage Dealt: {:.0}\n\
-                 🎯 Kill / Death Ratio: {:.2}",
+                "Match Duration: {:02}:{:02} | APM: {} ({} Actions)\n\
+                 Gold Mined: {} | Spent: {}\n\
+                 Units Trained: {} | Units Lost: {} | Kills: {}\n\
+                 Enemy Bases Destroyed: {} | Damage Dealt: {:.0}\n\
+                 Kill / Death Ratio: {:.2}",
                 mins,
                 secs,
                 stats.current_apm(),
@@ -228,7 +228,7 @@ pub fn spawn_post_match_banner(parent: &mut ChildBuilder) {
                     ))
                     .with_children(|btn| {
                         btn.spawn((
-                            Text::new("🔄 PLAY AGAIN"),
+                            Text::new("PLAY AGAIN"),
                             TextFont {
                                 font_size: 14.0,
                                 ..default()
@@ -254,7 +254,7 @@ pub fn spawn_post_match_banner(parent: &mut ChildBuilder) {
                     ))
                     .with_children(|btn| {
                         btn.spawn((
-                            Text::new("🏠 LANDING PAGE"),
+                            Text::new("LANDING PAGE"),
                             TextFont {
                                 font_size: 14.0,
                                 ..default()

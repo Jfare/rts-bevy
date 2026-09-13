@@ -5,7 +5,7 @@ dist = "dist"
 release = false
 
 [watch]
-watch = ["crates/client", "crates/shared", "crates/bot_ai"]
+watch = ["index.html", "crates/client", "crates/shared", "crates/bot_ai"]
 
 [serve]
 addresses = ["127.0.0.1"]
