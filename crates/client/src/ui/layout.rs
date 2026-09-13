@@ -3,7 +3,8 @@ use bevy::ui::FocusPolicy;
 
 use super::{
     spawn_bottom_bar, spawn_countdown_overlay, spawn_game_menu_modal,
-    spawn_mobile_deselect_button, spawn_mobile_quick_bar, spawn_post_match_banner, spawn_top_bar,
+    spawn_mobile_build_menu, spawn_mobile_deselect_button, spawn_mobile_placement_prompt,
+    spawn_mobile_quick_bar, spawn_post_match_banner, spawn_top_bar,
 };
 
 /// Marker component for the high-level HUD root UI overlay container
@@ -32,19 +33,25 @@ pub fn setup_hud(mut commands: Commands) {
             FocusPolicy::Pass,
         ))
         .with_children(|root| {
-            // Top HUD Bar (Title, APM, Resources, Network Status, Menu Button)
+            // Top Bar (Resources, Network, Time)
             spawn_top_bar(root);
 
-            // Top-Right Minimap Frame (Clean container without in-game headline)
+            // Minimap Frame in top-right corner
             spawn_minimap_frame(root);
 
-            // Left Thumb Quick Action Bar (Mobile Touch only)
+            // Right Bottom BUILD Action Button (Mobile Touch only, positioned above X button)
             spawn_mobile_quick_bar(root);
+
+            // Mobile Build Menu Panel (Displays all buildings when BUILD is toggled)
+            spawn_mobile_build_menu(root);
+
+            // Mobile Placement Prompt Pill (Top center, active when placing on mobile)
+            spawn_mobile_placement_prompt(root);
 
             // Bottom Control Bar (Selection Info Card, Command Card)
             spawn_bottom_bar(root);
 
-            // Right Bottom Deselect Button (Mobile Touch only, active when units selected)
+            // Right Bottom Deselect Button (Mobile Touch only, active when units selected or placing)
             spawn_mobile_deselect_button(root);
 
             // Center Match Outcome Scoreboard (Hidden until Victory/Defeat)

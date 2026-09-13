@@ -297,16 +297,12 @@ pub fn update_responsive_hud_layout_system(
             node.height = Val::Px(95.0);
         }
         for mut node in &mut command_card_query {
-            node.min_width = Val::Px(220.0);
-            node.max_width = Val::Px(280.0);
-            node.min_height = Val::Auto;
-            node.padding = UiRect::all(Val::Px(6.0));
-            node.row_gap = Val::Px(4.0);
+            node.display = Display::None;
         }
         for mut node in &mut selection_panel_query {
             node.max_width = Val::Px(240.0);
             node.padding = UiRect::all(Val::Px(6.0));
-            node.margin = UiRect::left(Val::Px(105.0));
+            node.margin = UiRect::default();
         }
     } else {
         for mut node in &mut root_query {
@@ -444,14 +440,13 @@ mod tests {
         assert_eq!(mm_node_mob.width, Val::Px(95.0));
         assert_eq!(mm_node_mob.height, Val::Px(95.0));
         let cmd_node_mob = app.world().get::<Node>(cmd_card).unwrap();
-        assert_eq!(cmd_node_mob.min_width, Val::Px(220.0));
-        assert_eq!(cmd_node_mob.min_height, Val::Auto);
+        assert_eq!(cmd_node_mob.display, Display::None);
         let sel_node_mob = app.world().get::<Node>(sel_panel).unwrap();
         assert_eq!(sel_node_mob.max_width, Val::Px(240.0));
     }
 
     #[test]
-    fn test_mobile_command_card_hidden_until_needed() {
+    fn test_mobile_command_card_always_hidden_on_mobile() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.init_resource::<NetClient>();
@@ -464,7 +459,7 @@ mod tests {
         app.world_mut().spawn(window);
 
         let card_root = app.world_mut().spawn((CommandCardRoot, Node::default())).id();
-        let build_sec = app.world_mut().spawn((BuildStructuresSection, Node::default())).id();
+        let _build_sec = app.world_mut().spawn((BuildStructuresSection, Node::default())).id();
         let _hq_sec = app.world_mut().spawn((HqActionSection, Node::default())).id();
         let _barracks_sec = app.world_mut().spawn((BarracksActionSection, Node::default())).id();
         let _tactics_sec = app.world_mut().spawn((UnitTacticsSection, Node::default())).id();
@@ -472,18 +467,21 @@ mod tests {
 
         app.add_systems(Update, crate::ui::command_card::update_command_card_visibility_system);
 
-        // 1. With nothing selected and build menu closed -> Command Card is HIDDEN on mobile!
+        // 1. With nothing selected and build menu closed -> Command Card is HIDDEN on mobile
         app.update();
         assert_eq!(app.world().get::<Node>(card_root).unwrap().display, Display::None);
 
-        // 2. Open mobile build menu -> Command Card opens with structure options
+        // 2. Open mobile build menu -> Command Card remains HIDDEN on mobile (dedicated build menu is used)
         app.world_mut().resource_mut::<MobileBuildMenuOpen>().0 = true;
         app.update();
-        assert_eq!(app.world().get::<Node>(card_root).unwrap().display, Display::Flex);
-        assert_eq!(app.world().get::<Node>(build_sec).unwrap().display, Display::Flex);
+        assert_eq!(app.world().get::<Node>(card_root).unwrap().display, Display::None);
 
-        // 3. Close mobile build menu -> Collapses back to hidden
-        app.world_mut().resource_mut::<MobileBuildMenuOpen>().0 = false;
+        // 3. Select a worker -> Command Card still remains HIDDEN on mobile
+        app.world_mut().spawn((
+            shared::components::Faction::Player1,
+            shared::components::Selectable { is_selected: true },
+            shared::components::Worker::default(),
+        ));
         app.update();
         assert_eq!(app.world().get::<Node>(card_root).unwrap().display, Display::None);
     }

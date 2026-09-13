@@ -15,6 +15,7 @@ use crate::command_marker::CommandMarker;
 use crate::fog_of_war::{FogOfWarGrid, FogState};
 use crate::minimap::{get_minimap_screen_rect, MinimapState};
 use crate::net::{NetClient, NetStatus};
+use crate::placement::PlacementState;
 use crate::selection::{screen_to_world_2d, SelectionState};
 use crate::stats::MatchStats;
 use crate::ui::AttackMovePending;
@@ -37,9 +38,10 @@ pub fn is_mobile_ui_hit(
     pos: Vec2,
     window: &Window,
     minimap_opt: Option<&MinimapState>,
-    has_bottom_card: bool,
+    has_selection: bool,
+    build_menu_open: bool,
 ) -> bool {
-    // 1. Top resource bar (30px on mobile)
+    // 1. Top resource bar (34px on mobile)
     if pos.y <= 34.0 {
         return true;
     }
@@ -52,20 +54,22 @@ pub fn is_mobile_ui_hit(
         }
     }
 
-    // 3. Mobile quick action thumb bar (bottom left: 10px left, 85px width, 30px height)
-    if pos.x <= 105.0 && pos.y >= window.height() - 55.0 {
+    // 3. Right side action buttons: BUILD button (bottom: 64px, right: 10px, 44x44)
+    // and Deselect "X" button (bottom: 12px, right: 10px, 44x44)
+    if pos.x >= window.width() - 65.0 && pos.y >= window.height() - 118.0 {
         return true;
     }
 
-    // 4. Bottom HUD panels (only present when a unit is selected or build menu is open):
-    if has_bottom_card {
-        // Selection info card (bottom-left, shifted 105px from left edge, width ~240px)
-        if pos.x >= 105.0 && pos.x <= 350.0 && pos.y >= window.height() - 90.0 {
+    // 4. Mobile Build Menu (when open, docked to left of build button)
+    if build_menu_open {
+        if pos.x >= window.width() - 330.0 && pos.x <= window.width() - 65.0 && pos.y >= window.height() - 140.0 {
             return true;
         }
-        // Command card (bottom-right, width ~280px)
-        let cmd_start_x = (window.width() - 290.0).max(350.0);
-        if pos.x >= cmd_start_x && pos.y >= window.height() - 115.0 {
+    }
+
+    // 5. Selection info card (bottom-left, width ~250px, height ~90px, only when selection active)
+    if has_selection {
+        if pos.x <= 250.0 && pos.y >= window.height() - 90.0 {
             return true;
         }
     }
@@ -102,10 +106,17 @@ fn mobile_camera_pan_system(
     mobile_build_menu: Option<Res<crate::ui::mobile_hud::MobileBuildMenuOpen>>,
     selectable_query: Query<(&Faction, &Selectable)>,
     net_client: Res<NetClient>,
+    placement_state: Option<Res<PlacementState>>,
     mut gesture_state: ResMut<TouchGestureState>,
     mut camera_query: Query<(&mut Transform, Option<&OrthographicProjection>), With<Camera2d>>,
 ) {
     if box_select.0 {
+        gesture_state.last_pan_pos = None;
+        return;
+    }
+
+    // When actively placing a building, 1-finger touches are dedicated to building placement
+    if placement_state.as_ref().map_or(false, |ps| ps.active_kind.is_some()) {
         gesture_state.last_pan_pos = None;
         return;
     }
@@ -121,14 +132,13 @@ fn mobile_camera_pan_system(
         .iter()
         .any(|(fac, sel)| *fac == net_client.my_faction && sel.is_selected);
     let build_menu_open = mobile_build_menu.map_or(false, |m| m.0);
-    let has_bottom_card = has_any_friendly_selection || build_menu_open;
 
     // 1. Touch Panning (1 finger)
     if touches.iter().count() == 1 {
         gesture_state.last_pan_pos = None;
         let Some(touch) = touches.iter().next() else { return; };
         let pos = touch.position();
-        if is_mobile_ui_hit(pos, window, minimap_opt.as_deref(), has_bottom_card) {
+        if is_mobile_ui_hit(pos, window, minimap_opt.as_deref(), has_any_friendly_selection, build_menu_open) {
             return;
         }
 
@@ -149,7 +159,7 @@ fn mobile_camera_pan_system(
                         apply_pan_delta(&mut transform, delta, ortho_opt, grid_config.as_deref());
                     }
                     gesture_state.last_pan_pos = Some(cursor_pos);
-                } else if !is_mobile_ui_hit(cursor_pos, window, minimap_opt.as_deref(), has_bottom_card) {
+                } else if !is_mobile_ui_hit(cursor_pos, window, minimap_opt.as_deref(), has_any_friendly_selection, build_menu_open) {
                     gesture_state.last_pan_pos = Some(cursor_pos);
                 }
             }
@@ -232,6 +242,7 @@ pub struct MobileTouchParams<'w, 's> {
     pub nav_grid: Res<'w, NavGrid>,
     pub minimap_opt: Option<Res<'w, MinimapState>>,
     pub mobile_build_menu: Option<Res<'w, crate::ui::mobile_hud::MobileBuildMenuOpen>>,
+    pub placement_state: ResMut<'w, PlacementState>,
 }
 
 /// Touch/Mouse tap interaction: Selects entities or issues contextual Move/Attack/Harvest orders
@@ -275,10 +286,16 @@ fn mobile_touch_interaction_system(
         nav_grid,
         minimap_opt,
         mobile_build_menu,
+        placement_state,
     } = p;
     if outcome_opt.as_deref() == Some(&MatchOutcome::Victory)
         || outcome_opt.as_deref() == Some(&MatchOutcome::Defeat)
     {
+        return;
+    }
+
+    // When in placement mode, touch taps place buildings rather than selecting/ordering units
+    if placement_state.active_kind.is_some() {
         return;
     }
 
@@ -307,7 +324,6 @@ fn mobile_touch_interaction_system(
         .iter()
         .any(|(_, _, _, fac, sel, ..)| *fac == net_client.my_faction && sel.is_selected);
     let build_menu_open = mobile_build_menu.map_or(false, |m| m.0);
-    let has_bottom_card = has_any_friendly_selection || build_menu_open;
 
     let just_pressed = touches.any_just_pressed() || (!has_touches && mouse_button.just_pressed(MouseButton::Left));
     let is_held = (has_touches && touches.iter().count() == 1) || (!has_touches && mouse_button.pressed(MouseButton::Left));
@@ -322,7 +338,7 @@ fn mobile_touch_interaction_system(
     // 1. Touch / Mouse Pressed
     if just_pressed {
         if let Some(pos) = current_pos_opt {
-            let ui_hit = is_mobile_ui_hit(pos, window, minimap_opt.as_deref(), has_bottom_card);
+            let ui_hit = is_mobile_ui_hit(pos, window, minimap_opt.as_deref(), has_any_friendly_selection, build_menu_open);
             info!("📱 [Mobile Input] Pressed at pos={:?}, touches={}, is_ui_hit={}", pos, touches.iter().count(), ui_hit);
             if !ui_hit {
                 gesture_state.touch_start_pos = Some(pos);
@@ -739,30 +755,24 @@ mod tests {
         let mut window = Window::default();
         window.resolution = WindowResolution::new(955.0, 440.0);
 
-        // 1. Top bar: y <= 34 is UI, y = 35 is battlefield
-        assert!(is_mobile_ui_hit(Vec2::new(200.0, 20.0), &window, None, false));
-        assert!(!is_mobile_ui_hit(Vec2::new(200.0, 45.0), &window, None, false));
+        // 1. Top bar: y <= 34 is UI, y = 45 is battlefield
+        assert!(is_mobile_ui_hit(Vec2::new(200.0, 20.0), &window, None, false, false));
+        assert!(!is_mobile_ui_hit(Vec2::new(200.0, 45.0), &window, None, false, false));
 
-        // 2. Left quick bar: x <= 105.0, y >= 440 - 55 = 385
-        assert!(is_mobile_ui_hit(Vec2::new(50.0, 400.0), &window, None, false));
-        assert!(!is_mobile_ui_hit(Vec2::new(50.0, 300.0), &window, None, false));
-        // Right next to quick bar (x = 120.0, y = 400.0) is free battlefield when no bottom card
-        assert!(!is_mobile_ui_hit(Vec2::new(120.0, 400.0), &window, None, false));
+        // 2. Right action buttons (BUILD / X): x >= 955 - 65 = 890, y >= 440 - 118 = 322
+        assert!(is_mobile_ui_hit(Vec2::new(910.0, 350.0), &window, None, false, false));
+        assert!(!is_mobile_ui_hit(Vec2::new(850.0, 350.0), &window, None, false, false));
 
-        // 3. Bottom HUD cards: only hit if has_bottom_card is true
-        let bottom_info_pos = Vec2::new(250.0, 400.0);
-        let bottom_cmd_pos = Vec2::new(800.0, 400.0);
-        let bottom_center_pos = Vec2::new(500.0, 400.0);
+        // 3. Mobile Build Menu: x between 955 - 330 = 625 and 890, y >= 440 - 140 = 300
+        assert!(is_mobile_ui_hit(Vec2::new(750.0, 380.0), &window, None, false, true));
+        assert!(!is_mobile_ui_hit(Vec2::new(750.0, 380.0), &window, None, false, false));
 
-        // When no bottom cards active, all lower areas are free battlefield
-        assert!(!is_mobile_ui_hit(bottom_info_pos, &window, None, false));
-        assert!(!is_mobile_ui_hit(bottom_cmd_pos, &window, None, false));
-        assert!(!is_mobile_ui_hit(bottom_center_pos, &window, None, false));
+        // 4. Selection info panel (bottom-left): x <= 250, y >= 440 - 90 = 350
+        assert!(is_mobile_ui_hit(Vec2::new(150.0, 400.0), &window, None, true, false));
+        assert!(!is_mobile_ui_hit(Vec2::new(150.0, 400.0), &window, None, false, false));
 
-        // When bottom cards active: info panel (left) and cmd card (right) are UI, but center is open!
-        assert!(is_mobile_ui_hit(bottom_info_pos, &window, None, true));
-        assert!(is_mobile_ui_hit(bottom_cmd_pos, &window, None, true));
-        assert!(!is_mobile_ui_hit(bottom_center_pos, &window, None, true));
+        // 5. Open battlefield in center and center-bottom
+        assert!(!is_mobile_ui_hit(Vec2::new(450.0, 400.0), &window, None, true, true));
     }
 
     #[test]
@@ -778,6 +788,7 @@ mod tests {
         app.init_resource::<SelectionState>();
         app.init_resource::<MatchStats>();
         app.init_resource::<AttackMovePending>();
+        app.init_resource::<PlacementState>();
         app.init_resource::<FogOfWarGrid>();
         app.init_resource::<NavGrid>();
         app.add_event::<SoundEffect>();

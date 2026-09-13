@@ -467,14 +467,13 @@ pub fn update_command_card_visibility_system(
         ),
     >,
     control_scheme: Option<Res<crate::controls::ControlScheme>>,
-    mobile_build_menu: Option<Res<crate::ui::mobile_hud::MobileBuildMenuOpen>>,
+    _mobile_build_menu: Option<Res<crate::ui::mobile_hud::MobileBuildMenuOpen>>,
     window_query: Query<&Window, With<bevy::window::PrimaryWindow>>,
 ) {
     let win_mobile = window_query.get_single().map_or(false, |w| w.width() < 960.0 || w.height() < 550.0);
     let is_mobile = control_scheme.map_or(false, |s| *s == crate::controls::ControlScheme::MobileTouch)
         || net_client.my_platform == shared::protocol::ClientPlatform::Mobile
         || win_mobile;
-    let build_menu_open = mobile_build_menu.map_or(false, |m| m.0);
 
     let my_faction = net_client.my_faction;
     let is_placing = placement_state.active_kind.is_some();
@@ -490,7 +489,11 @@ pub fn update_command_card_visibility_system(
 
     if is_placing {
         for mut node in &mut card_root_query {
-            node.display = Display::Flex;
+            node.display = if is_mobile {
+                Display::None
+            } else {
+                Display::Flex
+            };
         }
         // Hide all other action sub-panels when in placement mode
         for mut node in &mut hq_section_query {
@@ -535,7 +538,7 @@ pub fn update_command_card_visibility_system(
         }
     }
 
-    let has_any_selection = has_selected_hq
+    let _has_any_selection = has_selected_hq
         || has_selected_barracks
         || has_selected_worker
         || has_selected_combat;
@@ -567,12 +570,8 @@ pub fn update_command_card_visibility_system(
         };
     }
 
-    // 5. Structure Placement Section (Worker or Default/None selected on desktop, or mobile build menu open)
-    let show_build = if is_mobile {
-        has_selected_worker || (!has_any_selection && build_menu_open)
-    } else {
-        has_selected_worker || !has_any_selection
-    };
+    // 5. Structure Placement Section (Worker or Default/None selected on desktop)
+    let show_build = has_selected_worker || !has_selected_hq && !has_selected_barracks && !has_selected_combat;
 
     for mut node in &mut build_section_query {
         node.display = if show_build {
@@ -582,22 +581,14 @@ pub fn update_command_card_visibility_system(
         };
     }
 
-    // Root Command Card visibility: On desktop always visible, on mobile only visible when selection or build menu active
+    // Root Command Card visibility: On desktop always visible; on mobile completely removed (never visible)
     for mut node in &mut card_root_query {
         node.display = if is_mobile {
-            if has_any_selection || build_menu_open {
-                Display::Flex
-            } else {
-                Display::None
-            }
+            Display::None
         } else {
             Display::Flex
         };
-        node.margin = if is_mobile && (has_selected_combat || has_selected_worker) {
-            UiRect::right(Val::Px(56.0))
-        } else {
-            UiRect::ZERO
-        };
+        node.margin = UiRect::ZERO;
     }
 }
 
@@ -826,25 +817,30 @@ pub fn handle_command_card_interactions_system(
                     CommandCardAction::BuildHQ => {
                         placement_state.active_kind = Some(BuildingKind::BaseHQ);
                         placement_state.mineral_cost = BuildingKind::BaseHQ.mineral_cost();
+                        placement_state.awaiting_initial_release = true;
                         info!("🏗️ [CommandCard] Base HQ ($400) selected for placement");
                     }
                     CommandCardAction::BuildBarracks => {
                         placement_state.active_kind = Some(BuildingKind::Barracks);
                         placement_state.mineral_cost = BuildingKind::Barracks.mineral_cost();
+                        placement_state.awaiting_initial_release = true;
                         info!("🏗️ [CommandCard] Barracks ($150) selected for placement");
                     }
                     CommandCardAction::BuildSupplyDepot => {
                         placement_state.active_kind = Some(BuildingKind::SupplyDepot);
                         placement_state.mineral_cost = BuildingKind::SupplyDepot.mineral_cost();
+                        placement_state.awaiting_initial_release = true;
                         info!("🏗️ [CommandCard] Supply Depot ($100) selected for placement");
                     }
                     CommandCardAction::BuildTurret => {
                         placement_state.active_kind = Some(BuildingKind::Turret);
                         placement_state.mineral_cost = BuildingKind::Turret.mineral_cost();
+                        placement_state.awaiting_initial_release = true;
                         info!("🏗️ [CommandCard] Gun Turret ($125) selected for placement");
                     }
                     CommandCardAction::CancelPlacement => {
                         placement_state.active_kind = None;
+                        placement_state.has_preview_position = false;
                         info!("❌ [CommandCard] Placement cancelled");
                     }
                     CommandCardAction::Stop => {
