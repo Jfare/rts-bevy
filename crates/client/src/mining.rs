@@ -145,7 +145,55 @@ fn worker_mining_state_machine(
 
         match worker.state {
             WorkerState::Idle => {
-                // Do nothing
+                if move_target_opt.is_none() {
+                    let worker_pos = worker_transform.translation.truncate();
+                    if worker.carried_minerals > 0 {
+                        worker.state = WorkerState::MovingToBase;
+                    } else {
+                        let mut best_node = None;
+                        let mut best_dist = WORKER_AUTO_MINE_RANGE;
+
+                        for (node_ent, node_tf, node) in &node_query {
+                            if node.remaining_minerals > 0 {
+                                let n_pos = node_tf.translation.truncate();
+                                let dist = worker_pos.distance(n_pos);
+                                if dist <= best_dist {
+                                    // Safety check: Don't target nodes closer to enemy base than friendly base
+                                    let mut min_friendly_base_dist = f32::MAX;
+                                    let mut min_enemy_base_dist = f32::MAX;
+
+                                    for (_, base_tf, base_fac, _, _) in &base_query {
+                                        let b_pos = base_tf.translation.truncate();
+                                        let b_dist = n_pos.distance(b_pos);
+                                        if *base_fac == *faction {
+                                            if b_dist < min_friendly_base_dist {
+                                                min_friendly_base_dist = b_dist;
+                                            }
+                                        } else if base_fac.is_hostile_to(faction) {
+                                            if b_dist < min_enemy_base_dist {
+                                                min_enemy_base_dist = b_dist;
+                                            }
+                                        }
+                                    }
+
+                                    if min_enemy_base_dist >= min_friendly_base_dist {
+                                        best_dist = dist;
+                                        best_node = Some((node_ent, n_pos));
+                                    }
+                                }
+                            }
+                        }
+
+                        if let Some((node_ent, n_pos)) = best_node {
+                            worker.target_node = Some(node_ent);
+                            worker.state = WorkerState::MovingToResource;
+                            let dir = (n_pos - worker_pos).normalize_or_zero();
+                            if dir.length_squared() > 0.0 {
+                                worker_transform.rotation = Quat::from_rotation_z(dir.y.atan2(dir.x));
+                            }
+                        }
+                    }
+                }
             }
 
             WorkerState::MovingToResource => {
@@ -305,15 +353,28 @@ fn worker_mining_state_machine(
                     }
 
 
-                    // Otherwise try to find another mineral patch
+                    // Otherwise try to find another mineral patch within reasonable range
                     let mut closest_node = None;
-                    let mut closest_dist = f32::MAX;
+                    let mut closest_dist = WORKER_AUTO_MINE_RANGE;
                     for (n_ent, n_trans, n) in &node_query {
                         if n.remaining_minerals > 0 {
-                            let d = worker_pos.distance(n_trans.translation.truncate());
-                            if d < closest_dist {
-                                closest_dist = d;
-                                closest_node = Some(n_ent);
+                            let n_pos = n_trans.translation.truncate();
+                            let d = worker_pos.distance(n_pos);
+                            if d <= closest_dist {
+                                let mut min_friendly = f32::MAX;
+                                let mut min_enemy = f32::MAX;
+                                for (_, base_tf, base_fac, _, _) in &base_query {
+                                    let b_dist = n_pos.distance(base_tf.translation.truncate());
+                                    if *base_fac == *faction {
+                                        if b_dist < min_friendly { min_friendly = b_dist; }
+                                    } else if base_fac.is_hostile_to(faction) {
+                                        if b_dist < min_enemy { min_enemy = b_dist; }
+                                    }
+                                }
+                                if min_enemy >= min_friendly {
+                                    closest_dist = d;
+                                    closest_node = Some(n_ent);
+                                }
                             }
                         }
                     }

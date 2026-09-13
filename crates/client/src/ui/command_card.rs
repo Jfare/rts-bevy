@@ -593,6 +593,11 @@ pub fn update_command_card_visibility_system(
         } else {
             Display::Flex
         };
+        node.margin = if is_mobile && (has_selected_combat || has_selected_worker) {
+            UiRect::right(Val::Px(56.0))
+        } else {
+            UiRect::ZERO
+        };
     }
 }
 

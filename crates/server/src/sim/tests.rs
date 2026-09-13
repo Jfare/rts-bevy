@@ -1157,4 +1157,150 @@ fn test_consecutive_matches_have_fresh_economy() {
     );
 }
 
+#[test]
+fn test_idle_worker_auto_mines_nearest_gold_rock_within_range() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    app.insert_resource(Time::<()>::default());
+    let mut mm = Matchmaker::new();
+    let mut room = Room::new(1, None, GameMode::Multiplayer1v1, Some(101), Some(102));
+    room.is_active = true;
+    room.countdown_timer = 0.0;
+    mm.rooms.insert(1, room);
+    app.insert_resource(mm);
+    app.add_systems(Update, server_mining_system);
+
+    let world = app.world_mut();
+
+    // Friendly base at (0, -1000)
+    world.spawn((
+        Transform::from_xyz(0.0, -1000.0, 1.0),
+        Faction::Player1,
+        RoomId(1),
+        BaseHQ {
+            supply_provided: 10,
+            dropoff_radius: 70.0,
+        },
+    ));
+
+    // Friendly mineral node at (0, -1200)
+    let home_rock = world.spawn((
+        Transform::from_xyz(0.0, -1200.0, 0.5),
+        ResourceNode::new(2000),
+        NetEntity { net_id: 10, owner_peer_id: 0 },
+        RoomId(1),
+    )).id();
+
+    // Enemy base at (0, 1000)
+    world.spawn((
+        Transform::from_xyz(0.0, 1000.0, 1.0),
+        Faction::Player2,
+        RoomId(1),
+        BaseHQ {
+            supply_provided: 10,
+            dropoff_radius: 70.0,
+        },
+    ));
+
+    // Enemy mineral node at (0, 1200)
+    world.spawn((
+        Transform::from_xyz(0.0, 1200.0, 0.5),
+        ResourceNode::new(2000),
+        NetEntity { net_id: 20, owner_peer_id: 0 },
+        RoomId(1),
+    ));
+
+    // Idle friendly worker at (0, -1050) (dist 150 to home rock, within 450 range)
+    let worker_ent = world.spawn((
+        Transform::from_xyz(0.0, -1050.0, 2.0),
+        MoveSpeed(WORKER_MOVE_SPEED),
+        Faction::Player1,
+        RoomId(1),
+        Worker::default(),
+    )).id();
+
+    app.update();
+
+    let worker = app.world().get::<Worker>(worker_ent).unwrap();
+    assert_eq!(worker.state, WorkerState::MovingToResource, "Idle worker within range should start moving to resource");
+    assert_eq!(worker.target_node, Some(home_rock), "Worker should target home mineral node");
+}
+
+#[test]
+fn test_idle_worker_does_not_target_enemy_base_or_out_of_range_rock() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    app.insert_resource(Time::<()>::default());
+    let mut mm = Matchmaker::new();
+    let mut room = Room::new(1, None, GameMode::Multiplayer1v1, Some(101), Some(102));
+    room.is_active = true;
+    room.countdown_timer = 0.0;
+    mm.rooms.insert(1, room);
+    app.insert_resource(mm);
+    app.add_systems(Update, server_mining_system);
+
+    let world = app.world_mut();
+
+    // Friendly base at (0, -1000)
+    world.spawn((
+        Transform::from_xyz(0.0, -1000.0, 1.0),
+        Faction::Player1,
+        RoomId(1),
+        BaseHQ {
+            supply_provided: 10,
+            dropoff_radius: 70.0,
+        },
+    ));
+
+    // Enemy base at (0, 1000)
+    world.spawn((
+        Transform::from_xyz(0.0, 1000.0, 1.0),
+        Faction::Player2,
+        RoomId(1),
+        BaseHQ {
+            supply_provided: 10,
+            dropoff_radius: 70.0,
+        },
+    ));
+
+    // Enemy mineral node at (0, 1200)
+    world.spawn((
+        Transform::from_xyz(0.0, 1200.0, 0.5),
+        ResourceNode::new(2000),
+        NetEntity { net_id: 20, owner_peer_id: 0 },
+        RoomId(1),
+    ));
+
+    // Worker stationed at scouting position (0, 800) near enemy base
+    // Distance to enemy rock is 400 (within WORKER_AUTO_MINE_RANGE), but it's in enemy territory
+    let worker_near_enemy = world.spawn((
+        Transform::from_xyz(0.0, 800.0, 2.0),
+        MoveSpeed(WORKER_MOVE_SPEED),
+        Faction::Player1,
+        RoomId(1),
+        Worker::default(),
+    )).id();
+
+    // Worker stationed at middle of map (0, 0)
+    // Distance to any rock is > 1000 (well outside 450 range)
+    let worker_in_middle = world.spawn((
+        Transform::from_xyz(0.0, 0.0, 2.0),
+        MoveSpeed(WORKER_MOVE_SPEED),
+        Faction::Player1,
+        RoomId(1),
+        Worker::default(),
+    )).id();
+
+    app.update();
+
+    let w_enemy = app.world().get::<Worker>(worker_near_enemy).unwrap();
+    assert_eq!(w_enemy.state, WorkerState::Idle, "Worker near enemy base should not auto-mine enemy gold");
+    assert_eq!(w_enemy.target_node, None);
+
+    let w_mid = app.world().get::<Worker>(worker_in_middle).unwrap();
+    assert_eq!(w_mid.state, WorkerState::Idle, "Worker in middle of map should remain idle");
+    assert_eq!(w_mid.target_node, None);
+}
+
+
 

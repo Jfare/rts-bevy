@@ -203,6 +203,9 @@ pub enum WorkerState {
 
 pub const WORKER_MOVE_SPEED: f32 = 140.0;
 
+/// Maximum search distance for idle workers to automatically find and mine nearby mineral nodes
+pub const WORKER_AUTO_MINE_RANGE: f32 = 450.0;
+
 #[derive(Debug, Clone, PartialEq, Component, Reflect)]
 pub struct Worker {
     pub state: WorkerState,

@@ -148,6 +148,7 @@ pub fn handle_initial_world_state(
             UnitKind::Worker => {
                 let closest_node = mineral_nodes
                     .iter()
+                    .filter(|(_, a)| pos.distance(*a) <= WORKER_AUTO_MINE_RANGE)
                     .min_by(|(_, a), (_, b)| {
                         let da = pos.distance(*a);
                         let db = pos.distance(*b);
@@ -155,9 +156,15 @@ pub fn handle_initial_world_state(
                     })
                     .map(|(e, _)| *e);
 
+                let state = if closest_node.is_some() {
+                    WorkerState::MovingToResource
+                } else {
+                    WorkerState::Idle
+                };
+
                 u_cmds.insert((
                     Worker {
-                        state: WorkerState::MovingToResource,
+                        state,
                         target_node: closest_node,
                         ..default()
                     },

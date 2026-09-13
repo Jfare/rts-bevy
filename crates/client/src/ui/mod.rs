@@ -29,9 +29,10 @@ pub use menu_modal::{
     update_lobby_modal_status_text,
 };
 pub use mobile_hud::{
-    handle_mobile_quick_action_interactions, spawn_mobile_quick_bar,
-    update_box_select_visuals_system, update_build_menu_visuals_system,
-    update_mobile_hud_visibility_system, MobileBuildMenuOpen,
+    handle_mobile_deselect_button_interaction, handle_mobile_quick_action_interactions,
+    spawn_mobile_deselect_button, spawn_mobile_quick_bar, update_build_menu_visuals_system,
+    update_mobile_deselect_button_visibility_system, update_mobile_hud_visibility_system,
+    MobileBuildMenuOpen,
 };
 pub use post_match::{
     handle_play_again_button_interaction, handle_return_to_landing_button_interaction,
@@ -65,9 +66,10 @@ impl Plugin for RtsUiPlugin {
                     handle_return_to_landing_button_interaction,
                     update_lobby_modal_status_text,
                     update_mobile_hud_visibility_system,
-                    update_box_select_visuals_system,
                     update_build_menu_visuals_system,
                     handle_mobile_quick_action_interactions,
+                    update_mobile_deselect_button_visibility_system,
+                    handle_mobile_deselect_button_interaction,
                     update_responsive_hud_layout_system,
                 ),
             );

@@ -350,6 +350,7 @@ pub fn update_responsive_hud_layout_system(
             node.min_height = Val::Px(170.0);
             node.padding = UiRect::all(Val::Px(10.0));
             node.row_gap = Val::Px(6.0);
+            node.margin = UiRect::default();
         }
         for mut node in &mut selection_panel_query {
             node.max_width = Val::Px(460.0);

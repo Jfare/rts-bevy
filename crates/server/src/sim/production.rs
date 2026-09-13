@@ -71,8 +71,12 @@ pub fn server_production_system(
                             Vec2::new(0.0, 65.0)
                         };
                         let spawn_pos = transform.translation.truncate() + spawn_offset;
-                        let rally = prod.rally_point;
-                        let waypoints = nav_grid.find_path(spawn_pos, rally);
+                        let default_rally = if *faction == Faction::Player1 {
+                            transform.translation.truncate() + Vec2::new(0.0, 100.0)
+                        } else {
+                            transform.translation.truncate() + Vec2::new(0.0, -100.0)
+                        };
+                        let has_custom_rally = prod.rally_point.distance(default_rally) > 5.0;
 
                         let mut unit_cmds = commands.spawn((
                             Unit {
@@ -86,9 +90,14 @@ pub fn server_production_system(
                                 net_id,
                                 owner_peer_id: net_entity.owner_peer_id,
                             },
-                            MoveTarget::with_waypoints(rally, false, waypoints),
                             Transform::from_xyz(spawn_pos.x, spawn_pos.y, 2.0),
                         ));
+
+                        if unit_kind != UnitKind::Worker || has_custom_rally {
+                            let rally = prod.rally_point;
+                            let waypoints = nav_grid.find_path(spawn_pos, rally);
+                            unit_cmds.insert(MoveTarget::with_waypoints(rally, false, waypoints));
+                        }
 
                         match unit_kind {
                             UnitKind::Worker => {

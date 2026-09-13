@@ -9,7 +9,7 @@ pub fn server_mining_system(
     time: Res<Time>,
     mut matchmaker: ResMut<Matchmaker>,
     mut workers: Query<(Entity, &mut Transform, &MoveSpeed, &Faction, &RoomId, &mut Worker, Option<&MoveTarget>)>,
-    mut nodes: Query<(&Transform, &mut ResourceNode, &NetEntity, &RoomId), Without<Worker>>,
+    mut nodes: Query<(Entity, &Transform, &mut ResourceNode, &NetEntity, &RoomId), Without<Worker>>,
     bases: Query<(&Transform, &Faction, &RoomId), (With<BaseHQ>, Without<Worker>, Without<ResourceNode>)>,
 ) {
     let dt = time.delta_secs();
@@ -26,14 +26,66 @@ pub fn server_mining_system(
         }
 
         match worker.state {
-            WorkerState::Idle => {}
+            WorkerState::Idle => {
+                if move_target_opt.is_none() {
+                    let w_pos = transform.translation.truncate();
+                    if worker.carried_minerals > 0 {
+                        worker.state = WorkerState::MovingToBase;
+                    } else {
+                        let mut best_node = None;
+                        let mut best_dist = WORKER_AUTO_MINE_RANGE;
+
+                        for (node_e, node_tf, node, _, node_room) in &nodes {
+                            if node_room.0 == worker_room.0 && node.remaining_minerals > 0 {
+                                let n_pos = node_tf.translation.truncate();
+                                let dist = w_pos.distance(n_pos);
+                                if dist <= best_dist {
+                                    // Safety check: Don't auto-target nodes closer to enemy base than friendly base
+                                    let mut min_friendly_base_dist = f32::MAX;
+                                    let mut min_enemy_base_dist = f32::MAX;
+
+                                    for (base_tf, base_faction, base_room) in &bases {
+                                        if base_room.0 == worker_room.0 {
+                                            let b_pos = base_tf.translation.truncate();
+                                            let b_dist = n_pos.distance(b_pos);
+                                            if *base_faction == *faction {
+                                                if b_dist < min_friendly_base_dist {
+                                                    min_friendly_base_dist = b_dist;
+                                                }
+                                            } else if base_faction.is_hostile_to(faction) {
+                                                if b_dist < min_enemy_base_dist {
+                                                    min_enemy_base_dist = b_dist;
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    if min_enemy_base_dist >= min_friendly_base_dist {
+                                        best_dist = dist;
+                                        best_node = Some((node_e, n_pos));
+                                    }
+                                }
+                            }
+                        }
+
+                        if let Some((node_e, n_pos)) = best_node {
+                            worker.target_node = Some(node_e);
+                            worker.state = WorkerState::MovingToResource;
+                            let dir = (n_pos - w_pos).normalize_or_zero();
+                            if dir.length_squared() > 0.0 {
+                                transform.rotation = Quat::from_rotation_z(dir.y.atan2(dir.x));
+                            }
+                        }
+                    }
+                }
+            }
             WorkerState::MovingToResource => {
                 let Some(node_e) = worker.target_node else {
                     worker.state = WorkerState::Idle;
                     continue;
                 };
 
-                if let Ok((node_tf, node, _, node_room)) = nodes.get(node_e) {
+                if let Ok((_, node_tf, node, _, node_room)) = nodes.get(node_e) {
                     if node_room.0 != worker_room.0 || node.remaining_minerals == 0 {
                         worker.target_node = None;
                         worker.state = WorkerState::Idle;
@@ -65,7 +117,7 @@ pub fn server_mining_system(
                     continue;
                 };
 
-                if let Ok((node_tf, mut node, _, node_room)) = nodes.get_mut(node_e) {
+                if let Ok((_, node_tf, mut node, _, node_room)) = nodes.get_mut(node_e) {
                     if node_room.0 != worker_room.0 || node.remaining_minerals == 0 {
                         worker.target_node = None;
                         worker.state = WorkerState::Idle;
@@ -137,7 +189,7 @@ pub fn server_mining_system(
                         worker.carried_minerals = 0;
                         if let Some(node_e) = worker.target_node {
                             worker.state = WorkerState::MovingToResource;
-                            if let Ok((node_tf, ..)) = nodes.get(node_e) {
+                            if let Ok((_, node_tf, ..)) = nodes.get(node_e) {
                                 let dir = (node_tf.translation.truncate() - w_pos).normalize_or_zero();
                                 if dir.length_squared() > 0.0 {
                                     transform.rotation = Quat::from_rotation_z(dir.y.atan2(dir.x));

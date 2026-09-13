@@ -52,8 +52,8 @@ pub fn is_mobile_ui_hit(
         }
     }
 
-    // 3. Mobile quick action thumb bar (bottom left: 10px left, 85px width, 170px height)
-    if pos.x <= 105.0 && pos.y >= window.height() - 195.0 {
+    // 3. Mobile quick action thumb bar (bottom left: 10px left, 85px width, 30px height)
+    if pos.x <= 105.0 && pos.y >= window.height() - 55.0 {
         return true;
     }
 
@@ -743,10 +743,11 @@ mod tests {
         assert!(is_mobile_ui_hit(Vec2::new(200.0, 20.0), &window, None, false));
         assert!(!is_mobile_ui_hit(Vec2::new(200.0, 45.0), &window, None, false));
 
-        // 2. Left quick bar: x <= 105.0, y >= 440 - 195 = 245
-        assert!(is_mobile_ui_hit(Vec2::new(50.0, 300.0), &window, None, false));
-        // Right next to quick bar (x = 120.0, y = 300.0) is free battlefield when no bottom card
-        assert!(!is_mobile_ui_hit(Vec2::new(120.0, 300.0), &window, None, false));
+        // 2. Left quick bar: x <= 105.0, y >= 440 - 55 = 385
+        assert!(is_mobile_ui_hit(Vec2::new(50.0, 400.0), &window, None, false));
+        assert!(!is_mobile_ui_hit(Vec2::new(50.0, 300.0), &window, None, false));
+        // Right next to quick bar (x = 120.0, y = 400.0) is free battlefield when no bottom card
+        assert!(!is_mobile_ui_hit(Vec2::new(120.0, 400.0), &window, None, false));
 
         // 3. Bottom HUD cards: only hit if has_bottom_card is true
         let bottom_info_pos = Vec2::new(250.0, 400.0);

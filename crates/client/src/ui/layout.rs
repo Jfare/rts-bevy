@@ -3,7 +3,7 @@ use bevy::ui::FocusPolicy;
 
 use super::{
     spawn_bottom_bar, spawn_countdown_overlay, spawn_game_menu_modal,
-    spawn_mobile_quick_bar, spawn_post_match_banner, spawn_top_bar,
+    spawn_mobile_deselect_button, spawn_mobile_quick_bar, spawn_post_match_banner, spawn_top_bar,
 };
 
 /// Marker component for the high-level HUD root UI overlay container
@@ -41,6 +41,12 @@ pub fn setup_hud(mut commands: Commands) {
             // Left Thumb Quick Action Bar (Mobile Touch only)
             spawn_mobile_quick_bar(root);
 
+            // Bottom Control Bar (Selection Info Card, Command Card)
+            spawn_bottom_bar(root);
+
+            // Right Bottom Deselect Button (Mobile Touch only, active when units selected)
+            spawn_mobile_deselect_button(root);
+
             // Center Match Outcome Scoreboard (Hidden until Victory/Defeat)
             spawn_post_match_banner(root);
 
@@ -49,9 +55,6 @@ pub fn setup_hud(mut commands: Commands) {
 
             // ESC / Game Menu Modal Overlay (Hidden until toggled)
             spawn_game_menu_modal(root);
-
-            // Bottom Control Bar (Selection Info Card, Command Card)
-            spawn_bottom_bar(root);
         });
 }
 
