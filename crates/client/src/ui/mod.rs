@@ -108,6 +108,7 @@ pub enum LobbyButtonAction {
     ToggleModal,
     CloseModal,
     ForfeitMatch,
+    ToggleFullscreen,
 }
 
 #[derive(Component)]

@@ -144,6 +144,7 @@ fn sync_browser_canvas_resolution(
                         window.resolution.set_scale_factor(dpr as f32);
                         window.resolution.set_physical_resolution(target_phys_w, target_phys_h);
                         info!("📐 [Window Sync Changed] DPR={}, Logical=({}x{}), Physical=({}x{})", dpr, window.width(), window.height(), window.physical_width(), window.physical_height());
+                        let _ = js_sys::eval("if (window.__rts_sync_canvas_size) { window.__rts_sync_canvas_size(); }");
                     }
                 }
             }

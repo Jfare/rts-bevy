@@ -50,6 +50,12 @@ pub fn handle_lobby_button_interactions(
                             node.display = Display::None;
                         }
                     }
+                    LobbyButtonAction::ToggleFullscreen => {
+                        #[cfg(target_arch = "wasm32")]
+                        {
+                            let _ = js_sys::eval("if (window.__rts_toggle_fullscreen) { window.__rts_toggle_fullscreen(); }");
+                        }
+                    }
                     LobbyButtonAction::ForfeitMatch => {
                         info!("🏳️ [GameMenu] Player forfeited match, returning to landing page.");
                         for mut node in &mut modal_query {
@@ -70,6 +76,7 @@ pub fn handle_lobby_button_interactions(
                     LobbyButtonAction::ForfeitMatch => Color::srgba(0.55, 0.18, 0.18, 0.95),
                     LobbyButtonAction::CloseModal => Color::srgba(0.20, 0.40, 0.65, 0.95),
                     LobbyButtonAction::ToggleModal => Color::srgba(0.20, 0.35, 0.50, 0.95),
+                    LobbyButtonAction::ToggleFullscreen => Color::srgba(0.18, 0.42, 0.55, 0.95),
                 };
             }
             Interaction::None => {
@@ -77,6 +84,7 @@ pub fn handle_lobby_button_interactions(
                     LobbyButtonAction::ForfeitMatch => Color::srgba(0.40, 0.12, 0.12, 0.95),
                     LobbyButtonAction::CloseModal => Color::srgba(0.12, 0.28, 0.45, 0.95),
                     LobbyButtonAction::ToggleModal => Color::srgba(0.12, 0.22, 0.32, 0.95),
+                    LobbyButtonAction::ToggleFullscreen => Color::srgba(0.10, 0.25, 0.38, 0.95),
                 };
             }
         }
@@ -268,6 +276,35 @@ pub fn spawn_game_menu_modal(parent: &mut ChildBuilder) {
                                     ..default()
                                 },
                                 TextColor(Color::WHITE),
+                                FocusPolicy::Pass,
+                            ));
+                        });
+
+                    // Toggle Fullscreen Button
+                    actions
+                        .spawn((
+                            Button,
+                            Node {
+                                width: Val::Percent(100.0),
+                                padding: UiRect::axes(Val::Px(16.0), Val::Px(12.0)),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                border: UiRect::all(Val::Px(1.5)),
+                                ..default()
+                            },
+                            BorderRadius::all(Val::Px(6.0)),
+                            BackgroundColor(Color::srgba(0.10, 0.25, 0.38, 0.95)),
+                            BorderColor(Color::srgb(0.25, 0.65, 0.85)),
+                            LobbyButtonAction::ToggleFullscreen,
+                        ))
+                        .with_children(|btn| {
+                            btn.spawn((
+                                Text::new("⛶ TOGGLE FULLSCREEN"),
+                                TextFont {
+                                    font_size: 14.0,
+                                    ..default()
+                                },
+                                TextColor(Color::srgb(0.85, 0.95, 1.0)),
                                 FocusPolicy::Pass,
                             ));
                         });

@@ -2,8 +2,15 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Mini-RTS">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#070a0e">
     <title>Mini-RTS // Tactical Command (Rust & Bevy 0.15)</title>
+    <link data-trunk rel="copy-file" href="manifest.json" />
+    <link rel="manifest" href="manifest.json">
     <link data-trunk rel="rust" href="crates/client/Cargo.toml" data-bin="client" data-wasm-opt="0" />
     <style>
         :root {
@@ -28,9 +35,19 @@
         }
 
         html, body {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
             width: 100%;
             height: 100%;
+            height: -webkit-fill-available;
+            height: 100dvh;
             overflow: hidden;
+            overscroll-behavior: none;
+            -webkit-overflow-scrolling: auto;
+            touch-action: none;
             background-color: var(--bg-dark);
             display: flex;
             justify-content: center;
@@ -40,11 +57,13 @@
         }
 
         #bevy-canvas {
-            position: absolute;
+            position: fixed;
             top: 0;
             left: 0;
-            width: 100vw !important;
-            height: 100vh !important;
+            width: 100%;
+            height: 100%;
+            width: 100dvw;
+            height: 100dvh;
             display: block;
             outline: none;
             touch-action: none;
@@ -54,11 +73,13 @@
 
         /* ── Landing Page Portal Overlay ── */
         #portal-overlay {
-            position: absolute;
+            position: fixed;
             top: 0;
             left: 0;
-            width: 100vw;
-            height: 100vh;
+            width: 100%;
+            height: 100%;
+            width: 100dvw;
+            height: 100dvh;
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -67,7 +88,7 @@
             background: radial-gradient(circle at center, rgba(15, 23, 42, 0.92) 0%, rgba(7, 10, 14, 0.98) 100%);
             backdrop-filter: blur(12px);
             transition: opacity 0.45s ease, transform 0.45s ease;
-            padding: 24px;
+            padding: 16px;
         }
 
         #portal-overlay.hidden {
@@ -80,8 +101,11 @@
         .portal-card {
             width: 100%;
             max-width: 720px;
-            max-height: 94vh;
+            max-height: 96dvh;
             overflow-y: auto;
+            overscroll-behavior: contain;
+            -webkit-overflow-scrolling: touch;
+            touch-action: pan-y;
             scrollbar-width: thin;
             scrollbar-color: rgba(56, 189, 248, 0.3) rgba(15, 23, 42, 0.4);
             background: var(--panel-bg);
@@ -559,14 +583,19 @@
             position: fixed;
             top: 0;
             left: 0;
-            width: 100vw;
-            height: 100vh;
+            width: 100%;
+            height: 100%;
+            width: 100dvw;
+            height: 100dvh;
             z-index: 100;
             background: radial-gradient(circle at center, rgba(17, 24, 39, 0.98) 0%, rgba(3, 7, 18, 1.0) 100%);
             align-items: center;
             justify-content: center;
-            padding: 20px;
+            padding: 16px;
             overflow-y: auto;
+            overscroll-behavior: contain;
+            -webkit-overflow-scrolling: touch;
+            touch-action: pan-y;
         }
 
         .mobile-card {
@@ -700,7 +729,14 @@
             <!-- VIEW 1: Main Landing Dashboard -->
             <div id="portal-view-main" class="portal-view">
                 <div class="portal-header">
-                    <div class="portal-title">⚡ MINI-RTS // TACTICAL COMMAND</div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; position: relative;">
+                        <div style="flex: 1; text-align: center;">
+                            <div class="portal-title">⚡ MINI-RTS // TACTICAL COMMAND</div>
+                        </div>
+                        <button id="btn-portal-fullscreen" title="Toggle Fullscreen" style="position: absolute; right: 0; top: 0; background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(56, 189, 248, 0.45); color: #38bdf8; border-radius: 6px; padding: 5px 11px; font-size: 0.78rem; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: all 0.2s ease;">
+                            <span>⛶</span> <span id="portal-fs-text">Fullscreen</span>
+                        </button>
+                    </div>
                     <div class="portal-subtitle">Real-Time Strategy in Browser (Rust & Bevy 0.15 Wasm) • Desktop & Mobile Touch</div>
                 </div>
 
@@ -745,16 +781,16 @@
                     <div class="updates-header">
                         <div class="updates-title">
                             <span class="updates-badge">LATEST UPDATE</span>
-                            <span class="updates-version">v0.5.1</span>
+                            <span class="updates-version">v0.5.2</span>
                         </div>
-                        <div class="updates-date">September 13, 2026</div>
+                        <div class="updates-date">September 14, 2026</div>
                     </div>
                     <ul class="updates-list">
+                        <li><strong>📱 Dynamic Mobile Viewport & Pixel-Perfect Touch Coordinates:</strong> Upgraded rendering viewport to dynamic viewport height (<code>100dvh</code>) with active subpixel canvas synchronization. Taps on units and HUD buttons now align with 100% precision even when mobile browser search bars are visible.</li>
+                        <li><strong>⛶ Automatic & Interactive Fullscreen:</strong> Launching a match automatically triggers fullscreen on supported mobile and desktop browsers. Added <code>[⛶ Fullscreen]</code> button on the lobby header and in the in-game Game Menu.</li>
+                        <li><strong>🍎 iOS "Add to Home Screen" PWA Mode:</strong> Added Web App Manifest and standalone tags. iPhone and iPad players can add Mini-RTS to Home Screen for native borderless fullscreen without browser address bars.</li>
                         <li><strong>🎯 Screen-Area Double-Tap Army Selection:</strong> Double-tap any combat unit (or open ground) to instantly select all friendly combat units visible on screen while excluding workers. Double-tap a worker to quickly select all on-screen workers. Off-screen units remain unaffected.</li>
-                        <li><strong>🏭 Mobile Unit Production Drawer:</strong> Tapping your Base HQ or Barracks opens a clean on-screen unit drawer to queue Workers, Ranged Fighters, and Melee Fighters without obscuring the action.</li>
-                        <li><strong>🏗️ Mobile Build Menu & Placement:</strong> Tap the docked [🏗️ BUILD] button to choose Barracks, Supply Depots, or Gun Turrets with visual placement preview and drag confirmation.</li>
-                        <li><strong>⛏️ Smart Worker Auto-Mining:</strong> Workers in proximity to mineral deposits automatically locate and harvest resources without requiring manual micro orders.</li>
-                        <li><strong>✕ Quick Deselect & Clean Mobile Chrome:</strong> Dedicated [✕] button to instantly clear selections or cancel placement, keeping touch gameplay fluid and uncluttered.</li>
+                        <li><strong>🏭 Mobile Production Drawer & Docked Build Menu:</strong> Tapping your Base HQ or Barracks opens a clean on-screen unit drawer, while the docked [🏗️ BUILD] button provides one-touch access to structure placement.</li>
                         <li><strong>🖥️ Zero Desktop Regression:</strong> Desktop mouse and keyboard controls (WASD/edge pan, wheel zoom, marquee drag box, right-click context orders, and hotkeys) remain completely untouched and isolated.</li>
                     </ul>
                 </div>
@@ -767,8 +803,8 @@
                         <span><strong>Hotkeys:</strong> <span class="kbd">B</span> Build | <span class="kbd">V</span> Worker | <span class="kbd">R</span>/<span class="kbd">F</span> Units | <span class="kbd">S</span> Stop | <span class="kbd">H</span> Hold</span>
                     </div>
                     <div class="controls-row">
-                        <span><strong>Mobile Touch:</strong> Tap Select/Order | 1-Finger Drag Pan | 2-Finger Pinch Zoom | Double-Tap Visible Army Select (or Workers)</span>
-                        <span><strong>Mobile HUD:</strong> [🏗️ BUILD] Menu | [✕] Deselect | HQ & Barracks Production Drawer</span>
+                        <span><strong>Mobile Touch:</strong> Tap Select/Order | 1-Finger Drag Pan | 2-Finger Pinch Zoom | Double-Tap Visible Army Select</span>
+                        <span><strong>Mobile HUD:</strong> [🏗️ BUILD] Menu | [✕] Deselect | HQ & Barracks Production Drawer | [⛶ Fullscreen]</span>
                     </div>
                 </div>
 
@@ -875,6 +911,19 @@
                 </div>
             </div>
 
+            <!-- iOS Safari PWA / Add to Home Screen Guidance -->
+            <div id="ios-pwa-tip" style="display: none; background: rgba(56, 189, 248, 0.12); border: 1px solid rgba(56, 189, 248, 0.45); border-radius: 8px; padding: 12px 14px; font-size: 0.84rem; text-align: left; line-height: 1.45; color: #bae6fd;">
+                <strong>💡 Tip for iPhone / iPad:</strong><br>
+                For full screen without browser search bars, tap Safari's <strong>Share</strong> button (<span style="font-size: 1.05rem;">⬆</span>) and select <strong>"Add to Home Screen" (<span style="font-size: 1.05rem;">➕</span>)</strong>.
+            </div>
+
+            <div id="android-fs-box" style="display: none;">
+                <button class="copy-btn" id="btn-overlay-fullscreen" style="background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); width: 100%;">
+                    <span>⛶</span>
+                    <span>Enter Fullscreen</span>
+                </button>
+            </div>
+
             <div class="copy-box">
                 <button class="copy-btn" id="btn-dismiss-orientation">
                     <span>⚔️</span>
@@ -903,6 +952,135 @@
         const btnCopyLink = document.getElementById('btn-copy-link');
         const copyBtnText = document.getElementById('copy-btn-text');
         const urlDisplayText = document.getElementById('url-display-text');
+        const btnPortalFullscreen = document.getElementById('btn-portal-fullscreen');
+        const btnOverlayFullscreen = document.getElementById('btn-overlay-fullscreen');
+
+        // ─────────────────────────────────────────────────────────────
+        // Dynamic Viewport & Pixel-Perfect Canvas Sizing
+        // ─────────────────────────────────────────────────────────────
+        function syncCanvasSize() {
+            const canvasEl = document.getElementById('bevy-canvas');
+            if (!canvasEl) return;
+            const w = window.innerWidth;
+            const h = window.innerHeight;
+            canvasEl.style.width = w + 'px';
+            canvasEl.style.height = h + 'px';
+            canvasEl.style.position = 'fixed';
+            canvasEl.style.top = '0px';
+            canvasEl.style.left = '0px';
+        }
+        window.__rts_sync_canvas_size = syncCanvasSize;
+
+        window.addEventListener('resize', syncCanvasSize);
+        window.addEventListener('orientationchange', () => {
+            setTimeout(syncCanvasSize, 50);
+            setTimeout(syncCanvasSize, 200);
+            setTimeout(checkOrientation, 200);
+        });
+        if (window.visualViewport) {
+            window.visualViewport.addEventListener('resize', syncCanvasSize);
+            window.visualViewport.addEventListener('scroll', syncCanvasSize);
+        }
+        syncCanvasSize();
+
+        // Prevent mobile bounce / rubber-band scrolling outside modal cards
+        document.addEventListener('touchmove', function(e) {
+            let target = e.target;
+            while (target && target !== document.body) {
+                if (target.classList && (target.classList.contains('portal-card') || target.classList.contains('mobile-card') || target.classList.contains('updates-list'))) {
+                    return; // Allow modal content scrolling
+                }
+                target = target.parentElement;
+            }
+            e.preventDefault();
+        }, { passive: false });
+
+        window.addEventListener('scroll', () => {
+            if (window.scrollX !== 0 || window.scrollY !== 0) {
+                window.scrollTo(0, 0);
+            }
+        });
+
+        // ─────────────────────────────────────────────────────────────
+        // Fullscreen Management
+        // ─────────────────────────────────────────────────────────────
+        function isFullscreenSupported() {
+            return !!(
+                document.fullscreenEnabled ||
+                document.webkitFullscreenEnabled ||
+                document.mozFullScreenEnabled ||
+                document.msFullscreenEnabled
+            );
+        }
+
+        function isCurrentlyFullscreen() {
+            return !!(
+                document.fullscreenElement ||
+                document.webkitFullscreenElement ||
+                document.mozFullScreenElement ||
+                document.msFullscreenElement
+            );
+        }
+
+        async function requestAppFullscreen() {
+            if (!isFullscreenSupported()) return false;
+            try {
+                const el = document.documentElement;
+                if (el.requestFullscreen) {
+                    await el.requestFullscreen();
+                } else if (el.webkitRequestFullscreen) {
+                    await el.webkitRequestFullscreen();
+                } else if (el.msRequestFullscreen) {
+                    await el.msRequestFullscreen();
+                }
+                return true;
+            } catch (err) {
+                return false;
+            }
+        }
+
+        async function exitAppFullscreen() {
+            try {
+                if (document.exitFullscreen) {
+                    await document.exitFullscreen();
+                } else if (document.webkitExitFullscreen) {
+                    await document.webkitExitFullscreen();
+                } else if (document.msExitFullscreen) {
+                    await document.msExitFullscreen();
+                }
+            } catch (err) {}
+        }
+
+        function toggleAppFullscreen() {
+            if (isCurrentlyFullscreen()) {
+                exitAppFullscreen();
+            } else {
+                requestAppFullscreen();
+            }
+        }
+        window.__rts_toggle_fullscreen = toggleAppFullscreen;
+        window.__rts_is_fullscreen = isCurrentlyFullscreen;
+
+        function updateFullscreenUI() {
+            const isFs = isCurrentlyFullscreen();
+            const btnText = document.getElementById('portal-fs-text');
+            if (btnText) {
+                btnText.innerText = isFs ? 'Exit Fullscreen' : 'Fullscreen';
+            }
+            syncCanvasSize();
+        }
+        document.addEventListener('fullscreenchange', updateFullscreenUI);
+        document.addEventListener('webkitfullscreenchange', updateFullscreenUI);
+
+        if (btnPortalFullscreen) {
+            btnPortalFullscreen.addEventListener('click', toggleAppFullscreen);
+        }
+        if (btnOverlayFullscreen) {
+            btnOverlayFullscreen.addEventListener('click', () => {
+                requestAppFullscreen();
+                if (orientationOverlay) orientationOverlay.style.display = 'none';
+            });
+        }
 
         // ─────────────────────────────────────────────────────────────
         // Mobile & Touch Device Detection
@@ -970,6 +1148,20 @@
             });
         }
 
+        const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+            (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        const isStandalone = window.navigator.standalone === true ||
+            (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+
+        const iosTip = document.getElementById('ios-pwa-tip');
+        const androidFsBox = document.getElementById('android-fs-box');
+
+        if (isIOS && !isStandalone && iosTip) {
+            iosTip.style.display = 'block';
+        } else if (isFullscreenSupported() && !isCurrentlyFullscreen() && androidFsBox) {
+            androidFsBox.style.display = 'block';
+        }
+
         window.addEventListener('resize', checkOrientation);
         window.addEventListener('orientationchange', () => setTimeout(checkOrientation, 200));
         checkOrientation();
@@ -993,7 +1185,7 @@
                     </div>
                     <div class="controls-row">
                         <span><strong>Building:</strong> Tap [🏗️ BUILD] button, then tap battlefield to place</span>
-                        <span><strong>Minimap:</strong> Drag thumb over top-right radar to reposition camera</span>
+                        <span><strong>Fullscreen:</strong> Tap [⛶ Fullscreen] or Game Menu to toggle borderless play</span>
                     </div>
                 `;
             }
@@ -1055,19 +1247,23 @@
 
             function launchGame(mode) {
                 window.__rts_requested_mode = mode;
+                requestAppFullscreen();
                 if (portalOverlay) {
                     portalOverlay.classList.add('hidden');
                     if (canvas) {
                         canvas.focus();
                     }
                 }
+                syncCanvasSize();
             }
 
             if (btnPlay1v1) {
                 btnPlay1v1.addEventListener('click', () => {
+                    requestAppFullscreen();
                     showView('portal-view-queue');
                     startQueueTimer();
                     window.__rts_requested_mode = '1v1';
+                    syncCanvasSize();
                 });
             }
 
@@ -1185,6 +1381,7 @@
                 if (canvas && canvas.getAttribute('data-raw-handle')) {
                     if (loadingBadge) loadingBadge.style.display = 'none';
                     if (serverCloudBadge) serverCloudBadge.style.display = 'inline';
+                    syncCanvasSize();
                     observer.disconnect();
                 }
             });

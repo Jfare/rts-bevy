@@ -1,0 +1,10 @@
+{
+  "name": "Mini-RTS // Tactical Command",
+  "short_name": "Mini-RTS",
+  "description": "Real-Time Strategy in Browser (Rust & Bevy 0.15 Wasm)",
+  "start_url": "/",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#070a0e",
+  "theme_color": "#070a0e"
+}
