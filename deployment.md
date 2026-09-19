@@ -108,7 +108,6 @@ After the deployment workflow completes, visit:
 
 ---
 
-## 🛠️ 6. Useful Server Management Commands
 ## 🐳 6. Local Testing with Docker Desktop
 
 To test the container stack locally before deploying to UpCloud:
@@ -165,7 +164,7 @@ docker compose down
 
 ---
 
-## 🎯 Capacity & Limits Summary
+## 🎯 8. Capacity & Limits Summary
 - **Max 10 concurrent 1v1 PvP matches** (20 players).
 - **Max 10 concurrent Solo vs AI matches** (10 players).
 - **Memory Footprint**: Only ~250–300 MB out of 1024 MB RAM under full load.

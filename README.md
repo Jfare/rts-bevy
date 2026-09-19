@@ -7,15 +7,17 @@ A high-performance, competitive 2D Real-Time Strategy game written in **Rust** u
 ## 🎮 Features
 
 - **Authoritative Headless Server**: 30 Hz deterministic simulation loop with multi-room matchmaking (Solo vs AI and 1v1 PvP).
-- **WebAssembly & WebGL 2.0**: Zero-plugin browser deployment optimized for desktop Chrome, Firefox, and Edge.
-- **Competitively Mirrored 1v1 Map ("Iron Meridian")**: 180° point-symmetric terrain with cliff ridges, ramp choke bluffs, natural expansions, and contested mineral deposits.
+- **Cross-Platform WebAssembly & WebGL 2.0**: Instant browser play with full responsive support for both desktop browsers (Chrome, Firefox, Edge, Safari) and mobile touch devices (Android & iOS PWA).
+- **Competitively Mirrored 1v1 Map ("Iron Meridian")**: 180° point-symmetric terrain with cliff ridges, ramp choke bluffs, natural expansions, and contested gold deposits.
 - **A\* Pathfinding & Steering**: 64×64 navigation grid with 8-directional movement, obstacle avoidance, nearest-walkable fallback, and line-of-sight shortcutting.
-- **Dynamic Economy & Production**: Contextual Worker mineral mining with cyan pulsating lasers, supply mechanics, rally points, and structured production queues.
-- **Tech Tree & Abilities**:
+- **Dynamic Economy & Production**: Contextual Worker gold mining with pickaxe animations, gold nugget carrying, supply mechanics, rally points, and structured production queues.
+- **Combat Units & Defenses**:
+  - **Worker**: Resource harvesting, Base HQ gold deposits, and structural building.
   - **Ranged Fighter**: Automatic aggro scanning, rapid tracer fire, and steady kinetic firepower.
   - **Melee Fighter**: Close-range sword combat unit with dynamic slashing visual animations, contact sparks, and blade impact audio.
   - **Gun Turret**: Stationary automated perimeter defense requiring an active Barracks.
 - **Tactical Stances**: Stop (`S`), Hold Position (`H`), Patrol (`P`), and Attack-Move (`A`).
+- **Mobile First-Class Touch Suite**: 1-finger drag panning, 2-finger pinch zoom, double-tap army selection, docked build menu, and slide-out unit production drawer.
 - **Real-Time Soundscape & FX**: Procedural Web Audio synthesizer sound effects (gunfire, sword slashes, orders) and particle emitters for muzzle flashes, tracer rounds, and explosions.
 - **Tactical Multiplayer Features**: Real-time in-game chat (`Enter`), terrain/minimap pings (`Alt + Click`), custom 4-digit room codes, and post-match scoreboard analytics.
 
@@ -41,19 +43,36 @@ rts-bevy/
 
 ## 🕹️ Controls
 
+### Desktop (Mouse & Keyboard)
+
 | Action | Control / Hotkey |
 | :--- | :--- |
 | **Camera Pan** | `W`, `A`, `S`, `D` or Screen Edge Scrolling |
 | **Camera Zoom** | Mouse Scroll Wheel |
 | **Select Units** | Left-Click or Drag Box (Hold `Shift` to add to selection) |
-| **Issue Orders** | Right-Click (Move / Attack / Harvest minerals) |
-| **Stop / Hold Position**| `S` (Stop), `H` (Hold Position) |
+| **Issue Orders** | Right-Click (Move / Attack / Harvest Gold) |
+| **Stop / Hold Position** | `S` (Stop), `H` (Hold Position) |
 | **Patrol / Attack-Move** | `P` (Patrol), `A` (Attack-Move) |
-| **Build Menu** | `B` (Barracks: 150💎, Supply Depot: 100💎, Gun Turret: 125💎, Base HQ: 400💎) |
-| **Train Units** | `V` / `W` (Worker at HQ), `R` / `M` (Ranged Fighter at Barracks), `F` (Melee Fighter at Barracks) |
+| **Build Menu** | `B` (Barracks: 150🪙, Supply Depot: 100🪙, Gun Turret: 125🪙, Base HQ: 400🪙) |
+| **Train Units** | `V` / `W` (Worker: 50🪙), `R` / `M` (Ranged Fighter: 100🪙), `F` (Melee Fighter: 75🪙) |
 | **Tactical Ping** | `Alt + Left Click` on terrain or minimap |
 | **Chat** | `Enter` to open/send chat, `Esc` to cancel |
-| **Menu / Lobby** | `Tab` or `F1` |
+| **Game Menu / Lobby** | `Tab` or `F1` |
+
+### Mobile (Touchscreen & PWA)
+
+| Action | Touch Gesture / Button |
+| :--- | :--- |
+| **Camera Pan** | 1-Finger Drag across terrain |
+| **Camera Zoom** | 2-Finger Pinch In / Out |
+| **Select Unit / Building** | Tap on entity |
+| **Select On-Screen Army** | Double-tap any combat unit (or open ground) to select all visible combat units |
+| **Select On-Screen Workers** | Double-tap any worker to select all visible workers |
+| **Issue Orders** | Tap destination, enemy unit, or gold rock deposit |
+| **Deselect** | Tap circular `[✕]` Deselect button |
+| **Build Menu** | Tap docked `[🏗️ BUILD]` button |
+| **Train Units** | Tap Base HQ or Barracks to open unit production drawer |
+| **Toggle Fullscreen** | Tap `[⛶ Fullscreen]` button in header or Game Menu |
 
 ---
 
