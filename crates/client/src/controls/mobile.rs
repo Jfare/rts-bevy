@@ -3,7 +3,7 @@ use bevy::prelude::*;
 use bevy::render::camera::OrthographicProjection;
 use bevy::window::PrimaryWindow;
 use shared::components::{
-    AppState, Building, Faction, MatchOutcome, MeleeFighter, MoveTarget, NetEntity,
+    AppState, Building, Faction, Health, MatchOutcome, MeleeFighter, MoveTarget, NetEntity,
     Radius, ResourceNode, Selectable, Soldier, SoldierState, TacticalStance, Worker, WorkerState,
 };
 use shared::grid::{NavGrid, WorldGridConfig};
@@ -279,6 +279,7 @@ fn mobile_touch_interaction_system(
     camera_query: Query<(&Camera, &Transform, Option<&OrthographicProjection>), With<Camera2d>>,
     node_query: Query<(Entity, &Transform, &Radius, &ResourceNode, Option<&NetEntity>), With<ResourceNode>>,
     hostile_query: Query<(Entity, &Transform, &Radius, &Faction, Option<&NetEntity>), (Without<Camera>, Without<ResourceNode>)>,
+    building_query: Query<(Entity, &Building, &Health), With<Building>>,
     mut selectable_query: Query<(
         Entity,
         &Transform,
@@ -583,6 +584,119 @@ fn mobile_touch_interaction_system(
         }
 
         if let Some(bldg_entity) = tapped_friendly_bldg {
+            let (is_unconstructed, is_damaged) = building_query
+                .get(bldg_entity)
+                .map(|(_, b, hp)| (!b.is_constructed, b.is_constructed && hp.current < hp.max))
+                .unwrap_or((false, false));
+
+            if has_selected_workers && is_unconstructed {
+                let bldg_net_id = selectable_query
+                    .get(bldg_entity)
+                    .ok()
+                    .and_then(|(_, _, _, _, _, net_opt, ..)| net_opt.map(|n| n.net_id));
+                let bldg_pos = selectable_query
+                    .get(bldg_entity)
+                    .ok()
+                    .map(|(_, tf, ..)| tf.translation.truncate())
+                    .unwrap_or(tap_world_pos);
+
+                let mut worker_net_ids = Vec::new();
+                for (ent, _, _, fac, sel, net_opt, _, _, ref mut worker_opt, ..) in &mut selectable_query {
+                    if *fac == net_client.my_faction && sel.is_selected {
+                        if let Some(ref mut worker) = worker_opt {
+                            commands.entity(ent).remove::<MoveTarget>();
+                            worker.target_building = Some(bldg_entity);
+                            worker.target_node = None;
+                            worker.state = WorkerState::MovingToBuilding;
+                            worker.manual_override = false;
+                            if let Some(net) = net_opt {
+                                worker_net_ids.push(net.net_id);
+                            }
+                        }
+                    }
+                }
+
+                stats.record_action();
+                sound_events.send(SoundEffect::OrderIssued);
+
+                commands.spawn((
+                    CommandMarker {
+                        lifetime: 0.0,
+                        max_lifetime: 0.45,
+                        initial_radius: 22.0,
+                        color: Color::srgba(1.0, 0.75, 0.15, 0.95), // Amber construct marker
+                    },
+                    Transform::from_xyz(bldg_pos.x, bldg_pos.y, 1.0),
+                ));
+
+                if net_client.status != NetStatus::Disconnected && !worker_net_ids.is_empty() {
+                    if let Some(b_net) = bldg_net_id {
+                        net_client.send(&ClientMessage::RequestConstruct {
+                            worker_net_ids,
+                            building_net_id: b_net,
+                        });
+                    }
+                }
+
+                double_tap.last_entity = None;
+                double_tap.last_tap_time = 0.0;
+                return;
+            }
+
+            if has_selected_workers && is_damaged {
+                let bldg_net_id = selectable_query
+                    .get(bldg_entity)
+                    .ok()
+                    .and_then(|(_, _, _, _, _, net_opt, ..)| net_opt.map(|n| n.net_id));
+                let bldg_pos = selectable_query
+                    .get(bldg_entity)
+                    .ok()
+                    .map(|(_, tf, ..)| tf.translation.truncate())
+                    .unwrap_or(tap_world_pos);
+
+                let mut worker_net_ids = Vec::new();
+                for (ent, _, _, fac, sel, net_opt, _, _, ref mut worker_opt, ..) in &mut selectable_query {
+                    if *fac == net_client.my_faction && sel.is_selected {
+                        if let Some(ref mut worker) = worker_opt {
+                            commands.entity(ent).remove::<MoveTarget>();
+                            worker.target_building = Some(bldg_entity);
+                            worker.target_node = None;
+                            worker.state = WorkerState::MovingToRepair;
+                            worker.manual_override = false;
+                            if let Some(net) = net_opt {
+                                worker_net_ids.push(net.net_id);
+                            }
+                        }
+                    }
+                }
+
+                stats.record_action();
+                sound_events.send(SoundEffect::OrderIssued);
+
+                commands.spawn((
+                    CommandMarker {
+                        lifetime: 0.0,
+                        max_lifetime: 0.45,
+                        initial_radius: 22.0,
+                        color: Color::srgba(0.2, 0.95, 0.45, 0.95), // Emerald repair marker
+                    },
+                    Transform::from_xyz(bldg_pos.x, bldg_pos.y, 1.0),
+                ));
+
+                if net_client.status != NetStatus::Disconnected && !worker_net_ids.is_empty() {
+                    if let Some(b_net) = bldg_net_id {
+                        net_client.send(&ClientMessage::RequestRepair {
+                            worker_net_ids,
+                            building_net_id: b_net,
+                        });
+                    }
+                }
+
+                double_tap.last_entity = None;
+                double_tap.last_tap_time = 0.0;
+                return;
+            }
+
             for (entity, _, _, _, mut sel, ..) in &mut selectable_query {
                 sel.is_selected = entity == bldg_entity;
             }
@@ -692,7 +806,9 @@ fn mobile_touch_interaction_system(
                                 }
                                 commands.entity(ent).remove::<MoveTarget>();
                                 worker.target_node = Some(node_ent);
+                                worker.target_building = None;
                                 worker.state = WorkerState::MovingToResource;
+                                worker.manual_override = false;
                             }
                         }
                     }
@@ -758,6 +874,8 @@ fn mobile_touch_interaction_system(
                         if let Some(mut worker) = worker_opt {
                             worker.state = WorkerState::Idle;
                             worker.target_node = None;
+                            worker.target_building = None;
+                            worker.manual_override = true;
                         }
                         if let Some(mut soldier) = soldier_opt {
                             soldier.target = None;

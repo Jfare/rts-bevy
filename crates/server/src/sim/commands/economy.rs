@@ -5,7 +5,7 @@ use shared::protocol::{ServerMessage, UnitKind};
 
 use crate::net_server::{OutgoingNetEvent, ServerNetworkChannels};
 use crate::session::Matchmaker;
-use super::{get_player_and_room, NodeQuery, ProdQuery, UnitQuery};
+use super::{get_player_and_room, BuildingQuery, NodeQuery, ProdQuery, UnitQuery};
 
 pub fn handle_harvest(
     commands: &mut Commands,
@@ -27,6 +27,18 @@ pub fn handle_harvest(
         .map(|(e, _, _, _)| e);
 
     if let Some(node_e) = target_node {
+        let current_miners = unit_query
+            .iter()
+            .filter(|(_, _, net_entity, _, unit_room, _, _, worker_opt, ..)| {
+                unit_room.0 == player_room
+                    && !worker_net_ids.contains(&net_entity.net_id)
+                    && worker_opt.as_ref().map_or(false, |w| {
+                        w.target_node == Some(node_e) && w.state != WorkerState::Idle
+                    })
+            })
+            .count();
+        let available_slots = MAX_WORKERS_PER_ROCK.saturating_sub(current_miners);
+
         let mut valid_net_ids = Vec::new();
         for (e, _, net_entity, faction, unit_room, _, _, worker_opt, ..) in
             unit_query.iter_mut()
@@ -35,13 +47,17 @@ pub fn handle_harvest(
                 && *faction == player_faction
                 && unit_room.0 == player_room
             {
-                commands.entity(e).remove::<MoveTarget>();
-                if let Some(mut worker) = worker_opt {
-                    worker.target_node = Some(node_e);
-                    worker.state = WorkerState::MovingToResource;
-                    worker.harvest_timer = 0.0;
+                if valid_net_ids.len() < available_slots {
+                    commands.entity(e).remove::<MoveTarget>();
+                    if let Some(mut worker) = worker_opt {
+                        worker.target_node = Some(node_e);
+                        worker.target_building = None;
+                        worker.state = WorkerState::MovingToResource;
+                        worker.harvest_timer = 0.0;
+                        worker.manual_override = false;
+                    }
+                    valid_net_ids.push(net_entity.net_id);
                 }
-                valid_net_ids.push(net_entity.net_id);
             }
         }
 
@@ -51,6 +67,104 @@ pub fn handle_harvest(
                 msg: ServerMessage::WorkersOrderedHarvest {
                     worker_net_ids: valid_net_ids,
                     resource_net_id,
+                },
+            });
+        }
+    }
+}
+
+pub fn handle_construct(
+    commands: &mut Commands,
+    net_channels: &ServerNetworkChannels,
+    matchmaker: &Matchmaker,
+    unit_query: &mut UnitQuery,
+    building_query: &BuildingQuery,
+    peer_id: u64,
+    worker_net_ids: &[u32],
+    building_net_id: u32,
+) {
+    let (player_faction, player_room) = get_player_and_room(matchmaker, peer_id);
+    let peers = matchmaker.get_room_peers(player_room);
+    let target_building = building_query
+        .iter()
+        .find(|(_, net_entity, b_room, faction, b)| {
+            net_entity.net_id == building_net_id && b_room.0 == player_room && **faction == player_faction && !b.is_constructed
+        })
+        .map(|(e, ..)| e);
+
+    if let Some(b_ent) = target_building {
+        let mut valid_net_ids = Vec::new();
+        for (e, _, net_entity, faction, unit_room, _, _, worker_opt, ..) in unit_query.iter_mut() {
+            if worker_net_ids.contains(&net_entity.net_id)
+                && *faction == player_faction
+                && unit_room.0 == player_room
+            {
+                commands.entity(e).remove::<MoveTarget>();
+                if let Some(mut worker) = worker_opt {
+                    worker.target_building = Some(b_ent);
+                    worker.target_node = None;
+                    worker.state = WorkerState::MovingToBuilding;
+                    worker.manual_override = false;
+                }
+                valid_net_ids.push(net_entity.net_id);
+            }
+        }
+
+        if !peers.is_empty() && !valid_net_ids.is_empty() {
+            let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::BroadcastToPeers {
+                peer_ids: peers,
+                msg: ServerMessage::WorkersOrderedConstruct {
+                    worker_net_ids: valid_net_ids,
+                    building_net_id,
+                },
+            });
+        }
+    }
+}
+
+pub fn handle_repair(
+    commands: &mut Commands,
+    net_channels: &ServerNetworkChannels,
+    matchmaker: &Matchmaker,
+    unit_query: &mut UnitQuery,
+    building_query: &BuildingQuery,
+    peer_id: u64,
+    worker_net_ids: &[u32],
+    building_net_id: u32,
+) {
+    let (player_faction, player_room) = get_player_and_room(matchmaker, peer_id);
+    let peers = matchmaker.get_room_peers(player_room);
+    let target_building = building_query
+        .iter()
+        .find(|(_, net_entity, b_room, faction, b)| {
+            net_entity.net_id == building_net_id && b_room.0 == player_room && **faction == player_faction && b.is_constructed
+        })
+        .map(|(e, ..)| e);
+
+    if let Some(b_ent) = target_building {
+        let mut valid_net_ids = Vec::new();
+        for (e, _, net_entity, faction, unit_room, _, _, worker_opt, ..) in unit_query.iter_mut() {
+            if worker_net_ids.contains(&net_entity.net_id)
+                && *faction == player_faction
+                && unit_room.0 == player_room
+            {
+                commands.entity(e).remove::<MoveTarget>();
+                if let Some(mut worker) = worker_opt {
+                    worker.target_building = Some(b_ent);
+                    worker.target_node = None;
+                    worker.state = WorkerState::MovingToRepair;
+                    worker.manual_override = false;
+                }
+                valid_net_ids.push(net_entity.net_id);
+            }
+        }
+
+        if !peers.is_empty() && !valid_net_ids.is_empty() {
+            let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::BroadcastToPeers {
+                peer_ids: peers,
+                msg: ServerMessage::WorkersOrderedRepair {
+                    worker_net_ids: valid_net_ids,
+                    building_net_id,
                 },
             });
         }

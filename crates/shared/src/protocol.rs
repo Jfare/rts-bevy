@@ -188,6 +188,14 @@ pub enum ClientMessage {
         worker_net_ids: Vec<u32>,
         resource_net_id: u32,
     },
+    RequestConstruct {
+        worker_net_ids: Vec<u32>,
+        building_net_id: u32,
+    },
+    RequestRepair {
+        worker_net_ids: Vec<u32>,
+        building_net_id: u32,
+    },
     RequestStop {
         unit_net_ids: Vec<u32>,
     },
@@ -322,6 +330,17 @@ pub enum ServerMessage {
     WorkersOrderedHarvest {
         worker_net_ids: Vec<u32>,
         resource_net_id: u32,
+    },
+    WorkersOrderedConstruct {
+        worker_net_ids: Vec<u32>,
+        building_net_id: u32,
+    },
+    WorkersOrderedRepair {
+        worker_net_ids: Vec<u32>,
+        building_net_id: u32,
+    },
+    BuildingConstructed {
+        building_net_id: u32,
     },
     UnitsOrderedStop {
         unit_net_ids: Vec<u32>,

@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use shared::components::{
     Building, Faction, GunTurret, Health, MeleeFighter, ProductionBuilding, ResourceNode, Selectable,
-    Soldier, TacticalStance, Unit, Worker,
+    Soldier, TacticalStance, Unit, Worker, WorkerState,
 };
 use shared::economy::PlayerEconomy;
 
@@ -77,9 +77,10 @@ pub fn update_selection_info_text(
         Option<&Soldier>,
         Option<&MeleeFighter>,
         Option<&TacticalStance>,
+        &Transform,
     )>,
     building_query: Query<(&Building, &Faction, &Health, &Selectable, Option<&ProductionBuilding>, Option<&GunTurret>)>,
-    resource_query: Query<(&ResourceNode, &Selectable)>,
+    resource_query: Query<(Entity, &Transform, &ResourceNode, &Selectable)>,
     mut title_query: Query<&mut Text, (With<SelectionTitleText>, Without<SelectionDetailsText>, Without<ProductionQueueText>)>,
     mut details_query: Query<&mut Text, (With<SelectionDetailsText>, Without<SelectionTitleText>, Without<ProductionQueueText>)>,
     mut queue_query: Query<&mut Text, (With<ProductionQueueText>, Without<SelectionTitleText>, Without<SelectionDetailsText>)>,
@@ -97,7 +98,7 @@ pub fn update_selection_info_text(
     let mut selected_building = None;
     let mut selected_resource = None;
 
-    for (unit, faction, health, selectable, worker_opt, soldier_opt, melee_opt, stance_opt) in &unit_query {
+    for (unit, faction, health, selectable, worker_opt, soldier_opt, melee_opt, stance_opt, _) in &unit_query {
         if selectable.is_selected {
             selected_units.push((unit, faction, health, worker_opt, soldier_opt, melee_opt, stance_opt));
         }
@@ -110,9 +111,9 @@ pub fn update_selection_info_text(
         }
     }
 
-    for (resource, selectable) in &resource_query {
+    for (node_e, node_tf, resource, selectable) in &resource_query {
         if selectable.is_selected {
-            selected_resource = Some(resource);
+            selected_resource = Some((node_e, node_tf.translation.truncate(), resource));
             break;
         }
     }
@@ -146,7 +147,7 @@ pub fn update_selection_info_text(
             details_str = "Automated Twin-Cannon Defense | 360° Arc (18 DMG, 220 Range)".to_string();
         } else if let Some(prod) = prod_opt {
             let train_prompt = if building.name.contains("Base HQ") {
-                if is_mobile { "Train Worker (50 Gold, 1 Supply)" } else { "Press [V]/[W] to Train Worker (50 Gold, 1 Supply)" }
+                if is_mobile { "Train Worker (50 Gold, 1 Supply)" } else { "Press [V] to Train Worker (50 Gold, 1 Supply)" }
             } else if building.name.contains("Barracks") {
                 if is_mobile { "Train Ranged (100 Gold) / Melee (75 Gold)" } else { "Press [R] Ranged (100 Gold) | [F] Melee (75 Gold)" }
             } else if is_mobile {
@@ -163,9 +164,17 @@ pub fn update_selection_info_text(
                 queue_str = format!("Queue: {} ({:.0}%) | Queued: {}", queued_names.join(", "), progress, prod.queue.len());
             }
         }
-    } else if let Some(resource) = selected_resource {
+    } else if let Some((node_e, node_pos, resource)) = selected_resource {
         title_str = "Gold Rock Deposit".to_string();
-        details_str = format!("Remaining Gold: {} / {}", resource.remaining_minerals, resource.max_minerals);
+        let miner_count = unit_query.iter().filter(|(_, _, _, _, worker_opt, _, _, _, tf)| {
+            worker_opt.as_ref().map_or(false, |w| {
+                w.state != WorkerState::Idle && (
+                    w.target_node == Some(node_e)
+                    || (w.state == WorkerState::Mining && tf.translation.truncate().distance(node_pos) <= 80.0)
+                )
+            })
+        }).count();
+        details_str = format!("Remaining Gold: {} / {} | Miners: {}/{}", resource.remaining_minerals, resource.max_minerals, miner_count, shared::components::MAX_WORKERS_PER_ROCK);
     } else if !selected_units.is_empty() {
         if selected_units.len() == 1 {
             let (unit, _, health, worker_opt, soldier_opt, _, stance_opt) = selected_units[0];
@@ -254,6 +263,7 @@ pub fn update_responsive_hud_layout_system(
     mut min_font_query: Query<&mut TextFont, (With<super::MineralsText>, Without<super::SupplyText>, Without<super::NetworkStatusText>)>,
     mut sup_font_query: Query<&mut TextFont, (With<super::SupplyText>, Without<super::MineralsText>, Without<super::NetworkStatusText>)>,
     mut net_font_query: Query<&mut TextFont, (With<super::NetworkStatusText>, Without<super::MineralsText>, Without<super::SupplyText>)>,
+    mut desktop_quick_train_query: Query<&mut Node, (With<super::quick_train_hud::DesktopQuickTrainContainer>, Without<super::layout::RootUiContainer>, Without<super::top_bar::TopBarContainer>, Without<super::layout::MinimapFrame>, Without<super::command_card::CommandCardRoot>, Without<super::bottom_bar::SelectionCardPanel>, Without<super::top_bar::TopBarTitleText>, Without<super::top_bar::TopBarResourceGroup>, Without<super::top_bar::TopBarMenuButton>, Without<super::ApmText>)>,
 ) {
     let win_mobile = window_query.get_single().map_or(false, |w| w.width() < 960.0 || w.height() < 550.0);
     let is_mobile = control_scheme.map_or(false, |s| *s == crate::controls::ControlScheme::MobileTouch)
@@ -261,6 +271,9 @@ pub fn update_responsive_hud_layout_system(
         || win_mobile;
 
     if is_mobile {
+        for mut node in &mut desktop_quick_train_query {
+            node.display = Display::None;
+        }
         for mut node in &mut root_query {
             node.padding = UiRect::all(Val::Px(6.0));
         }
@@ -352,6 +365,9 @@ pub fn update_responsive_hud_layout_system(
             node.max_width = Val::Px(460.0);
             node.padding = UiRect::all(Val::Px(14.0));
             node.margin = UiRect::default();
+        }
+        for mut node in &mut desktop_quick_train_query {
+            node.display = Display::Flex;
         }
     }
 }
@@ -484,5 +500,53 @@ mod tests {
         ));
         app.update();
         assert_eq!(app.world().get::<Node>(card_root).unwrap().display, Display::None);
+    }
+
+    #[test]
+    fn test_selected_rock_displays_miners_saturation_in_hud() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(NetClient::default());
+
+        let mut window = Window::default();
+        window.resolution.set(1280.0, 720.0);
+        app.world_mut().spawn(window);
+
+        let title_ent = app.world_mut().spawn((SelectionTitleText, Text::new(""))).id();
+        let details_ent = app.world_mut().spawn((SelectionDetailsText, Text::new(""))).id();
+        let _queue_ent = app.world_mut().spawn((ProductionQueueText, Text::new(""))).id();
+        let _panel_ent = app.world_mut().spawn((crate::ui::bottom_bar::SelectionCardPanel, Node::default())).id();
+
+        // Spawn a selected ResourceNode
+        let rock_ent = app.world_mut().spawn((
+            ResourceNode { remaining_minerals: 1800, max_minerals: 2000 },
+            Transform::from_xyz(0.0, -1200.0, 1.0),
+            Selectable { is_selected: true },
+        )).id();
+
+        // Spawn 3 workers mining this rock
+        for i in 0..3 {
+            app.world_mut().spawn((
+                Unit { name: "Worker".to_string(), supply_cost: 1 },
+                Faction::Player1,
+                Health::new(60.0),
+                Selectable::default(),
+                Worker {
+                    state: WorkerState::Mining,
+                    target_node: Some(rock_ent),
+                    ..default()
+                },
+                Transform::from_xyz(i as f32 * 10.0, -1200.0, 2.0),
+            ));
+        }
+
+        app.add_systems(Update, update_selection_info_text);
+        app.update();
+
+        let title = app.world().get::<Text>(title_ent).unwrap().0.clone();
+        let details = app.world().get::<Text>(details_ent).unwrap().0.clone();
+
+        assert_eq!(title, "Gold Rock Deposit");
+        assert_eq!(details, "Remaining Gold: 1800 / 2000 | Miners: 3/5");
     }
 }

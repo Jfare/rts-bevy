@@ -6,6 +6,7 @@ use shared::economy::PlayerEconomy;
 use shared::grid::NavGrid;
 use shared::protocol::{ClientMessage, UnitKind};
 use crate::audio_sfx::SoundEffect;
+use crate::chat::ChatLog;
 use crate::net::{NetClient, NetStatus};
 use crate::selection::screen_to_world_2d;
 use crate::stats::MatchStats;
@@ -17,7 +18,6 @@ impl Plugin for ProductionPlugin {
         app.add_systems(
             Update,
             (
-                building_construction_system,
                 production_queue_system,
                 handle_production_hotkeys,
                 handle_rally_point_order,
@@ -25,45 +25,6 @@ impl Plugin for ProductionPlugin {
             )
                 .run_if(in_state(AppState::InGame)),
         );
-    }
-}
-
-/// Ticks construction progress for uncompleted buildings and activates them upon completion
-fn building_construction_system(
-    time: Res<Time>,
-    outcome_opt: Option<Res<MatchOutcome>>,
-    mut economy: ResMut<PlayerEconomy>,
-    mut building_query: Query<(
-        Entity,
-        &mut Building,
-        &mut Health,
-        &Faction,
-        Option<&SupplyDepot>,
-    )>,
-) {
-    if outcome_opt.as_deref() == Some(&MatchOutcome::Victory) || outcome_opt.as_deref() == Some(&MatchOutcome::Defeat) {
-        return;
-    }
-
-    let dt = time.delta_secs();
-
-    for (_entity, mut building, mut health, faction, supply_depot_opt) in &mut building_query {
-        if !building.is_constructed {
-            building.build_timer += dt;
-            health.current = (health.max * building.progress()).max(15.0);
-
-            if building.build_timer >= building.build_duration {
-                building.is_constructed = true;
-                building.build_timer = building.build_duration;
-                health.current = health.max;
-
-                // If this is a Supply Depot, grant +8 supply capacity to faction
-                if supply_depot_opt.is_some() {
-                    economy.add_max_supply(*faction, 8);
-                    info!("⚡ [Economy] Supply Depot constructed! Max supply +8 for {:?}", faction);
-                }
-            }
-        }
     }
 }
 
@@ -200,11 +161,13 @@ fn production_queue_system(
 fn handle_production_hotkeys(
     keyboard: Res<ButtonInput<KeyCode>>,
     net_client: Res<NetClient>,
+    chat_log_opt: Option<Res<ChatLog>>,
     outcome_opt: Option<Res<MatchOutcome>>,
     mut economy: ResMut<PlayerEconomy>,
     mut stats: ResMut<MatchStats>,
     mut sound_events: EventWriter<SoundEffect>,
     mut prod_query: Query<(
+        Entity,
         &mut ProductionBuilding,
         &Building,
         &Faction,
@@ -218,57 +181,85 @@ fn handle_production_hotkeys(
         return;
     }
 
+    if chat_log_opt.as_ref().map(|c| c.is_input_active).unwrap_or(false) {
+        return;
+    }
+
     let my_faction = net_client.my_faction;
 
-    // Key 'V' or 'W' for Worker at Base HQ
-    if keyboard.just_pressed(KeyCode::KeyV) || keyboard.just_pressed(KeyCode::KeyW) {
-        for (mut prod, building, faction, selectable, net_entity_opt, base_hq, _) in &mut prod_query {
-            if *faction == my_faction && selectable.is_selected && building.is_constructed && base_hq.is_some()
-                && prod.queue.len() < prod.max_queue_size {
-                    if !economy.has_minerals(*faction, 50) {
-                        info!("⚠️ [Economy] Not enough minerals for Worker (Requires 50 💎)!");
-                        continue;
+    // Key 'V' for Worker at Base HQ (global hotkey: works whether Base HQ is selected or not)
+    if keyboard.just_pressed(KeyCode::KeyV) {
+        let mut target_hq: Option<Entity> = None;
+        let mut min_queue_len = usize::MAX;
+
+        for (entity, prod, building, faction, selectable, _, base_hq, _) in prod_query.iter() {
+            if *faction == my_faction && base_hq.is_some() && building.is_constructed {
+                if selectable.is_selected && prod.queue.len() < prod.max_queue_size {
+                    target_hq = Some(entity);
+                    break;
+                } else if target_hq.is_none() && prod.queue.len() < prod.max_queue_size {
+                    if prod.queue.len() < min_queue_len {
+                        min_queue_len = prod.queue.len();
+                        target_hq = Some(entity);
                     }
-
-                    if !economy.has_supply(*faction, 1) {
-                        sound_events.send(SoundEffect::SupplyBlocked);
-                        info!("⚠️ [Economy] Not enough supply for Worker (Requires 1 ⚡) - Build a Supply Depot [P]!");
-                        continue;
-                    }
-
-                    economy.spend_minerals(*faction, 50);
-                    economy.register_supply(*faction, 1);
-                    if *faction == Faction::Player1 {
-                        stats.minerals_spent += 50;
-                        stats.units_trained += 1;
-                    }
-                    stats.record_action();
-                    sound_events.send(SoundEffect::UnitTrained);
-
-                    prod.queue.push(QueuedUnit {
-                        name: "Worker".to_string(),
-                        mineral_cost: 50,
-                        supply_cost: 1,
-                        build_duration: 3.0,
-                    });
-
-                    if let Some(net) = net_entity_opt {
-                        if net_client.status != NetStatus::Disconnected {
-                            net_client.send(&ClientMessage::RequestTrainUnit {
-                                building_net_id: net.net_id,
-                                unit_kind: UnitKind::Worker,
-                            });
-                        }
-                    }
-
-                    info!("⛏️ [Queue] Worker queued! Queue size: {}", prod.queue.len());
                 }
+            }
+        }
+
+        if let Some(target_entity) = target_hq {
+            if !economy.has_minerals(my_faction, 50) {
+                info!("⚠️ [Economy] Not enough minerals for Worker (Requires 50 🪙)!");
+            } else if !economy.has_supply(my_faction, 1) {
+                sound_events.send(SoundEffect::SupplyBlocked);
+                info!("⚠️ [Economy] Not enough supply for Worker (Requires 1 ⚡) - Build a Supply Depot [P]!");
+            } else {
+                economy.spend_minerals(my_faction, 50);
+                economy.register_supply(my_faction, 1);
+                if my_faction == Faction::Player1 {
+                    stats.minerals_spent += 50;
+                    stats.units_trained += 1;
+                }
+                stats.record_action();
+                sound_events.send(SoundEffect::UnitTrained);
+
+                for (entity, mut prod, _, _, _, net_entity_opt, _, _) in prod_query.iter_mut() {
+                    if entity == target_entity {
+                        prod.queue.push(QueuedUnit {
+                            name: "Worker".to_string(),
+                            mineral_cost: 50,
+                            supply_cost: 1,
+                            build_duration: 3.0,
+                        });
+
+                        if let Some(net) = net_entity_opt {
+                            if net_client.status != NetStatus::Disconnected {
+                                net_client.send(&ClientMessage::RequestTrainUnit {
+                                    building_net_id: net.net_id,
+                                    unit_kind: UnitKind::Worker,
+                                });
+                            }
+                        }
+
+                        info!("⛏️ [Queue] Worker queued! Queue size: {}", prod.queue.len());
+                        break;
+                    }
+                }
+            }
+        } else {
+            let has_hq = prod_query
+                .iter()
+                .any(|(_, _, b, f, _, _, hq, _)| *f == my_faction && hq.is_some() && b.is_constructed);
+            if has_hq {
+                info!("⚠️ [Queue] Base HQ production queue is full!");
+            } else {
+                info!("⚠️ [Queue] No constructed Base HQ available!");
+            }
         }
     }
 
     // Key 'R' for Ranged Fighter at Barracks
     if keyboard.just_pressed(KeyCode::KeyR) {
-        for (mut prod, building, faction, selectable, net_entity_opt, _, barracks) in &mut prod_query {
+        for (_, mut prod, building, faction, selectable, net_entity_opt, _, barracks) in &mut prod_query {
             if *faction == my_faction && selectable.is_selected && building.is_constructed && barracks.is_some() {
                 if prod.queue.len() >= prod.max_queue_size {
                     info!("⚠️ [Queue] Production queue is full!");
@@ -318,7 +309,7 @@ fn handle_production_hotkeys(
 
     // Key 'F' for Melee Fighter at Barracks
     if keyboard.just_pressed(KeyCode::KeyF) {
-        for (mut prod, building, faction, selectable, net_entity_opt, _, barracks) in &mut prod_query {
+        for (_, mut prod, building, faction, selectable, net_entity_opt, _, barracks) in &mut prod_query {
             if *faction == my_faction && selectable.is_selected && building.is_constructed && barracks.is_some() {
                 if prod.queue.len() >= prod.max_queue_size {
                     info!("⚠️ [Queue] Production queue is full!");
@@ -488,5 +479,146 @@ fn draw_production_and_construction_visuals(
             gizmos.circle_2d(prod.rally_point, 8.0, rally_col);
             gizmos.circle_2d(prod.rally_point, 3.0, Color::srgb(1.0, 1.0, 1.0));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::ecs::system::RunSystemOnce;
+
+    #[test]
+    fn test_global_hotkey_v_trains_worker_without_selection() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        let mut net_client = NetClient::default();
+        net_client.my_faction = Faction::Player1;
+        app.insert_resource(net_client);
+
+        let mut economy = PlayerEconomy::default();
+        economy.set_minerals(Faction::Player1, 100);
+        economy.set_supply(Faction::Player1, 0, 10);
+        app.insert_resource(economy);
+        app.init_resource::<MatchStats>();
+        app.add_event::<SoundEffect>();
+
+        // ButtonInput with KeyCode::KeyV just pressed
+        let mut keyboard = ButtonInput::<KeyCode>::default();
+        keyboard.press(KeyCode::KeyV);
+        app.insert_resource(keyboard);
+
+        // Spawn Base HQ (unselected!)
+        let hq_entity = app
+            .world_mut()
+            .spawn((
+                Faction::Player1,
+                Selectable { is_selected: false },
+                Building::new("Base HQ", Vec2::new(110.0, 110.0), 5.0, true),
+                BaseHQ::default(),
+                ProductionBuilding::default(),
+            ))
+            .id();
+
+        app.world_mut()
+            .run_system_once(handle_production_hotkeys)
+            .unwrap();
+
+        let eco = app.world().resource::<PlayerEconomy>();
+        assert_eq!(eco.get_minerals(Faction::Player1), 50);
+        assert_eq!(eco.get(Faction::Player1).current_supply, 1);
+
+        let prod = app.world().get::<ProductionBuilding>(hq_entity).unwrap();
+        assert_eq!(prod.queue.len(), 1, "Global 'V' should queue worker even without selecting Base HQ");
+        assert_eq!(prod.queue[0].name, "Worker");
+    }
+
+    #[test]
+    fn test_hotkey_w_does_not_train_worker() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        let mut net_client = NetClient::default();
+        net_client.my_faction = Faction::Player1;
+        app.insert_resource(net_client);
+
+        let mut economy = PlayerEconomy::default();
+        economy.set_minerals(Faction::Player1, 100);
+        economy.set_supply(Faction::Player1, 0, 10);
+        app.insert_resource(economy);
+        app.init_resource::<MatchStats>();
+        app.add_event::<SoundEffect>();
+
+        // ButtonInput with KeyCode::KeyW pressed (WASD camera pan)
+        let mut keyboard = ButtonInput::<KeyCode>::default();
+        keyboard.press(KeyCode::KeyW);
+        app.insert_resource(keyboard);
+
+        let hq_entity = app
+            .world_mut()
+            .spawn((
+                Faction::Player1,
+                Selectable { is_selected: true },
+                Building::new("Base HQ", Vec2::new(110.0, 110.0), 5.0, true),
+                BaseHQ::default(),
+                ProductionBuilding::default(),
+            ))
+            .id();
+
+        app.world_mut()
+            .run_system_once(handle_production_hotkeys)
+            .unwrap();
+
+        let eco = app.world().resource::<PlayerEconomy>();
+        assert_eq!(eco.get_minerals(Faction::Player1), 100, "'W' must not spend gold");
+        let prod = app.world().get::<ProductionBuilding>(hq_entity).unwrap();
+        assert_eq!(prod.queue.len(), 0, "'W' must NOT queue a worker (reserved for WASD pan)");
+    }
+
+    #[test]
+    fn test_hotkey_v_ignored_while_typing_in_chat() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        let mut net_client = NetClient::default();
+        net_client.my_faction = Faction::Player1;
+        app.insert_resource(net_client);
+
+        let mut economy = PlayerEconomy::default();
+        economy.set_minerals(Faction::Player1, 100);
+        economy.set_supply(Faction::Player1, 0, 10);
+        app.insert_resource(economy);
+        app.init_resource::<MatchStats>();
+        app.add_event::<SoundEffect>();
+
+        // Chat input is active!
+        app.insert_resource(ChatLog {
+            entries: Vec::new(),
+            is_input_active: true,
+            current_input: "v".to_string(),
+            cursor_timer: Timer::from_seconds(0.5, TimerMode::Repeating),
+            show_cursor: true,
+        });
+
+        let mut keyboard = ButtonInput::<KeyCode>::default();
+        keyboard.press(KeyCode::KeyV);
+        app.insert_resource(keyboard);
+
+        let hq_entity = app
+            .world_mut()
+            .spawn((
+                Faction::Player1,
+                Selectable { is_selected: false },
+                Building::new("Base HQ", Vec2::new(110.0, 110.0), 5.0, true),
+                BaseHQ::default(),
+                ProductionBuilding::default(),
+            ))
+            .id();
+
+        app.world_mut()
+            .run_system_once(handle_production_hotkeys)
+            .unwrap();
+
+        let eco = app.world().resource::<PlayerEconomy>();
+        assert_eq!(eco.get_minerals(Faction::Player1), 100, "Typing 'v' in chat must not train worker");
+        let prod = app.world().get::<ProductionBuilding>(hq_entity).unwrap();
+        assert_eq!(prod.queue.len(), 0);
     }
 }

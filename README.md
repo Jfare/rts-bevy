@@ -50,11 +50,11 @@ rts-bevy/
 | **Camera Pan** | `W`, `A`, `S`, `D` or Screen Edge Scrolling |
 | **Camera Zoom** | Mouse Scroll Wheel |
 | **Select Units** | Left-Click or Drag Box (Hold `Shift` to add to selection) |
-| **Issue Orders** | Right-Click (Move / Attack / Harvest Gold) |
+| **Issue Orders** | Right-Click (Move / Attack / Harvest Gold / Repair Building) |
 | **Stop / Hold Position** | `S` (Stop), `H` (Hold Position) |
 | **Patrol / Attack-Move** | `P` (Patrol), `A` (Attack-Move) |
 | **Build Menu** | `B` (Barracks: 150🪙, Supply Depot: 100🪙, Gun Turret: 125🪙, Base HQ: 400🪙) |
-| **Train Units** | `V` / `W` (Worker: 50🪙), `R` / `M` (Ranged Fighter: 100🪙), `F` (Melee Fighter: 75🪙) |
+| **Train Units** | `V` (Quick Train Worker: 50🪙), `R` / `M` (Ranged Fighter: 100🪙), `F` (Melee Fighter: 75🪙) |
 | **Tactical Ping** | `Alt + Left Click` on terrain or minimap |
 | **Chat** | `Enter` to open/send chat, `Esc` to cancel |
 | **Game Menu / Lobby** | `Tab` or `F1` |
@@ -68,8 +68,9 @@ rts-bevy/
 | **Select Unit / Building** | Tap on entity |
 | **Select On-Screen Army** | Double-tap any combat unit (or open ground) to select all visible combat units |
 | **Select On-Screen Workers** | Double-tap any worker to select all visible workers |
-| **Issue Orders** | Tap destination, enemy unit, or gold rock deposit |
+| **Issue Orders** | Tap destination, enemy unit, gold deposit, or damaged building |
 | **Deselect** | Tap circular `[✕]` Deselect button |
+| **Quick Train Worker** | Tap dedicated `[⛏️ Worker]` HUD button above build menu |
 | **Build Menu** | Tap docked `[🏗️ BUILD]` button |
 | **Train Units** | Tap Base HQ or Barracks to open unit production drawer |
 | **Toggle Fullscreen** | Tap `[⛶ Fullscreen]` button in header or Game Menu |

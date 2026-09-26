@@ -20,6 +20,8 @@ pub fn handle_units_ordered_move(
                 if let Some(ref mut worker) = worker_opt {
                     worker.state = WorkerState::Idle;
                     worker.target_node = None;
+                    worker.target_building = None;
+                    worker.manual_override = true;
                 }
                 if let Some(mut soldier) = soldier_opt {
                     soldier.target = None;
@@ -108,8 +110,10 @@ pub fn handle_workers_ordered_harvest(
                 commands.entity(entity).remove::<MoveTarget>();
                 if let Some(mut worker) = worker_opt {
                     worker.target_node = Some(node_e);
+                    worker.target_building = None;
                     worker.state = WorkerState::MovingToResource;
                     worker.harvest_timer = 0.0;
+                    worker.manual_override = false;
                 }
             }
         }
@@ -136,6 +140,9 @@ pub fn handle_units_ordered_stop(
             }
             if let Some(mut worker) = worker_opt {
                 worker.state = WorkerState::Idle;
+                worker.target_node = None;
+                worker.target_building = None;
+                worker.manual_override = false;
             }
             if let Some(mut stance) = stance_opt {
                 *stance = TacticalStance::Aggressive;
@@ -149,7 +156,7 @@ pub fn handle_units_ordered_hold_position(
     entity_query: &mut EntityNetQuery,
     unit_net_ids: Vec<u32>,
 ) {
-    for (entity, net_entity, _fac, _tf, _hp, _worker, soldier_opt, mut melee_opt, _, stance_opt, ..) in
+    for (entity, net_entity, _fac, _tf, _hp, worker_opt, soldier_opt, mut melee_opt, _, stance_opt, ..) in
         entity_query.iter_mut()
     {
         if unit_net_ids.contains(&net_entity.net_id) {
@@ -161,6 +168,12 @@ pub fn handle_units_ordered_hold_position(
             if let Some(ref mut melee) = melee_opt {
                 melee.target = None;
                 melee.state = SoldierState::HoldingPosition;
+            }
+            if let Some(mut worker) = worker_opt {
+                worker.state = WorkerState::Idle;
+                worker.target_node = None;
+                worker.target_building = None;
+                worker.manual_override = true;
             }
             if let Some(mut stance) = stance_opt {
                 *stance = TacticalStance::HoldPosition;
@@ -220,3 +233,89 @@ pub fn handle_units_ordered_patrol(
         }
     }
 }
+
+pub fn handle_workers_ordered_construct(
+    commands: &mut Commands,
+    entity_query: &mut EntityNetQuery,
+    worker_net_ids: Vec<u32>,
+    building_net_id: u32,
+) {
+    let target_building = entity_query
+        .iter()
+        .find(|(_, net_entity, ..)| net_entity.net_id == building_net_id)
+        .map(|(e, ..)| e);
+
+    if let Some(bldg_e) = target_building {
+        for (entity, net_entity, _fac, _tf, _hp, worker_opt, ..) in entity_query.iter_mut() {
+            if worker_net_ids.contains(&net_entity.net_id) {
+                commands.entity(entity).remove::<MoveTarget>();
+                if let Some(mut worker) = worker_opt {
+                    worker.target_building = Some(bldg_e);
+                    worker.target_node = None;
+                    worker.state = WorkerState::MovingToBuilding;
+                    worker.manual_override = false;
+                }
+            }
+        }
+    }
+}
+
+pub fn handle_workers_ordered_repair(
+    commands: &mut Commands,
+    entity_query: &mut EntityNetQuery,
+    worker_net_ids: Vec<u32>,
+    building_net_id: u32,
+) {
+    let target_building = entity_query
+        .iter()
+        .find(|(_, net_entity, ..)| net_entity.net_id == building_net_id)
+        .map(|(e, ..)| e);
+
+    if let Some(bldg_e) = target_building {
+        for (entity, net_entity, _fac, _tf, _hp, worker_opt, ..) in entity_query.iter_mut() {
+            if worker_net_ids.contains(&net_entity.net_id) {
+                commands.entity(entity).remove::<MoveTarget>();
+                if let Some(mut worker) = worker_opt {
+                    worker.target_building = Some(bldg_e);
+                    worker.target_node = None;
+                    worker.state = WorkerState::MovingToRepair;
+                    worker.manual_override = false;
+                }
+            }
+        }
+    }
+}
+
+pub fn handle_building_constructed(
+    entity_query: &mut EntityNetQuery,
+    building_net_id: u32,
+) {
+    let mut constructed_e = None;
+    for (entity, net_entity, _, _, mut hp, _, _, _, _, _, _, _, _, building_opt, ..) in
+        entity_query.iter_mut()
+    {
+        if net_entity.net_id == building_net_id {
+            if let Some(mut b) = building_opt {
+                b.is_constructed = true;
+                b.build_timer = b.build_duration;
+            }
+            hp.current = hp.max;
+            constructed_e = Some(entity);
+            break;
+        }
+    }
+
+    if let Some(b_entity) = constructed_e {
+        for (_, _, _, _, _, worker_opt, ..) in entity_query.iter_mut() {
+            if let Some(mut worker) = worker_opt {
+                if worker.target_building == Some(b_entity) {
+                    worker.target_building = None;
+                    if worker.state == WorkerState::Building || worker.state == WorkerState::MovingToBuilding {
+                        worker.state = WorkerState::Idle;
+                    }
+                }
+            }
+        }
+    }
+}
+

@@ -781,17 +781,17 @@
                     <div class="updates-header">
                         <div class="updates-title">
                             <span class="updates-badge">LATEST UPDATE</span>
-                            <span class="updates-version">v0.5.2</span>
+                            <span class="updates-version">v0.6.0</span>
                         </div>
-                        <div class="updates-date">September 14, 2026</div>
+                        <div class="updates-date">September 26, 2026</div>
                     </div>
                     <ul class="updates-list">
-                        <li><strong>📱 Dynamic Mobile Viewport & Pixel-Perfect Touch Coordinates:</strong> Upgraded rendering viewport to dynamic viewport height (<code>100dvh</code>) with active subpixel canvas synchronization. Taps on units and HUD buttons now align with 100% precision even when mobile browser search bars are visible.</li>
-                        <li><strong>⛶ Automatic & Interactive Fullscreen:</strong> Launching a match automatically triggers fullscreen on supported mobile and desktop browsers. Added <code>[⛶ Fullscreen]</code> button on the lobby header and in the in-game Game Menu.</li>
-                        <li><strong>🍎 iOS "Add to Home Screen" PWA Mode:</strong> Added Web App Manifest and standalone tags. iPhone and iPad players can add Mini-RTS to Home Screen for native borderless fullscreen without browser address bars.</li>
-                        <li><strong>🎯 Screen-Area Double-Tap Army Selection:</strong> Double-tap any combat unit (or open ground) to instantly select all friendly combat units visible on screen while excluding workers. Double-tap a worker to quickly select all on-screen workers. Off-screen units remain unaffected.</li>
-                        <li><strong>🏭 Mobile Production Drawer & Docked Build Menu:</strong> Tapping your Base HQ or Barracks opens a clean on-screen unit drawer, while the docked [🏗️ BUILD] button provides one-touch access to structure placement.</li>
-                        <li><strong>🖥️ Zero Desktop Regression:</strong> Desktop mouse and keyboard controls (WASD/edge pan, wheel zoom, marquee drag box, right-click context orders, and hotkeys) remain completely untouched and isolated.</li>
+                        <li><strong>⛏️ Autonomous Workers & 5-Cap Mineral Saturation:</strong> Newly produced workers automatically navigate to the nearest gold rock deposit near your Base HQ and start mining. Rocks strictly enforce a 5-miner saturation cap with live HUD indicators (<code>Miners: N/5</code>) to eliminate micro-management while encouraging base expansion.</li>
+                        <li><strong>🏗️ Worker-Driven Collaborative Construction:</strong> Buildings now require physical worker labor to construct! Idle workers automatically rush to foundations, and multiple workers build collaboratively with proportional speedups. If all workers are busy, the nearest miner is autonomously drafted.</li>
+                        <li><strong>🔧 Autonomous Building Repairs & Field Welding:</strong> Idle workers automatically seek out and restore damaged friendly structures at 20 HP/s with no gold cost. Contextual right-click (desktop) and tap (mobile) repair orders allow manual prioritization with emerald-green feedback markers.</li>
+                        <li><strong>🛡️ Tactical Manual Evasion:</strong> Manually retreating workers hold their ground and refuse to wander back into combat or auto-task until you issue an explicit work order or press <span class="kbd">S</span> (Stop).</li>
+                        <li><strong>⚡ Quick-Train Worker HUD & Hotkey:</strong> Dedicated persistent [⛏️ Worker] HUD button on desktop (under minimap) and mobile (above build menu), plus a global <span class="kbd">V</span> hotkey to train workers from anywhere without deselecting your army or checking your base.</li>
+                        <li><strong>✨ Enhanced Arc Flash & Welding VFX:</strong> Dynamic electric cyan arcs and directional molten sparks illuminate active construction sites and field repairs in real time.</li>
                     </ul>
                 </div>
 
@@ -799,12 +799,12 @@
                 <div class="controls-card">
                     <div class="controls-title">🎮 QUICK GUIDE & CONTROLS</div>
                     <div class="controls-row">
-                        <span><strong>Desktop:</strong> Left-Click Select / Marquee Box | Right-Click Orders (Move / Attack / Mine Gold)</span>
-                        <span><strong>Hotkeys:</strong> <span class="kbd">B</span> Build | <span class="kbd">V</span> Worker | <span class="kbd">R</span>/<span class="kbd">F</span> Units | <span class="kbd">S</span> Stop | <span class="kbd">H</span> Hold</span>
+                        <span><strong>Desktop:</strong> Left-Click Select / Marquee Box | Right-Click Orders (Move / Attack / Mine / Repair)</span>
+                        <span><strong>Hotkeys:</strong> <span class="kbd">B</span> Build | <span class="kbd">V</span> Quick Worker | <span class="kbd">R</span>/<span class="kbd">F</span> Units | <span class="kbd">S</span> Stop | <span class="kbd">H</span> Hold</span>
                     </div>
                     <div class="controls-row">
                         <span><strong>Mobile Touch:</strong> Tap Select/Order | 1-Finger Drag Pan | 2-Finger Pinch Zoom | Double-Tap Visible Army Select</span>
-                        <span><strong>Mobile HUD:</strong> [🏗️ BUILD] Menu | [✕] Deselect | HQ & Barracks Production Drawer | [⛶ Fullscreen]</span>
+                        <span><strong>Mobile HUD:</strong> [⛏️ Worker] Quick Train | [🏗️ BUILD] Menu | [✕] Deselect | Production Drawer | [⛶ Fullscreen]</span>
                     </div>
                 </div>
 

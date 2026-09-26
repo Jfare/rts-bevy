@@ -170,6 +170,8 @@ pub fn dispatch_move_order(
             if let Some(mut worker) = worker_opt {
                 worker.state = WorkerState::Idle;
                 worker.target_node = None;
+                worker.target_building = None;
+                worker.manual_override = true;
             }
             if let Some(mut soldier) = soldier_opt {
                 soldier.target = None;
@@ -326,6 +328,7 @@ pub fn dispatch_stop_order(
         &Faction,
         &Selectable,
         Option<&NetEntity>,
+        Option<&mut Worker>,
         Option<&mut Soldier>,
         Option<&mut MeleeFighter>,
         Option<&mut TacticalStance>,
@@ -334,12 +337,18 @@ pub fn dispatch_stop_order(
     let mut net_ids = Vec::new();
     let mut any_selected = false;
 
-    for (entity, faction, selectable, net_opt, mut soldier_opt, mut melee_opt, mut stance_opt) in
+    for (entity, faction, selectable, net_opt, mut worker_opt, mut soldier_opt, mut melee_opt, mut stance_opt) in
         &mut unit_query
     {
         if *faction == net_client.my_faction && selectable.is_selected {
             any_selected = true;
             commands.entity(entity).remove::<MoveTarget>();
+            if let Some(ref mut worker) = worker_opt {
+                worker.state = WorkerState::Idle;
+                worker.target_node = None;
+                worker.target_building = None;
+                worker.manual_override = false;
+            }
             if let Some(ref mut soldier) = soldier_opt {
                 soldier.state = SoldierState::Idle;
                 soldier.target = None;
@@ -378,6 +387,7 @@ pub fn dispatch_hold_order(
         &Faction,
         &Selectable,
         Option<&NetEntity>,
+        Option<&mut Worker>,
         Option<&mut Soldier>,
         Option<&mut MeleeFighter>,
         Option<&mut TacticalStance>,
@@ -386,12 +396,18 @@ pub fn dispatch_hold_order(
     let mut net_ids = Vec::new();
     let mut any_selected = false;
 
-    for (entity, faction, selectable, net_opt, mut soldier_opt, mut melee_opt, mut stance_opt) in
+    for (entity, faction, selectable, net_opt, mut worker_opt, mut soldier_opt, mut melee_opt, mut stance_opt) in
         &mut unit_query
     {
         if *faction == net_client.my_faction && selectable.is_selected {
             any_selected = true;
             commands.entity(entity).remove::<MoveTarget>();
+            if let Some(ref mut worker) = worker_opt {
+                worker.state = WorkerState::Idle;
+                worker.target_node = None;
+                worker.target_building = None;
+                worker.manual_override = true;
+            }
             if let Some(ref mut soldier) = soldier_opt {
                 soldier.state = SoldierState::HoldingPosition;
                 soldier.target = None;

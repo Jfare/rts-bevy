@@ -5,7 +5,7 @@ use shared::protocol::ServerMessage;
 
 use crate::net_server::{IncomingNetEvent, OutgoingNetEvent, ServerNetworkChannels};
 use crate::session::Matchmaker;
-use super::commands::{combat, economy, movement, social, NodeQuery, ProdQuery, UnitQuery};
+use super::commands::{combat, economy, movement, social, BuildingQuery, NodeQuery, ProdQuery, UnitQuery};
 use super::lobby::handle_join_lobby;
 
 /// Reads and executes client network commands
@@ -18,6 +18,7 @@ pub fn handle_incoming_network_events(
     mut unit_query: UnitQuery,
     node_query: NodeQuery,
     mut prod_query: ProdQuery,
+    building_query: BuildingQuery,
 ) {
     while let Ok(event) = net_channels.rx_incoming.try_recv() {
         match event {
@@ -156,6 +157,36 @@ pub fn handle_incoming_network_events(
                             peer_id,
                             &worker_net_ids,
                             resource_net_id,
+                        );
+                    }
+                    shared::protocol::ClientMessage::RequestConstruct {
+                        worker_net_ids,
+                        building_net_id,
+                    } => {
+                        economy::handle_construct(
+                            &mut commands,
+                            &net_channels,
+                            &matchmaker,
+                            &mut unit_query,
+                            &building_query,
+                            peer_id,
+                            &worker_net_ids,
+                            building_net_id,
+                        );
+                    }
+                    shared::protocol::ClientMessage::RequestRepair {
+                        worker_net_ids,
+                        building_net_id,
+                    } => {
+                        economy::handle_repair(
+                            &mut commands,
+                            &net_channels,
+                            &matchmaker,
+                            &mut unit_query,
+                            &building_query,
+                            peer_id,
+                            &worker_net_ids,
+                            building_net_id,
                         );
                     }
                     shared::protocol::ClientMessage::RequestStop { unit_net_ids } => {

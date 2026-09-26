@@ -60,6 +60,8 @@ pub fn handle_move(
                 if let Some(mut worker) = worker_opt {
                     worker.state = WorkerState::Idle;
                     worker.target_node = None;
+                    worker.target_building = None;
+                    worker.manual_override = true;
                 }
                 if let Some(mut stance) = stance_opt {
                     *stance = TacticalStance::Aggressive;
@@ -216,6 +218,9 @@ pub fn handle_stop(
             }
             if let Some(mut worker) = worker_opt {
                 worker.state = WorkerState::Idle;
+                worker.target_node = None;
+                worker.target_building = None;
+                worker.manual_override = false;
             }
             if let Some(mut stance) = stance_opt {
                 *stance = TacticalStance::Aggressive;
@@ -246,7 +251,7 @@ pub fn handle_hold_position(
     let peers = matchmaker.get_room_peers(player_room);
     let mut valid_net_ids = Vec::new();
 
-    for (e, _, net_entity, faction, unit_room, _, soldier_opt, _, mut melee_opt, _, stance_opt) in
+    for (e, _, net_entity, faction, unit_room, _, soldier_opt, worker_opt, mut melee_opt, _, stance_opt) in
         unit_query.iter_mut()
     {
         if unit_net_ids.contains(&net_entity.net_id)
@@ -261,6 +266,12 @@ pub fn handle_hold_position(
             if let Some(ref mut melee) = melee_opt {
                 melee.target = None;
                 melee.state = SoldierState::HoldingPosition;
+            }
+            if let Some(mut worker) = worker_opt {
+                worker.state = WorkerState::Idle;
+                worker.target_node = None;
+                worker.target_building = None;
+                worker.manual_override = true;
             }
             if let Some(mut stance) = stance_opt {
                 *stance = TacticalStance::HoldPosition;

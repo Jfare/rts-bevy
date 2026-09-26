@@ -19,33 +19,20 @@ pub fn server_production_system(
         &Faction,
         &RoomId,
         &Transform,
-        &mut Building,
+        &Building,
         Option<&mut ProductionBuilding>,
-        Option<&SupplyDepot>,
     )>,
 ) {
     let dt = time.delta_secs();
-    for (_entity, net_entity, faction, room_id, transform, mut building, prod_opt, supply_depot_opt) in
+    for (_entity, net_entity, faction, room_id, transform, building, prod_opt) in
         &mut buildings
     {
         let is_room_active = matchmaker.rooms.get(&room_id.0).map(|r| r.is_active && r.countdown_timer <= 0.0).unwrap_or(true);
         if !is_room_active {
             continue;
         }
-        // 1. Progress under-construction buildings
-        if !building.is_constructed {
-            building.build_timer += dt;
-            if building.build_timer >= building.build_duration {
-                building.is_constructed = true;
-                if let Some(depot) = supply_depot_opt {
-                    if let Some(room) = matchmaker.rooms.get_mut(&room_id.0) {
-                        room.economy.add_max_supply(*faction, depot.supply_provided);
-                    }
-                }
-            }
-        }
-
-        // 2. Production queue
+        // Active construction is driven collaboratively by workers in server_mining_system
+        // 2. Production queue (only active once building is constructed)
         if building.is_constructed {
             if let Some(mut prod) = prod_opt {
                 if !prod.queue.is_empty() {

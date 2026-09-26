@@ -57,6 +57,7 @@ pub type EntityNetItem = (
     Option<&'static Radius>,
     Option<&'static mut GunTurret>,
     Option<&'static mut ProductionBuilding>,
+    Option<&'static mut Building>,
 );
 
 pub type EntityNetFilter = (Without<Camera2d>, Without<ResourceNode>);
@@ -227,6 +228,31 @@ pub fn handle_server_message(
             queue_count,
             current_progress,
         } => world::handle_queue_updated(entity_query, building_net_id, queue_count, current_progress),
+
+        ServerMessage::WorkersOrderedConstruct {
+            worker_net_ids,
+            building_net_id,
+        } => orders::handle_workers_ordered_construct(
+            commands,
+            entity_query,
+            worker_net_ids,
+            building_net_id,
+        ),
+
+        ServerMessage::WorkersOrderedRepair {
+            worker_net_ids,
+            building_net_id,
+        } => orders::handle_workers_ordered_repair(
+            commands,
+            entity_query,
+            worker_net_ids,
+            building_net_id,
+        ),
+
+        ServerMessage::BuildingConstructed { building_net_id } => {
+            orders::handle_building_constructed(entity_query, building_net_id);
+            sound_events.send(SoundEffect::BuildPlaced);
+        }
 
         ServerMessage::ProjectileFired {
             attacker_net_id,

@@ -87,12 +87,14 @@ pub fn spawn_mobile_quick_bar(parent: &mut ChildBuilder) {
                 bottom: Val::Px(64.0),
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
+                row_gap: Val::Px(8.0),
                 display: Display::None, // Hidden by default on desktop, enabled on mobile
                 ..default()
             },
             FocusPolicy::Pass,
         ))
         .with_children(|col| {
+            super::spawn_quick_btn_train_worker(col);
             spawn_quick_btn_build_menu(col);
         });
 }

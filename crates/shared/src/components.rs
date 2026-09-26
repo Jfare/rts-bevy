@@ -199,12 +199,25 @@ pub enum WorkerState {
     MovingToResource,
     Mining,
     MovingToBase,
+    MovingToBuilding,
+    Building,
+    MovingToRepair,
+    Repairing,
 }
 
 pub const WORKER_MOVE_SPEED: f32 = 140.0;
 
 /// Maximum search distance for idle workers to automatically find and mine nearby mineral nodes
 pub const WORKER_AUTO_MINE_RANGE: f32 = 450.0;
+
+/// Maximum workers permitted to simultaneously target and mine a single gold deposit
+pub const MAX_WORKERS_PER_ROCK: usize = 5;
+
+/// Maximum distance between a friendly constructed Base HQ and a gold rock for automated mining
+pub const BASE_HQ_RESOURCE_RADIUS: f32 = 380.0;
+
+/// Repair rate in HP per second per active worker
+pub const WORKER_REPAIR_RATE: f32 = 20.0;
 
 #[derive(Debug, Clone, PartialEq, Component, Reflect)]
 pub struct Worker {
@@ -217,6 +230,8 @@ pub struct Worker {
     pub base_interact_distance: f32,
     pub target_node: Option<Entity>,
     pub target_base: Option<Entity>,
+    pub target_building: Option<Entity>,
+    pub manual_override: bool,
 }
 
 impl Default for Worker {
@@ -231,6 +246,8 @@ impl Default for Worker {
             base_interact_distance: 72.0,
             target_node: None,
             target_base: None,
+            target_building: None,
+            manual_override: false,
         }
     }
 }

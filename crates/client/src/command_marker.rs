@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy::render::camera::OrthographicProjection;
 use bevy::window::PrimaryWindow;
 use shared::components::{
-    AppState, Faction, Health, MatchOutcome, MeleeFighter, MoveTarget, NetEntity, Radius, ResourceNode, Selectable,
+    AppState, Building, Faction, Health, MatchOutcome, MeleeFighter, MoveTarget, NetEntity, Radius, ResourceNode, Selectable,
     Soldier, SoldierState, TacticalStance, Worker, WorkerState,
 };
 use shared::grid::{NavGrid, WorldGridConfig};
@@ -39,6 +39,15 @@ impl Plugin for CommandMarkerPlugin {
     }
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct RightClickQueries<'w, 's> {
+    pub window_query: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
+    pub camera_query: Query<'w, 's, (&'static Camera, &'static Transform, Option<&'static OrthographicProjection>)>,
+    pub node_query: Query<'w, 's, (&'static Transform, &'static Radius, &'static ResourceNode), With<ResourceNode>>,
+    pub hostile_query: Query<'w, 's, (Entity, &'static Transform, &'static Radius, &'static Faction, Option<&'static NetEntity>), (Without<Camera>, Without<ResourceNode>)>,
+    pub building_query: Query<'w, 's, (Entity, &'static Transform, &'static Radius, &'static Faction, &'static Building, &'static Health, Option<&'static NetEntity>), (Without<Camera>, Without<ResourceNode>, Without<Worker>)>,
+}
+
 /// Handles right-click movement/attack-move order dispatch with A* pathfinding
 fn handle_right_click_orders(
     mut commands: Commands,
@@ -52,10 +61,7 @@ fn handle_right_click_orders(
     grid_cfg: Option<Res<WorldGridConfig>>,
     fog: Res<FogOfWarGrid>,
     mut sound_events: EventWriter<SoundEffect>,
-    window_query: Query<&Window, With<PrimaryWindow>>,
-    camera_query: Query<(&Camera, &Transform, Option<&OrthographicProjection>)>,
-    node_query: Query<(&Transform, &Radius, &ResourceNode), With<ResourceNode>>,
-    hostile_query: Query<(Entity, &Transform, &Radius, &Faction, Option<&NetEntity>), (Without<Camera>, Without<ResourceNode>)>,
+    q: RightClickQueries,
     mut unit_query: Query<(
         Entity,
         &Transform,
@@ -69,6 +75,14 @@ fn handle_right_click_orders(
         Option<&mut MeleeFighter>,
     )>,
 ) {
+    let RightClickQueries {
+        window_query,
+        camera_query,
+        node_query,
+        hostile_query,
+        building_query,
+    } = q;
+
     if outcome_opt.as_deref() == Some(&MatchOutcome::Victory) || outcome_opt.as_deref() == Some(&MatchOutcome::Defeat) {
         return;
     }
@@ -94,6 +108,24 @@ fn handle_right_click_orders(
 
     let target_world_pos = screen_to_world_2d(cursor_screen, win_size, cam_pos, cam_scale);
 
+    // Check if clicked directly on an unconstructed or damaged friendly building
+    let mut clicked_unconstructed_bldg = None;
+    let mut clicked_damaged_bldg = None;
+    for (b_ent, b_tf, b_radius, b_fac, b_bldg, b_hp, b_net_opt) in &building_query {
+        if *b_fac == net_client.my_faction {
+            let pos = b_tf.translation.truncate();
+            if pos.distance(target_world_pos) <= (b_radius.0 + 20.0) {
+                if !b_bldg.is_constructed {
+                    clicked_unconstructed_bldg = Some((b_ent, b_net_opt.map(|n| n.net_id), pos));
+                    break;
+                } else if b_hp.current < b_hp.max {
+                    clicked_damaged_bldg = Some((b_ent, b_net_opt.map(|n| n.net_id), pos));
+                    break;
+                }
+            }
+        }
+    }
+
     // Check if clicked directly on an active mineral resource node
     let is_clicking_mineral = node_query.iter().any(|(t, r, n)| {
         t.translation.truncate().distance(target_world_pos) <= (r.0 + 20.0) && n.remaining_minerals > 0
@@ -102,12 +134,21 @@ fn handle_right_click_orders(
     // 1. Collect selected player units and their NetIDs
     let mut selected_units = Vec::new();
     let mut selected_net_ids = Vec::new();
+    let mut selected_workers = Vec::new();
+    let mut selected_worker_net_ids = Vec::new();
     let mut has_workers = false;
 
     for (entity, tf, faction, selectable, net_entity_opt, _, _, worker_opt, _, _) in &unit_query {
         if *faction == net_client.my_faction && selectable.is_selected {
-            if is_clicking_mineral && worker_opt.is_some() {
+            if worker_opt.is_some() {
                 has_workers = true;
+                selected_workers.push(entity);
+                if let Some(net) = net_entity_opt {
+                    selected_worker_net_ids.push(net.net_id);
+                }
+            }
+
+            if is_clicking_mineral && worker_opt.is_some() {
                 continue;
             }
 
@@ -115,6 +156,82 @@ fn handle_right_click_orders(
             if let Some(net) = net_entity_opt {
                 selected_net_ids.push(net.net_id);
             }
+        }
+    }
+
+    // Contextual Right-Click Construct Order
+    if let Some((b_ent, b_net_opt, b_pos)) = clicked_unconstructed_bldg {
+        if !selected_workers.is_empty() {
+            stats.record_action();
+            sound_events.send(SoundEffect::OrderIssued);
+
+            commands.spawn((
+                CommandMarker {
+                    lifetime: 0.0,
+                    max_lifetime: 0.45,
+                    initial_radius: 22.0,
+                    color: Color::srgba(1.0, 0.75, 0.15, 0.95), // Amber construct marker
+                },
+                Transform::from_xyz(b_pos.x, b_pos.y, 1.0),
+            ));
+
+            for &w_ent in &selected_workers {
+                commands.entity(w_ent).remove::<MoveTarget>();
+                if let Ok((_, _, _, _, _, _, _, Some(mut worker), ..)) = unit_query.get_mut(w_ent) {
+                    worker.target_building = Some(b_ent);
+                    worker.target_node = None;
+                    worker.state = WorkerState::MovingToBuilding;
+                    worker.manual_override = false;
+                }
+            }
+
+            if net_client.status != NetStatus::Disconnected && !selected_worker_net_ids.is_empty() {
+                if let Some(b_net) = b_net_opt {
+                    net_client.send(&ClientMessage::RequestConstruct {
+                        worker_net_ids: selected_worker_net_ids,
+                        building_net_id: b_net,
+                    });
+                }
+            }
+            return;
+        }
+    }
+
+    // Contextual Right-Click Repair Order
+    if let Some((b_ent, b_net_opt, b_pos)) = clicked_damaged_bldg {
+        if !selected_workers.is_empty() {
+            stats.record_action();
+            sound_events.send(SoundEffect::OrderIssued);
+
+            commands.spawn((
+                CommandMarker {
+                    lifetime: 0.0,
+                    max_lifetime: 0.45,
+                    initial_radius: 22.0,
+                    color: Color::srgba(0.2, 0.95, 0.45, 0.95), // Emerald repair marker
+                },
+                Transform::from_xyz(b_pos.x, b_pos.y, 1.0),
+            ));
+
+            for &w_ent in &selected_workers {
+                commands.entity(w_ent).remove::<MoveTarget>();
+                if let Ok((_, _, _, _, _, _, _, Some(mut worker), ..)) = unit_query.get_mut(w_ent) {
+                    worker.target_building = Some(b_ent);
+                    worker.target_node = None;
+                    worker.state = WorkerState::MovingToRepair;
+                    worker.manual_override = false;
+                }
+            }
+
+            if net_client.status != NetStatus::Disconnected && !selected_worker_net_ids.is_empty() {
+                if let Some(b_net) = b_net_opt {
+                    net_client.send(&ClientMessage::RequestRepair {
+                        worker_net_ids: selected_worker_net_ids,
+                        building_net_id: b_net,
+                    });
+                }
+            }
+            return;
         }
     }
 
@@ -228,10 +345,12 @@ fn handle_right_click_orders(
         let waypoints = nav_grid.find_path(*unit_pos, destination);
 
         if let Ok((_, _, _, _, _, move_target_opt, stance_opt, worker_opt, soldier_opt, melee_opt)) = unit_query.get_mut(*entity) {
-            // Cancel worker mining loop immediately on move order!
+            // Cancel worker mining/repair loop immediately on move order!
             if let Some(mut worker) = worker_opt {
                 worker.state = WorkerState::Idle;
                 worker.target_node = None;
+                worker.target_building = None;
+                worker.manual_override = true;
             }
             // Ground Move cancels any current attack target immediately!
             if let Some(mut soldier) = soldier_opt {
@@ -303,7 +422,7 @@ fn handle_stance_and_ability_hotkeys(
         &Faction,
         &Selectable,
         Option<&NetEntity>,
-        Option<&mut Health>,
+        Option<&mut Worker>,
         Option<&mut Soldier>,
         Option<&mut MeleeFighter>,
         Option<&mut TacticalStance>,
@@ -324,10 +443,16 @@ fn handle_stance_and_ability_hotkeys(
         attack_move_pending.0 = false;
         let mut net_ids = Vec::new();
         let mut any_selected = false;
-        for (entity, _, faction, selectable, net_opt, _, mut soldier_opt, mut melee_opt, mut stance_opt) in &mut unit_query {
+        for (entity, _, faction, selectable, net_opt, mut worker_opt, mut soldier_opt, mut melee_opt, mut stance_opt) in &mut unit_query {
             if *faction == my_faction && selectable.is_selected {
                 any_selected = true;
                 commands.entity(entity).remove::<MoveTarget>();
+                if let Some(ref mut worker) = worker_opt {
+                    worker.state = WorkerState::Idle;
+                    worker.target_node = None;
+                    worker.target_building = None;
+                    worker.manual_override = false;
+                }
                 if let Some(ref mut soldier) = soldier_opt {
                     soldier.state = SoldierState::Idle;
                     soldier.target = None;
@@ -359,10 +484,16 @@ fn handle_stance_and_ability_hotkeys(
         attack_move_pending.0 = false;
         let mut net_ids = Vec::new();
         let mut any_selected = false;
-        for (entity, _, faction, selectable, net_opt, _, mut soldier_opt, mut melee_opt, mut stance_opt) in &mut unit_query {
+        for (entity, _, faction, selectable, net_opt, mut worker_opt, mut soldier_opt, mut melee_opt, mut stance_opt) in &mut unit_query {
             if *faction == my_faction && selectable.is_selected {
                 any_selected = true;
                 commands.entity(entity).remove::<MoveTarget>();
+                if let Some(ref mut worker) = worker_opt {
+                    worker.state = WorkerState::Idle;
+                    worker.target_node = None;
+                    worker.target_building = None;
+                    worker.manual_override = true;
+                }
                 if let Some(ref mut soldier) = soldier_opt {
                     soldier.state = SoldierState::HoldingPosition;
                     soldier.target = None;

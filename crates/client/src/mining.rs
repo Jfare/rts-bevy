@@ -78,20 +78,32 @@ fn handle_mining_click_orders(
         return;
     };
 
+    let current_miners = worker_query
+        .iter()
+        .filter(|(_, _, selectable, worker, _)| {
+            !selectable.is_selected
+                && worker.target_node == Some(target_node_entity)
+                && worker.state != WorkerState::Idle
+        })
+        .count();
+    let available_slots = MAX_WORKERS_PER_ROCK.saturating_sub(current_miners);
+
     let mut worker_net_ids = Vec::new();
     let mut any_assigned = false;
 
     for (worker_entity, faction, selectable, mut worker, net_opt) in &mut worker_query {
         if selectable.is_selected && *faction == net_client.my_faction {
-            any_assigned = true;
-            worker.target_node = Some(target_node_entity);
-            worker.state = WorkerState::MovingToResource;
-            worker.harvest_timer = 0.0;
-            worker.carried_minerals = 0;
-            commands.entity(worker_entity).remove::<MoveTarget>();
+            if worker_net_ids.len() < available_slots {
+                any_assigned = true;
+                worker.target_node = Some(target_node_entity);
+                worker.state = WorkerState::MovingToResource;
+                worker.harvest_timer = 0.0;
+                worker.carried_minerals = 0;
+                commands.entity(worker_entity).remove::<MoveTarget>();
 
-            if let Some(net) = net_opt {
-                worker_net_ids.push(net.net_id);
+                if let Some(net) = net_opt {
+                    worker_net_ids.push(net.net_id);
+                }
             }
         }
     }
@@ -126,7 +138,16 @@ fn worker_mining_state_machine(
         Option<&MoveTarget>,
     ), (With<Worker>, Without<ResourceNode>, Without<BaseHQ>)>,
     mut node_query: Query<(Entity, &Transform, &mut ResourceNode), (With<ResourceNode>, Without<Worker>, Without<BaseHQ>)>,
-    base_query: Query<(Entity, &Transform, &Faction, &Building, &BaseHQ), (With<BaseHQ>, Without<Worker>, Without<ResourceNode>)>,
+    base_query: Query<(Entity, &Transform, &Faction, &BaseHQ), (With<BaseHQ>, Without<Worker>, Without<ResourceNode>)>,
+    mut building_query: Query<(
+        Entity,
+        &Transform,
+        &mut Building,
+        &mut Health,
+        &Radius,
+        &Faction,
+        Option<&SupplyDepot>,
+    ), (Without<Worker>, Without<ResourceNode>)>,
     mut sound_events: EventWriter<SoundEffect>,
 ) {
     // In online matches, the server simulates mining authoritatively and replicates via TickSnapshotBatch
@@ -136,36 +157,168 @@ fn worker_mining_state_machine(
 
     let dt = time.delta_secs();
 
+    // Track active miners targeting each resource node to enforce MAX_WORKERS_PER_ROCK
+    let mut node_worker_counts: std::collections::HashMap<Entity, usize> = std::collections::HashMap::new();
+    let mut building_worker_counts: std::collections::HashMap<Entity, usize> = std::collections::HashMap::new();
+
+    for (_, worker, _, _, _, move_target_opt) in &worker_query {
+        if move_target_opt.is_none() {
+            if worker.state != WorkerState::Idle {
+                if let Some(target) = worker.target_node {
+                    *node_worker_counts.entry(target).or_default() += 1;
+                }
+            }
+            if worker.state == WorkerState::MovingToBuilding || worker.state == WorkerState::Building {
+                if let Some(target_b) = worker.target_building {
+                    *building_worker_counts.entry(target_b).or_default() += 1;
+                }
+            }
+        }
+    }
+
+    // Collect unconstructed buildings
+    let mut unconstructed_buildings = Vec::new();
+    for (b_ent, b_tf, b, _, b_rad, b_fac, _) in building_query.iter() {
+        if !b.is_constructed {
+            unconstructed_buildings.push((
+                b_ent,
+                b_tf.translation.truncate(),
+                b_rad.0,
+                *b_fac,
+            ));
+        }
+    }
+
+    // Count idle workers per faction (excluding manual player override)
+    let mut idle_worker_count: std::collections::HashMap<Faction, usize> = std::collections::HashMap::new();
+    for (_, worker, _, _, faction, move_target_opt) in &worker_query {
+        if move_target_opt.is_none() && worker.state == WorkerState::Idle && !worker.manual_override {
+            *idle_worker_count.entry(*faction).or_default() += 1;
+        }
+    }
+
+    // Draft closest mining worker if an unconstructed building has 0 builders and 0 idle workers exist
+    for &(b_ent, b_pos, _, b_fac) in &unconstructed_buildings {
+        let assigned_count = building_worker_counts.get(&b_ent).copied().unwrap_or(0);
+        let idles = idle_worker_count.get(&b_fac).copied().unwrap_or(0);
+        if assigned_count == 0 && idles == 0 {
+            let mut best_miner: Option<(Entity, f32)> = None;
+            for (w_ent, w, w_tf, _, w_fac, w_move) in &worker_query {
+                if w_move.is_none() && !w.manual_override && *w_fac == b_fac {
+                    if w.state == WorkerState::Mining
+                        || w.state == WorkerState::MovingToResource
+                        || w.state == WorkerState::MovingToBase
+                    {
+                        let dist = w_tf.translation.truncate().distance(b_pos);
+                        if best_miner.map_or(true, |(_, d)| dist < d) {
+                            best_miner = Some((w_ent, dist));
+                        }
+                    }
+                }
+            }
+
+            if let Some((drafted_e, _)) = best_miner {
+                if let Ok((_, mut w, mut tf, ..)) = worker_query.get_mut(drafted_e) {
+                    if let Some(target_node) = w.target_node {
+                        if let Some(c) = node_worker_counts.get_mut(&target_node) {
+                            *c = c.saturating_sub(1);
+                        }
+                    }
+                    w.target_node = None;
+                    w.carried_minerals = 0;
+                    w.target_building = Some(b_ent);
+                    w.state = WorkerState::MovingToBuilding;
+                    *building_worker_counts.entry(b_ent).or_default() += 1;
+                    let dir = (b_pos - tf.translation.truncate()).normalize_or_zero();
+                    if dir.length_squared() > 0.0 {
+                        tf.rotation = Quat::from_rotation_z(dir.y.atan2(dir.x));
+                    }
+                }
+            }
+        }
+    }
+
     for (_worker_entity, mut worker, mut worker_transform, move_speed, faction, move_target_opt) in &mut worker_query {
-        // If player ordered a manual move, cancel the automated mining loop
+        // If player ordered a manual move, cancel the automated mining/building loop
         if move_target_opt.is_some() && worker.state != WorkerState::Idle {
+            if let Some(target) = worker.target_node {
+                if let Some(c) = node_worker_counts.get_mut(&target) {
+                    *c = c.saturating_sub(1);
+                }
+            }
+            if let Some(target_b) = worker.target_building {
+                if let Some(c) = building_worker_counts.get_mut(&target_b) {
+                    *c = c.saturating_sub(1);
+                }
+            }
             worker.state = WorkerState::Idle;
             worker.target_node = None;
+            worker.target_building = None;
         }
 
         match worker.state {
             WorkerState::Idle => {
-                if move_target_opt.is_none() {
+                if move_target_opt.is_none() && !worker.manual_override {
                     let worker_pos = worker_transform.translation.truncate();
                     if worker.carried_minerals > 0 {
                         worker.state = WorkerState::MovingToBase;
                     } else {
+                        // 1. Check for unconstructed friendly buildings
+                        let mut best_bldg: Option<(Entity, Vec2)> = None;
+                        let mut best_bldg_dist = f32::MAX;
+                        for &(b_ent, b_pos, _, b_fac) in &unconstructed_buildings {
+                            if b_fac == *faction {
+                                if let Ok((_, _, b, ..)) = building_query.get(b_ent) {
+                                    if !b.is_constructed {
+                                        let dist = worker_pos.distance(b_pos);
+                                        if dist < best_bldg_dist {
+                                            best_bldg_dist = dist;
+                                            best_bldg = Some((b_ent, b_pos));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if let Some((b_ent, b_pos)) = best_bldg {
+                            worker.target_building = Some(b_ent);
+                            worker.target_node = None;
+                            worker.state = WorkerState::MovingToBuilding;
+                            *building_worker_counts.entry(b_ent).or_default() += 1;
+                            let dir = (b_pos - worker_pos).normalize_or_zero();
+                            if dir.length_squared() > 0.0 {
+                                worker_transform.rotation = Quat::from_rotation_z(dir.y.atan2(dir.x));
+                            }
+                            continue;
+                        }
+
+                        // 2. Fall back to mining nearest available gold rock
                         let mut best_node = None;
                         let mut best_dist = WORKER_AUTO_MINE_RANGE;
 
                         for (node_ent, node_tf, node) in &node_query {
                             if node.remaining_minerals > 0 {
+                                let current_miners = node_worker_counts.get(&node_ent).copied().unwrap_or(0);
+                                if current_miners >= MAX_WORKERS_PER_ROCK {
+                                    continue;
+                                }
+
                                 let n_pos = node_tf.translation.truncate();
                                 let dist = worker_pos.distance(n_pos);
                                 if dist <= best_dist {
-                                    // Safety check: Don't target nodes closer to enemy base than friendly base
+                                    // Base HQ Proximity check: Must be within BASE_HQ_RESOURCE_RADIUS of friendly constructed Base HQ
+                                    let mut has_friendly_base = false;
                                     let mut min_friendly_base_dist = f32::MAX;
                                     let mut min_enemy_base_dist = f32::MAX;
 
-                                    for (_, base_tf, base_fac, _, _) in &base_query {
+                                    for (base_ent, base_tf, base_fac, _) in &base_query {
                                         let b_pos = base_tf.translation.truncate();
                                         let b_dist = n_pos.distance(b_pos);
+                                        let is_constructed = building_query.get(base_ent).map(|(_, _, b, ..)| b.is_constructed).unwrap_or(true);
                                         if *base_fac == *faction {
+                                            if is_constructed && b_dist <= BASE_HQ_RESOURCE_RADIUS {
+                                                has_friendly_base = true;
+                                            }
                                             if b_dist < min_friendly_base_dist {
                                                 min_friendly_base_dist = b_dist;
                                             }
@@ -176,7 +329,7 @@ fn worker_mining_state_machine(
                                         }
                                     }
 
-                                    if min_enemy_base_dist >= min_friendly_base_dist {
+                                    if has_friendly_base && min_enemy_base_dist >= min_friendly_base_dist {
                                         best_dist = dist;
                                         best_node = Some((node_ent, n_pos));
                                     }
@@ -185,14 +338,215 @@ fn worker_mining_state_machine(
                         }
 
                         if let Some((node_ent, n_pos)) = best_node {
+                            *node_worker_counts.entry(node_ent).or_default() += 1;
                             worker.target_node = Some(node_ent);
                             worker.state = WorkerState::MovingToResource;
                             let dir = (n_pos - worker_pos).normalize_or_zero();
                             if dir.length_squared() > 0.0 {
                                 worker_transform.rotation = Quat::from_rotation_z(dir.y.atan2(dir.x));
                             }
+                        } else {
+                            // 3. Fall back to repairing damaged friendly constructed buildings
+                            let mut best_repair_bldg: Option<(Entity, Vec2)> = None;
+                            let mut best_repair_dist = f32::MAX;
+                            for (b_ent, b_tf, b, hp, ..) in building_query.iter() {
+                                if b.is_constructed && hp.current < hp.max {
+                                    let b_pos = b_tf.translation.truncate();
+                                    let dist = worker_pos.distance(b_pos);
+                                    if dist < best_repair_dist {
+                                        best_repair_dist = dist;
+                                        best_repair_bldg = Some((b_ent, b_pos));
+                                    }
+                                }
+                            }
+
+                            if let Some((b_ent, b_pos)) = best_repair_bldg {
+                                worker.target_building = Some(b_ent);
+                                worker.target_node = None;
+                                worker.state = WorkerState::MovingToRepair;
+                                let dir = (b_pos - worker_pos).normalize_or_zero();
+                                if dir.length_squared() > 0.0 {
+                                    worker_transform.rotation = Quat::from_rotation_z(dir.y.atan2(dir.x));
+                                }
+                            }
                         }
                     }
+                }
+            }
+
+            WorkerState::MovingToBuilding => {
+                let Some(b_ent) = worker.target_building else {
+                    worker.state = WorkerState::Idle;
+                    continue;
+                };
+
+                if let Ok((_, b_tf, b, _, b_rad, b_fac, ..)) = building_query.get(b_ent) {
+                    if *b_fac != *faction || b.is_constructed {
+                        if let Some(c) = building_worker_counts.get_mut(&b_ent) {
+                            *c = c.saturating_sub(1);
+                        }
+                        worker.target_building = None;
+                        worker.state = WorkerState::Idle;
+                        continue;
+                    }
+
+                    let w_pos = worker_transform.translation.truncate();
+                    let b_pos = b_tf.translation.truncate();
+                    let dist = w_pos.distance(b_pos);
+                    let build_range = b_rad.0 + 26.0;
+
+                    if dist <= build_range {
+                        worker.state = WorkerState::Building;
+                    } else {
+                        let dir = (b_pos - w_pos).normalize_or_zero();
+                        let step = dir * move_speed.0 * dt;
+                        worker_transform.translation.x += step.x;
+                        worker_transform.translation.y += step.y;
+                        let angle = dir.y.atan2(dir.x);
+                        worker_transform.rotation = Quat::from_rotation_z(angle);
+                    }
+                } else {
+                    if let Some(c) = building_worker_counts.get_mut(&b_ent) {
+                        *c = c.saturating_sub(1);
+                    }
+                    worker.target_building = None;
+                    worker.state = WorkerState::Idle;
+                }
+            }
+
+            WorkerState::Building => {
+                let Some(b_ent) = worker.target_building else {
+                    worker.state = WorkerState::Idle;
+                    continue;
+                };
+
+                if let Ok((_, b_tf, mut b, mut hp, b_rad, b_fac, supply_depot_opt)) = building_query.get_mut(b_ent) {
+                    if *b_fac != *faction || b.is_constructed {
+                        if let Some(c) = building_worker_counts.get_mut(&b_ent) {
+                            *c = c.saturating_sub(1);
+                        }
+                        worker.target_building = None;
+                        worker.state = WorkerState::Idle;
+                        continue;
+                    }
+
+                    let w_pos = worker_transform.translation.truncate();
+                    let b_pos = b_tf.translation.truncate();
+                    let dist = w_pos.distance(b_pos);
+                    let build_range = b_rad.0 + 30.0;
+
+                    if dist > build_range {
+                        worker.state = WorkerState::MovingToBuilding;
+                        continue;
+                    }
+
+                    // Face the building directly
+                    let dir = (b_pos - w_pos).normalize_or_zero();
+                    if dir.length_squared() > 0.0 {
+                        worker_transform.rotation = Quat::from_rotation_z(dir.y.atan2(dir.x));
+                    }
+
+                    b.build_timer += dt;
+                    hp.current = (hp.max * b.progress()).max(15.0);
+
+                    if b.build_timer >= b.build_duration {
+                        b.is_constructed = true;
+                        b.build_timer = b.build_duration;
+                        hp.current = hp.max;
+
+                        if supply_depot_opt.is_some() {
+                            economy.add_max_supply(*faction, 8);
+                        }
+
+                        sound_events.send(SoundEffect::BuildPlaced);
+
+                        if let Some(c) = building_worker_counts.get_mut(&b_ent) {
+                            *c = c.saturating_sub(1);
+                        }
+                        worker.target_building = None;
+                        worker.state = WorkerState::Idle;
+                    }
+                } else {
+                    if let Some(c) = building_worker_counts.get_mut(&b_ent) {
+                        *c = c.saturating_sub(1);
+                    }
+                    worker.target_building = None;
+                    worker.state = WorkerState::Idle;
+                }
+            }
+
+            WorkerState::MovingToRepair => {
+                let Some(b_ent) = worker.target_building else {
+                    worker.state = WorkerState::Idle;
+                    continue;
+                };
+
+                if let Ok((_, b_tf, b, hp, b_rad, b_fac, ..)) = building_query.get(b_ent) {
+                    if *b_fac != *faction || !b.is_constructed || hp.current >= hp.max {
+                        worker.target_building = None;
+                        worker.state = WorkerState::Idle;
+                        continue;
+                    }
+
+                    let w_pos = worker_transform.translation.truncate();
+                    let b_pos = b_tf.translation.truncate();
+                    let dist = w_pos.distance(b_pos);
+                    let repair_range = b_rad.0 + 26.0;
+
+                    if dist <= repair_range {
+                        worker.state = WorkerState::Repairing;
+                    } else {
+                        let dir = (b_pos - w_pos).normalize_or_zero();
+                        let step = dir * move_speed.0 * dt;
+                        worker_transform.translation.x += step.x;
+                        worker_transform.translation.y += step.y;
+                        let angle = dir.y.atan2(dir.x);
+                        worker_transform.rotation = Quat::from_rotation_z(angle);
+                    }
+                } else {
+                    worker.target_building = None;
+                    worker.state = WorkerState::Idle;
+                }
+            }
+
+            WorkerState::Repairing => {
+                let Some(b_ent) = worker.target_building else {
+                    worker.state = WorkerState::Idle;
+                    continue;
+                };
+
+                if let Ok((_, b_tf, b, mut hp, b_rad, b_fac, ..)) = building_query.get_mut(b_ent) {
+                    if *b_fac != *faction || !b.is_constructed || hp.current >= hp.max {
+                        worker.target_building = None;
+                        worker.state = WorkerState::Idle;
+                        continue;
+                    }
+
+                    let w_pos = worker_transform.translation.truncate();
+                    let b_pos = b_tf.translation.truncate();
+                    let dist = w_pos.distance(b_pos);
+                    let repair_range = b_rad.0 + 30.0;
+
+                    if dist > repair_range {
+                        worker.state = WorkerState::MovingToRepair;
+                        continue;
+                    }
+
+                    // Face the building directly
+                    let dir = (b_pos - w_pos).normalize_or_zero();
+                    if dir.length_squared() > 0.0 {
+                        worker_transform.rotation = Quat::from_rotation_z(dir.y.atan2(dir.x));
+                    }
+
+                    hp.current = (hp.current + WORKER_REPAIR_RATE * dt).min(hp.max);
+
+                    if hp.current >= hp.max {
+                        worker.target_building = None;
+                        worker.state = WorkerState::Idle;
+                    }
+                } else {
+                    worker.target_building = None;
+                    worker.state = WorkerState::Idle;
                 }
             }
 
@@ -279,8 +633,9 @@ fn worker_mining_state_machine(
                     let mut nearest_base = None;
                     let mut nearest_dist = f32::MAX;
 
-                    for (base_entity, base_transform, base_faction, building, _) in &base_query {
-                        if *base_faction == *faction && building.is_constructed {
+                    for (base_entity, base_transform, base_faction, _) in &base_query {
+                        let is_constructed = building_query.get(base_entity).map(|(_, _, b, ..)| b.is_constructed).unwrap_or(true);
+                        if *base_faction == *faction && is_constructed {
                             let base_pos = base_transform.translation.truncate();
                             let d = worker_pos.distance(base_pos);
                             if d < nearest_dist {
@@ -299,8 +654,9 @@ fn worker_mining_state_machine(
                 // Check if target base is still valid, else search for closest one
                 let mut target_base_pos = None;
                 if let Some(base_entity) = worker.target_base {
-                    if let Ok((_, base_transform, base_faction, building, _)) = base_query.get(base_entity) {
-                        if *base_faction == *faction && building.is_constructed {
+                    if let Ok((_, base_transform, base_faction, _)) = base_query.get(base_entity) {
+                        let is_constructed = building_query.get(base_entity).map(|(_, _, b, ..)| b.is_constructed).unwrap_or(true);
+                        if *base_faction == *faction && is_constructed {
                             target_base_pos = Some(base_transform.translation.truncate());
                         }
                     }
@@ -309,8 +665,9 @@ fn worker_mining_state_machine(
                 if target_base_pos.is_none() {
                     let mut nearest_base = None;
                     let mut nearest_dist = f32::MAX;
-                    for (b_ent, b_trans, b_fac, building, _) in &base_query {
-                        if *b_fac == *faction && building.is_constructed {
+                    for (b_ent, b_trans, b_fac, _) in &base_query {
+                        let is_constructed = building_query.get(b_ent).map(|(_, _, b, ..)| b.is_constructed).unwrap_or(true);
+                        if *b_fac == *faction && is_constructed {
                             let d = worker_pos.distance(b_trans.translation.truncate());
                             if d < nearest_dist {
                                 nearest_dist = d;
@@ -342,50 +699,38 @@ fn worker_mining_state_machine(
                         worker.carried_minerals = 0;
                     }
 
-                    // If original mineral patch still has minerals, return to it!
-                    if let Some(node_entity) = worker.target_node {
-                        if let Ok((_, _, node)) = node_query.get(node_entity) {
+                    // If original mineral patch still has minerals and friendly base nearby, return to it!
+                    let node_valid = if let Some(node_entity) = worker.target_node {
+                        if let Ok((_, node_tf, node)) = node_query.get(node_entity) {
                             if node.remaining_minerals > 0 {
-                                worker.state = WorkerState::MovingToResource;
-                                continue;
+                                let n_pos = node_tf.translation.truncate();
+                                base_query.iter().any(|(b_ent, b_tf, b_fac, _)| {
+                                    let is_constructed = building_query.get(b_ent).map(|(_, _, b, ..)| b.is_constructed).unwrap_or(true);
+                                    *b_fac == *faction && is_constructed && n_pos.distance(b_tf.translation.truncate()) <= BASE_HQ_RESOURCE_RADIUS
+                                })
+                            } else {
+                                false
                             }
+                        } else {
+                            false
                         }
-                    }
-
-
-                    // Otherwise try to find another mineral patch within reasonable range
-                    let mut closest_node = None;
-                    let mut closest_dist = WORKER_AUTO_MINE_RANGE;
-                    for (n_ent, n_trans, n) in &node_query {
-                        if n.remaining_minerals > 0 {
-                            let n_pos = n_trans.translation.truncate();
-                            let d = worker_pos.distance(n_pos);
-                            if d <= closest_dist {
-                                let mut min_friendly = f32::MAX;
-                                let mut min_enemy = f32::MAX;
-                                for (_, base_tf, base_fac, _, _) in &base_query {
-                                    let b_dist = n_pos.distance(base_tf.translation.truncate());
-                                    if *base_fac == *faction {
-                                        if b_dist < min_friendly { min_friendly = b_dist; }
-                                    } else if base_fac.is_hostile_to(faction) {
-                                        if b_dist < min_enemy { min_enemy = b_dist; }
-                                    }
-                                }
-                                if min_enemy >= min_friendly {
-                                    closest_dist = d;
-                                    closest_node = Some(n_ent);
-                                }
-                            }
-                        }
-                    }
-
-                    if let Some(next_node) = closest_node {
-                        worker.target_node = Some(next_node);
-                        worker.state = WorkerState::MovingToResource;
                     } else {
-                        worker.target_node = None;
-                        worker.state = WorkerState::Idle;
+                        false
+                    };
+
+                    if node_valid {
+                        worker.state = WorkerState::MovingToResource;
+                        continue;
                     }
+
+                    // Node is depleted or lacks friendly Base HQ: become Idle
+                    if let Some(target) = worker.target_node {
+                        if let Some(c) = node_worker_counts.get_mut(&target) {
+                            *c = c.saturating_sub(1);
+                        }
+                    }
+                    worker.target_node = None;
+                    worker.state = WorkerState::Idle;
                 } else {
                     // Move towards Base HQ
                     let dir = (base_pos - worker_pos).normalize_or_zero();
@@ -527,6 +872,76 @@ fn draw_mining_visuals(
                 let chip_right = front_tip + chip_dir * 4.0 - right_side * 8.0;
                 gizmos.line_2d(front_tip, chip_left, Color::srgb(1.0, 0.84, 0.18));
                 gizmos.line_2d(front_tip, chip_right, Color::srgb(1.0, 0.92, 0.40));
+            }
+        } else if worker.state == WorkerState::Building {
+            // Welding Torch & Electric Blue/White Arc Visuals
+            let torch_len = 16.0;
+            let torch_base = worker_pos + forward * 6.0;
+            let torch_tip = torch_base + forward * torch_len;
+
+            // Worker arms holding welding torch
+            let left_shoulder = worker_pos + forward * 4.0 - right_side * 4.5;
+            let right_shoulder = worker_pos + forward * 5.0 + right_side * 4.5;
+            gizmos.line_2d(left_shoulder, torch_base, Color::srgb(0.95, 0.75, 0.20));
+            gizmos.line_2d(right_shoulder, torch_base, Color::srgb(0.95, 0.75, 0.20));
+
+            // Torch body & nozzle
+            gizmos.line_2d(torch_base, torch_tip, Color::srgb(0.35, 0.38, 0.45));
+            gizmos.circle_2d(torch_tip, 2.0, Color::srgb(0.80, 0.40, 0.15)); // Brass nozzle
+
+            // Electric blue/white arc flash (pulsates rapidly)
+            let arc_pulse = ((t * 28.0).sin() * 0.5 + 0.5).powi(2);
+            let arc_radius = 3.5 + arc_pulse * 3.5;
+            gizmos.circle_2d(torch_tip, arc_radius, Color::srgba(0.30, 0.85, 1.0, 0.85)); // Cyan glow
+            gizmos.circle_2d(torch_tip, arc_radius * 0.5, Color::srgb(1.0, 1.0, 1.0)); // White hot center
+
+            // Welding sparks spraying outward
+            let spark_count = 5;
+            for s in 0..spark_count {
+                let s_angle = rot + ((s as f32) - 2.0) * 0.45 + (t * 50.0 + s as f32 * 1.7).sin() * 0.3;
+                let s_dist = 6.0 + ((t * 40.0 + s as f32 * 3.1).cos().abs()) * 14.0;
+                let spark_pos = torch_tip + Vec2::new(s_angle.cos(), s_angle.sin()) * s_dist;
+                let spark_col = if s % 2 == 0 {
+                    Color::srgb(1.0, 0.90, 0.40) // Yellow hot
+                } else {
+                    Color::srgb(0.40, 0.85, 1.0) // Electric blue
+                };
+                gizmos.circle_2d(spark_pos, 1.5, spark_col);
+            }
+        } else if worker.state == WorkerState::Repairing {
+            // Repair Welding Torch & Emerald Green/Cyan Arc Visuals
+            let torch_len = 16.0;
+            let torch_base = worker_pos + forward * 6.0;
+            let torch_tip = torch_base + forward * torch_len;
+
+            // Worker arms holding welding torch
+            let left_shoulder = worker_pos + forward * 4.0 - right_side * 4.5;
+            let right_shoulder = worker_pos + forward * 5.0 + right_side * 4.5;
+            gizmos.line_2d(left_shoulder, torch_base, Color::srgb(0.95, 0.75, 0.20));
+            gizmos.line_2d(right_shoulder, torch_base, Color::srgb(0.95, 0.75, 0.20));
+
+            // Torch body & nozzle
+            gizmos.line_2d(torch_base, torch_tip, Color::srgb(0.35, 0.38, 0.45));
+            gizmos.circle_2d(torch_tip, 2.0, Color::srgb(0.80, 0.40, 0.15)); // Brass nozzle
+
+            // Emerald green arc flash (pulsates rapidly)
+            let arc_pulse = ((t * 28.0).sin() * 0.5 + 0.5).powi(2);
+            let arc_radius = 3.5 + arc_pulse * 3.5;
+            gizmos.circle_2d(torch_tip, arc_radius, Color::srgba(0.20, 0.95, 0.45, 0.85)); // Emerald glow
+            gizmos.circle_2d(torch_tip, arc_radius * 0.5, Color::srgb(1.0, 1.0, 1.0)); // White hot center
+
+            // Repair welding sparks spraying outward
+            let spark_count = 5;
+            for s in 0..spark_count {
+                let s_angle = rot + ((s as f32) - 2.0) * 0.45 + (t * 50.0 + s as f32 * 1.7).sin() * 0.3;
+                let s_dist = 6.0 + ((t * 40.0 + s as f32 * 3.1).cos().abs()) * 14.0;
+                let spark_pos = torch_tip + Vec2::new(s_angle.cos(), s_angle.sin()) * s_dist;
+                let spark_col = if s % 2 == 0 {
+                    Color::srgb(0.25, 0.95, 0.50) // Emerald green spark
+                } else {
+                    Color::srgb(0.80, 0.95, 0.30) // Yellow-green spark
+                };
+                gizmos.circle_2d(spark_pos, 1.5, spark_col);
             }
         } else {
             // Worker is Idle, Moving to Resource, or Returning to Base:

@@ -335,7 +335,7 @@ pub fn handle_queue_updated(
     queue_count: usize,
     current_progress: f32,
 ) {
-    for (_e, net_entity, _fac, _tf, _hp, _worker, _soldier, _melee, _move, _stance, _rad, _turret, mut prod_opt) in
+    for (_e, net_entity, _fac, _tf, _hp, _worker, _soldier, _melee, _move, _stance, _rad, _turret, mut prod_opt, ..) in
         entity_query.iter_mut()
     {
         if net_entity.net_id == building_net_id {

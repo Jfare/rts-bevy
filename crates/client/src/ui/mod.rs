@@ -6,11 +6,17 @@ pub mod layout;
 pub mod menu_modal;
 pub mod mobile_hud;
 pub mod post_match;
+pub mod quick_train_hud;
 pub mod top_bar;
 
 use bevy::prelude::*;
 use shared::components::AppState;
 use shared::protocol::{ClientPlatform, FactionColor};
+
+pub use quick_train_hud::{
+    handle_quick_train_button_interactions, spawn_desktop_quick_train_button,
+    spawn_quick_btn_train_worker,
+};
 
 pub use bottom_bar::spawn_bottom_bar;
 pub use command_card::{
@@ -87,6 +93,7 @@ impl Plugin for RtsUiPlugin {
                     update_mobile_unit_production_visibility_system,
                     handle_mobile_unit_production_interactions,
                     handle_mobile_unit_menu_close_interaction,
+                    handle_quick_train_button_interactions,
                 ),
             );
     }

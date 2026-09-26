@@ -1,4 +1,5 @@
 use super::*;
+use bevy::ecs::system::RunSystemOnce;
 use crate::net_server::{IncomingNetEvent, OutgoingNetEvent, ServerNetworkChannels};
 use crate::session::{Matchmaker, PlayerSession, Room};
 use shared::components::*;
@@ -1301,6 +1302,922 @@ fn test_idle_worker_does_not_target_enemy_base_or_out_of_range_rock() {
     assert_eq!(w_mid.state, WorkerState::Idle, "Worker in middle of map should remain idle");
     assert_eq!(w_mid.target_node, None);
 }
+
+#[test]
+fn test_gold_rock_5_worker_saturation_limit() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    app.insert_resource(Time::<()>::default());
+    let mut mm = Matchmaker::new();
+    let mut room = Room::new(1, None, GameMode::Multiplayer1v1, Some(101), Some(102));
+    room.is_active = true;
+    room.countdown_timer = 0.0;
+    mm.rooms.insert(1, room);
+    app.insert_resource(mm);
+    app.add_systems(Update, server_mining_system);
+
+    let world = app.world_mut();
+
+    // Friendly base at (0, -1000)
+    world.spawn((
+        Transform::from_xyz(0.0, -1000.0, 1.0),
+        Faction::Player1,
+        RoomId(1),
+        BaseHQ {
+            supply_provided: 10,
+            dropoff_radius: 70.0,
+        },
+    ));
+
+    // Friendly mineral node at (0, -1200) (distance 200 to base, within 380)
+    let home_rock = world.spawn((
+        Transform::from_xyz(0.0, -1200.0, 0.5),
+        ResourceNode::new(2000),
+        NetEntity { net_id: 10, owner_peer_id: 0 },
+        RoomId(1),
+    )).id();
+
+    // Spawn 7 idle friendly workers near base (dist ~150 to home rock)
+    let mut worker_ents = Vec::new();
+    for i in 0..7 {
+        let ent = world.spawn((
+            Transform::from_xyz(i as f32 * 5.0, -1050.0, 2.0),
+            MoveSpeed(WORKER_MOVE_SPEED),
+            Faction::Player1,
+            RoomId(1),
+            Worker::default(),
+        )).id();
+        worker_ents.push(ent);
+    }
+
+    app.update();
+
+    let mut mining_count = 0;
+    let mut idle_count = 0;
+
+    for &w_ent in &worker_ents {
+        let w = app.world().get::<Worker>(w_ent).unwrap();
+        if w.state == WorkerState::MovingToResource {
+            assert_eq!(w.target_node, Some(home_rock));
+            mining_count += 1;
+        } else if w.state == WorkerState::Idle {
+            assert_eq!(w.target_node, None);
+            idle_count += 1;
+        }
+    }
+
+    assert_eq!(mining_count, 5, "Exactly 5 workers should target the gold rock (MAX_WORKERS_PER_ROCK)");
+    assert_eq!(idle_count, 2, "Remaining 2 workers should stay idle due to saturation limit");
+}
+
+#[test]
+fn test_idle_worker_base_hq_proximity_constraint() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    app.insert_resource(Time::<()>::default());
+    let mut mm = Matchmaker::new();
+    let mut room = Room::new(1, None, GameMode::Multiplayer1v1, Some(101), Some(102));
+    room.is_active = true;
+    room.countdown_timer = 0.0;
+    mm.rooms.insert(1, room);
+    app.insert_resource(mm);
+    app.add_systems(Update, server_mining_system);
+
+    let world = app.world_mut();
+
+    // Friendly base at (0, -1000)
+    world.spawn((
+        Transform::from_xyz(0.0, -1000.0, 1.0),
+        Faction::Player1,
+        RoomId(1),
+        BaseHQ {
+            supply_provided: 10,
+            dropoff_radius: 70.0,
+        },
+    ));
+
+    // Expansion mineral node at (800, -750) - distance to Base HQ is ~838px (> 380px radius)
+    let expansion_rock = world.spawn((
+        Transform::from_xyz(800.0, -750.0, 0.5),
+        ResourceNode::new(2000),
+        NetEntity { net_id: 20, owner_peer_id: 0 },
+        RoomId(1),
+    )).id();
+
+    // Worker stationed at (750, -750) - only 50px from expansion rock, but expansion has no Base HQ
+    let worker_ent = world.spawn((
+        Transform::from_xyz(750.0, -750.0, 2.0),
+        MoveSpeed(WORKER_MOVE_SPEED),
+        Faction::Player1,
+        RoomId(1),
+        Worker::default(),
+    )).id();
+
+    app.update();
+
+    let worker = app.world().get::<Worker>(worker_ent).unwrap();
+    assert_eq!(worker.state, WorkerState::Idle, "Worker should not auto-mine rock without friendly Base HQ within 380px");
+    assert_eq!(worker.target_node, None);
+
+    // Now establish an expansion Base HQ at (850, -750) (distance 50px <= 380px)
+    app.world_mut().spawn((
+        Transform::from_xyz(850.0, -750.0, 1.0),
+        Faction::Player1,
+        RoomId(1),
+        BaseHQ {
+            supply_provided: 10,
+            dropoff_radius: 70.0,
+        },
+    ));
+
+    app.update();
+
+    let worker_after = app.world().get::<Worker>(worker_ent).unwrap();
+    assert_eq!(worker_after.state, WorkerState::MovingToResource, "Worker should now auto-mine rock with Base HQ nearby");
+    assert_eq!(worker_after.target_node, Some(expansion_rock));
+}
+
+#[test]
+fn test_depleted_rock_workers_fallback_to_idle() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    app.insert_resource(Time::<()>::default());
+    let mut mm = Matchmaker::new();
+    let mut room = Room::new(1, None, GameMode::Multiplayer1v1, Some(101), Some(102));
+    room.is_active = true;
+    room.countdown_timer = 0.0;
+    mm.rooms.insert(1, room);
+    app.insert_resource(mm);
+    app.add_systems(Update, server_mining_system);
+
+    let world = app.world_mut();
+
+    // Friendly base at (0, -1000)
+    world.spawn((
+        Transform::from_xyz(0.0, -1000.0, 1.0),
+        Faction::Player1,
+        RoomId(1),
+        BaseHQ {
+            supply_provided: 10,
+            dropoff_radius: 70.0,
+        },
+    ));
+
+    // Mineral node that is depleted (0 remaining minerals)
+    let depleted_rock = world.spawn((
+        Transform::from_xyz(0.0, -1200.0, 0.5),
+        ResourceNode { remaining_minerals: 0, max_minerals: 2000 },
+        NetEntity { net_id: 10, owner_peer_id: 0 },
+        RoomId(1),
+    )).id();
+
+    // Worker currently in MovingToResource state targeting the depleted rock
+    let worker_ent = world.spawn((
+        Transform::from_xyz(0.0, -1050.0, 2.0),
+        MoveSpeed(WORKER_MOVE_SPEED),
+        Faction::Player1,
+        RoomId(1),
+        Worker {
+            state: WorkerState::MovingToResource,
+            target_node: Some(depleted_rock),
+            ..default()
+        },
+    )).id();
+
+    app.update();
+
+    let worker = app.world().get::<Worker>(worker_ent).unwrap();
+    assert_eq!(worker.state, WorkerState::Idle, "Worker targeting depleted rock must fallback to Idle");
+    assert_eq!(worker.target_node, None);
+}
+
+#[test]
+fn test_manual_harvest_respects_5_worker_saturation_limit() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+
+    let (_tx_in, rx_in) = crossbeam_channel::unbounded();
+    let (tx_out, mut rx_out) = tokio::sync::mpsc::unbounded_channel();
+    app.insert_resource(ServerNetworkChannels {
+        rx_incoming: rx_in,
+        tx_outgoing: tx_out,
+    });
+
+    let mut mm = Matchmaker::new();
+    let mut room = Room::new(1, None, GameMode::Multiplayer1v1, Some(101), Some(102));
+    room.is_active = true;
+    mm.rooms.insert(1, room);
+    mm.players.insert(101, PlayerSession {
+        peer_id: 101,
+        name: "Player 1".to_string(),
+        room_id: 1,
+        faction: Faction::Player1,
+        color: FactionColor::Blue,
+        platform: ClientPlatform::Desktop,
+    });
+    app.insert_resource(mm);
+
+    let world = app.world_mut();
+
+    let rock_ent = world.spawn((
+        ResourceNode::new(2000),
+        NetEntity { net_id: 50, owner_peer_id: 0 },
+        Radius(36.0),
+        RoomId(1),
+        Transform::from_xyz(0.0, -1200.0, 1.0),
+    )).id();
+
+    // 4 workers already mining rock 50
+    for i in 0..4 {
+        world.spawn((
+            Unit { name: "Worker".to_string(), supply_cost: 1 },
+            Faction::Player1,
+            RoomId(1),
+            NetEntity { net_id: 10 + i, owner_peer_id: 101 },
+            Worker {
+                state: WorkerState::Mining,
+                target_node: Some(rock_ent),
+                ..default()
+            },
+            Transform::from_xyz(0.0, -1190.0, 2.0),
+        ));
+    }
+
+    // 3 new workers to order
+    for i in 0..3 {
+        let net_id = 20 + i;
+        world.spawn((
+            Unit { name: "Worker".to_string(), supply_cost: 1 },
+            Faction::Player1,
+            RoomId(1),
+            NetEntity { net_id, owner_peer_id: 101 },
+            Worker::default(),
+            Transform::from_xyz(0.0, -1000.0, 2.0),
+        ));
+    }
+
+    // Run handle_harvest via an exclusive system
+    let harvest_system = move |mut commands: Commands,
+                              channels: Res<ServerNetworkChannels>,
+                              matchmaker: Res<Matchmaker>,
+                              mut unit_query: crate::sim::commands::UnitQuery,
+                              node_query: crate::sim::commands::NodeQuery| {
+        crate::sim::commands::economy::handle_harvest(
+            &mut commands,
+            &channels,
+            &matchmaker,
+            &mut unit_query,
+            &node_query,
+            101,
+            &[20, 21, 22],
+            50,
+        );
+    };
+
+    app.add_systems(Update, harvest_system);
+    app.update();
+
+    // Verify broadcast event only contained 1 worker (20), because 4 + 1 = 5 (cap)
+    if let Ok(event) = rx_out.try_recv() {
+        match event {
+            OutgoingNetEvent::BroadcastToPeers { msg, .. } => match msg {
+                ServerMessage::WorkersOrderedHarvest { worker_net_ids, .. } => {
+                    assert_eq!(worker_net_ids.len(), 1, "Only 1 additional worker can be assigned before hitting 5 worker cap");
+                    assert_eq!(worker_net_ids[0], 20);
+                }
+                _ => panic!("Expected WorkersOrderedHarvest message"),
+            },
+            _ => panic!("Expected BroadcastToPeers event"),
+        }
+    } else {
+        panic!("Expected outgoing network event");
+    }
+}
+
+#[test]
+fn test_unconstructed_building_no_workers_stays_at_zero_progress() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    app.insert_resource(Time::<()>::default());
+    let mut mm = Matchmaker::new();
+    let mut room = Room::new(1, None, GameMode::Multiplayer1v1, Some(101), Some(102));
+    room.is_active = true;
+    room.countdown_timer = 0.0;
+    mm.rooms.insert(1, room);
+    app.insert_resource(mm);
+    app.add_systems(Update, server_mining_system);
+
+    let world = app.world_mut();
+
+    let barracks_e = world.spawn((
+        Building::new("Barracks", Vec2::new(60.0, 60.0), 10.0, false),
+        Health::new(500.0),
+        Radius(30.0),
+        Faction::Player1,
+        RoomId(1),
+        NetEntity { net_id: 30, owner_peer_id: 101 },
+        Transform::from_xyz(0.0, -900.0, 1.0),
+    )).id();
+
+    // Advance 5 seconds with no workers present
+    for _ in 0..5 {
+        let mut time = app.world_mut().resource_mut::<Time>();
+        time.advance_by(std::time::Duration::from_secs(1));
+        app.update();
+    }
+
+    let b = app.world().get::<Building>(barracks_e).unwrap();
+    assert_eq!(b.build_timer, 0.0, "Building should not passively construct without workers");
+    assert!(!b.is_constructed, "Building should remain unconstructed");
+}
+
+#[test]
+fn test_idle_worker_auto_moves_to_and_constructs_building() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    app.insert_resource(Time::<()>::default());
+    let mut mm = Matchmaker::new();
+    let mut room = Room::new(1, None, GameMode::Multiplayer1v1, Some(101), Some(102));
+    room.is_active = true;
+    room.countdown_timer = 0.0;
+    mm.rooms.insert(1, room);
+    app.insert_resource(mm);
+    app.add_systems(Update, server_mining_system);
+
+    let world = app.world_mut();
+
+    let barracks_e = world.spawn((
+        Building::new("Barracks", Vec2::new(60.0, 60.0), 2.0, false),
+        Health::new(500.0),
+        Radius(30.0),
+        Faction::Player1,
+        RoomId(1),
+        NetEntity { net_id: 30, owner_peer_id: 101 },
+        Transform::from_xyz(0.0, -950.0, 1.0),
+    )).id();
+
+    // Idle worker nearby
+    let worker_e = world.spawn((
+        Transform::from_xyz(0.0, -960.0, 2.0),
+        MoveSpeed(100.0),
+        Faction::Player1,
+        RoomId(1),
+        Worker::default(),
+    )).id();
+
+    // Tick 1: Worker detects uncompleted building and starts moving/building
+    app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_millis(100));
+    app.world_mut().run_system_once(server_mining_system).unwrap();
+
+    let w = app.world().get::<Worker>(worker_e).unwrap();
+    assert_eq!(w.target_building, Some(barracks_e), "Idle worker must target unconstructed building");
+    assert!(w.state == WorkerState::MovingToBuilding || w.state == WorkerState::Building);
+
+    // Advance 5 seconds with 0.5s steps (duration is 2.0s)
+    for _ in 0..10 {
+        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_millis(500));
+        app.world_mut().run_system_once(server_mining_system).unwrap();
+    }
+
+    let b = app.world().get::<Building>(barracks_e).unwrap();
+    assert!(b.is_constructed, "Building must be completed by worker");
+
+    let w_after = app.world().get::<Worker>(worker_e).unwrap();
+    assert_eq!(w_after.state, WorkerState::Idle, "Worker must return to Idle upon building completion");
+    assert_eq!(w_after.target_building, None);
+}
+
+#[test]
+fn test_zero_idle_workers_drafts_closest_miner() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    app.insert_resource(Time::<()>::default());
+    let mut mm = Matchmaker::new();
+    let mut room = Room::new(1, None, GameMode::Multiplayer1v1, Some(101), Some(102));
+    room.is_active = true;
+    room.countdown_timer = 0.0;
+    mm.rooms.insert(1, room);
+    app.insert_resource(mm);
+    app.add_systems(Update, server_mining_system);
+
+    let world = app.world_mut();
+
+    let rock_e = world.spawn((
+        ResourceNode { remaining_minerals: 500, max_minerals: 500 },
+        Radius(20.0),
+        NetEntity { net_id: 10, owner_peer_id: 0 },
+        RoomId(1),
+        Transform::from_xyz(50.0, -1000.0, 1.0),
+    )).id();
+
+    // Miner actively mining the rock
+    let mut mining_worker = Worker::default();
+    mining_worker.state = WorkerState::Mining;
+    mining_worker.target_node = Some(rock_e);
+
+    let worker_e = world.spawn((
+        Transform::from_xyz(50.0, -1000.0, 2.0),
+        MoveSpeed(100.0),
+        Faction::Player1,
+        RoomId(1),
+        mining_worker,
+    )).id();
+
+    // Now spawn unconstructed Barracks
+    let barracks_e = world.spawn((
+        Building::new("Barracks", Vec2::new(60.0, 60.0), 10.0, false),
+        Health::new(500.0),
+        Radius(30.0),
+        Faction::Player1,
+        RoomId(1),
+        NetEntity { net_id: 30, owner_peer_id: 101 },
+        Transform::from_xyz(0.0, -900.0, 1.0),
+    )).id();
+
+    // Run system tick: 0 idle workers exist, so closest miner must be drafted!
+    {
+        let mut time = app.world_mut().resource_mut::<Time>();
+        time.advance_by(std::time::Duration::from_millis(100));
+        app.update();
+    }
+
+    let w = app.world().get::<Worker>(worker_e).unwrap();
+    assert_eq!(w.target_building, Some(barracks_e), "Miner should be drafted to construct building");
+    assert_eq!(w.state, WorkerState::MovingToBuilding);
+    assert_eq!(w.target_node, None, "Drafted worker must clear its mining target");
+}
+
+#[test]
+fn test_collaborative_construction_two_workers_double_speed() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    app.insert_resource(Time::<()>::default());
+    let mut mm = Matchmaker::new();
+    let mut room = Room::new(1, None, GameMode::Multiplayer1v1, Some(101), Some(102));
+    room.is_active = true;
+    room.countdown_timer = 0.0;
+    mm.rooms.insert(1, room);
+    app.insert_resource(mm);
+    app.add_systems(Update, server_mining_system);
+
+    let world = app.world_mut();
+
+    let barracks_e = world.spawn((
+        Building::new("Barracks", Vec2::new(60.0, 60.0), 10.0, false),
+        Health::new(500.0),
+        Radius(30.0),
+        Faction::Player1,
+        RoomId(1),
+        NetEntity { net_id: 30, owner_peer_id: 101 },
+        Transform::from_xyz(0.0, 0.0, 1.0),
+    )).id();
+
+    // Worker 1 in Building state
+    let mut w1 = Worker::default();
+    w1.state = WorkerState::Building;
+    w1.target_building = Some(barracks_e);
+    world.spawn((
+        Transform::from_xyz(0.0, 20.0, 2.0),
+        MoveSpeed(100.0),
+        Faction::Player1,
+        RoomId(1),
+        w1,
+    ));
+
+    // Worker 2 in Building state
+    let mut w2 = Worker::default();
+    w2.state = WorkerState::Building;
+    w2.target_building = Some(barracks_e);
+    world.spawn((
+        Transform::from_xyz(0.0, -20.0, 2.0),
+        MoveSpeed(100.0),
+        Faction::Player1,
+        RoomId(1),
+        w2,
+    ));
+
+    // Advance by 1 second: with 2 workers, build_timer must advance by 2.0s!
+    app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs(1));
+    app.world_mut().run_system_once(server_mining_system).unwrap();
+
+    let b = app.world().get::<Building>(barracks_e).unwrap();
+    assert!((b.build_timer - 2.0).abs() < 0.01, "2 workers should advance build_timer by 2.0s in 1.0s elapsed (got {})", b.build_timer);
+}
+
+#[test]
+fn test_completed_building_transitions_workers_to_idle_and_mines() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    app.insert_resource(Time::<()>::default());
+    let mut mm = Matchmaker::new();
+    let mut room = Room::new(1, None, GameMode::Multiplayer1v1, Some(101), Some(102));
+    room.is_active = true;
+    room.countdown_timer = 0.0;
+    mm.rooms.insert(1, room);
+    app.insert_resource(mm);
+    app.add_systems(Update, server_mining_system);
+
+    let world = app.world_mut();
+
+    // Friendly base at (0, -1000)
+    world.spawn((
+        Transform::from_xyz(0.0, -1000.0, 1.0),
+        Faction::Player1,
+        RoomId(1),
+        BaseHQ {
+            supply_provided: 10,
+            dropoff_radius: 70.0,
+        },
+    ));
+
+    // Gold rock at (50, -1000)
+    let rock_e = world.spawn((
+        ResourceNode { remaining_minerals: 500, max_minerals: 500 },
+        Radius(20.0),
+        NetEntity { net_id: 10, owner_peer_id: 0 },
+        RoomId(1),
+        Transform::from_xyz(50.0, -1000.0, 1.0),
+    )).id();
+
+    // Building almost done (build_timer = 9.9, duration = 10.0)
+    let mut b = Building::new("Barracks", Vec2::new(60.0, 60.0), 10.0, false);
+    b.build_timer = 9.9;
+    let barracks_e = world.spawn((
+        b,
+        Health::new(500.0),
+        Radius(30.0),
+        Faction::Player1,
+        RoomId(1),
+        NetEntity { net_id: 30, owner_peer_id: 101 },
+        Transform::from_xyz(0.0, -980.0, 1.0),
+    )).id();
+
+    // Worker in Building state
+    let mut w = Worker::default();
+    w.state = WorkerState::Building;
+    w.target_building = Some(barracks_e);
+    let worker_e = world.spawn((
+        Transform::from_xyz(0.0, -990.0, 2.0),
+        MoveSpeed(100.0),
+        Faction::Player1,
+        RoomId(1),
+        w,
+    )).id();
+
+    // Advance 0.2s: building completes, worker becomes Idle
+    app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_millis(200));
+    app.world_mut().run_system_once(server_mining_system).unwrap();
+
+    let b_after = app.world().get::<Building>(barracks_e).unwrap();
+    assert!(b_after.is_constructed, "Building must be finished");
+
+    let w1 = app.world().get::<Worker>(worker_e).unwrap();
+    assert_eq!(w1.state, WorkerState::Idle, "Worker must become idle upon building completion");
+
+    // Next tick: Idle worker automatically targets nearest available rock
+    app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_millis(100));
+    app.world_mut().run_system_once(server_mining_system).unwrap();
+
+    let w2 = app.world().get::<Worker>(worker_e).unwrap();
+    assert_eq!(w2.target_node, Some(rock_e), "Worker should auto-target nearby gold rock after building finishes");
+    assert_eq!(w2.state, WorkerState::MovingToResource);
+}
+
+#[test]
+fn test_damaged_building_triggers_idle_worker_auto_repair() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    app.insert_resource(Time::<()>::default());
+    let mut mm = Matchmaker::new();
+    let mut room = Room::new(1, None, GameMode::Multiplayer1v1, Some(101), Some(102));
+    room.is_active = true;
+    room.countdown_timer = 0.0;
+    mm.rooms.insert(1, room);
+    app.insert_resource(mm);
+    app.add_systems(Update, server_mining_system);
+
+    let world = app.world_mut();
+
+    // Friendly Base HQ constructed
+    world.spawn((
+        Building::new("Base HQ", Vec2::new(100.0, 100.0), 0.0, true),
+        Health::new(1500.0),
+        BaseHQ { supply_provided: 10, dropoff_radius: 70.0 },
+        Radius(50.0),
+        Faction::Player1,
+        RoomId(1),
+        NetEntity { net_id: 10, owner_peer_id: 101 },
+        Transform::from_xyz(0.0, -1000.0, 1.0),
+    ));
+
+    // Damaged friendly building (100 / 500 HP)
+    let mut damaged_hp = Health::new(500.0);
+    damaged_hp.current = 100.0;
+    let bldg_e = world.spawn((
+        Building::new("Barracks", Vec2::new(60.0, 60.0), 10.0, true),
+        damaged_hp,
+        Radius(30.0),
+        Faction::Player1,
+        RoomId(1),
+        NetEntity { net_id: 20, owner_peer_id: 101 },
+        Transform::from_xyz(0.0, -950.0, 1.0),
+    )).id();
+
+    // Idle worker nearby
+    let worker_e = world.spawn((
+        Transform::from_xyz(0.0, -960.0, 2.0),
+        MoveSpeed(100.0),
+        Faction::Player1,
+        RoomId(1),
+        Worker::default(),
+    )).id();
+
+    // Advance 0.1s: idle worker notices damaged building and starts moving to repair / repairing
+    app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_millis(100));
+    app.world_mut().run_system_once(server_mining_system).unwrap();
+
+    let w = app.world().get::<Worker>(worker_e).unwrap();
+    assert_eq!(w.target_building, Some(bldg_e), "Worker must target damaged building for repair");
+    assert!(
+        w.state == WorkerState::MovingToRepair || w.state == WorkerState::Repairing,
+        "Worker state should be MovingToRepair or Repairing, got {:?}",
+        w.state
+    );
+}
+
+#[test]
+fn test_collaborative_repair_multiple_workers() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    app.insert_resource(Time::<()>::default());
+    let mut mm = Matchmaker::new();
+    let mut room = Room::new(1, None, GameMode::Multiplayer1v1, Some(101), Some(102));
+    room.is_active = true;
+    room.countdown_timer = 0.0;
+    mm.rooms.insert(1, room);
+    app.insert_resource(mm);
+    app.add_systems(Update, server_mining_system);
+
+    let world = app.world_mut();
+
+    let mut hp = Health::new(500.0);
+    hp.current = 100.0;
+    let bldg_e = world.spawn((
+        Building::new("Barracks", Vec2::new(60.0, 60.0), 10.0, true),
+        hp,
+        Radius(30.0),
+        Faction::Player1,
+        RoomId(1),
+        NetEntity { net_id: 10, owner_peer_id: 101 },
+        Transform::from_xyz(0.0, -950.0, 1.0),
+    )).id();
+
+    // Two workers actively repairing
+    let mut w1 = Worker::default();
+    w1.state = WorkerState::Repairing;
+    w1.target_building = Some(bldg_e);
+    world.spawn((
+        Transform::from_xyz(0.0, -955.0, 2.0),
+        MoveSpeed(100.0),
+        Faction::Player1,
+        RoomId(1),
+        w1,
+    ));
+
+    let mut w2 = Worker::default();
+    w2.state = WorkerState::Repairing;
+    w2.target_building = Some(bldg_e);
+    world.spawn((
+        Transform::from_xyz(0.0, -945.0, 2.0),
+        MoveSpeed(100.0),
+        Faction::Player1,
+        RoomId(1),
+        w2,
+    ));
+
+    // Advance 1.0s: 2 workers * 20 HP/s = 40 HP healed -> 100 + 40 = 140 HP
+    app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs(1));
+    app.world_mut().run_system_once(server_mining_system).unwrap();
+
+    let hp_after = app.world().get::<Health>(bldg_e).unwrap();
+    assert!((hp_after.current - 140.0).abs() < 0.1, "Expected 140.0 HP, got {}", hp_after.current);
+}
+
+#[test]
+fn test_repaired_building_full_hp_transitions_worker_to_idle() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    app.insert_resource(Time::<()>::default());
+    let mut mm = Matchmaker::new();
+    let mut room = Room::new(1, None, GameMode::Multiplayer1v1, Some(101), Some(102));
+    room.is_active = true;
+    room.countdown_timer = 0.0;
+    mm.rooms.insert(1, room);
+    app.insert_resource(mm);
+    app.add_systems(Update, server_mining_system);
+
+    let world = app.world_mut();
+
+    let mut hp = Health::new(500.0);
+    hp.current = 495.0; // 5 HP away from max
+    let bldg_e = world.spawn((
+        Building::new("Barracks", Vec2::new(60.0, 60.0), 10.0, true),
+        hp,
+        Radius(30.0),
+        Faction::Player1,
+        RoomId(1),
+        NetEntity { net_id: 10, owner_peer_id: 101 },
+        Transform::from_xyz(0.0, -950.0, 1.0),
+    )).id();
+
+    let mut w = Worker::default();
+    w.state = WorkerState::Repairing;
+    w.target_building = Some(bldg_e);
+    let worker_e = world.spawn((
+        Transform::from_xyz(0.0, -955.0, 2.0),
+        MoveSpeed(100.0),
+        Faction::Player1,
+        RoomId(1),
+        w,
+    )).id();
+
+    // Advance 0.5s: 1 worker * 20 HP/s * 0.5s = 10 HP healed -> clamps to 500.0 max HP
+    app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_millis(500));
+    app.world_mut().run_system_once(server_mining_system).unwrap();
+
+    let hp_after = app.world().get::<Health>(bldg_e).unwrap();
+    assert_eq!(hp_after.current, 500.0);
+
+    let w_after = app.world().get::<Worker>(worker_e).unwrap();
+    assert_eq!(w_after.state, WorkerState::Idle, "Worker must become idle once repair completes");
+    assert_eq!(w_after.target_building, None);
+}
+
+#[test]
+fn test_manual_override_prevents_worker_auto_tasking_and_drafting() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    app.insert_resource(Time::<()>::default());
+    let mut mm = Matchmaker::new();
+    let mut room = Room::new(1, None, GameMode::Multiplayer1v1, Some(101), Some(102));
+    room.is_active = true;
+    room.countdown_timer = 0.0;
+    mm.rooms.insert(1, room);
+    app.insert_resource(mm);
+    app.add_systems(Update, server_mining_system);
+
+    let world = app.world_mut();
+
+    // Unconstructed building nearby
+    world.spawn((
+        Building::new("Supply Depot", Vec2::new(40.0, 40.0), 10.0, false),
+        Health::new(300.0),
+        Radius(20.0),
+        Faction::Player1,
+        RoomId(1),
+        NetEntity { net_id: 10, owner_peer_id: 101 },
+        Transform::from_xyz(0.0, -900.0, 1.0),
+    ));
+
+    // Damaged building nearby
+    let mut hp = Health::new(500.0);
+    hp.current = 100.0;
+    world.spawn((
+        Building::new("Barracks", Vec2::new(60.0, 60.0), 10.0, true),
+        hp,
+        Radius(30.0),
+        Faction::Player1,
+        RoomId(1),
+        NetEntity { net_id: 20, owner_peer_id: 101 },
+        Transform::from_xyz(0.0, -950.0, 1.0),
+    ));
+
+    // Worker with manual_override: true at a retreat position
+    let mut worker = Worker::default();
+    worker.state = WorkerState::Idle;
+    worker.manual_override = true;
+    let worker_e = world.spawn((
+        Transform::from_xyz(0.0, -800.0, 2.0),
+        MoveSpeed(100.0),
+        Faction::Player1,
+        RoomId(1),
+        worker,
+    )).id();
+
+    // Advance time: worker should NOT auto-build, auto-mine, or auto-repair
+    app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs(1));
+    app.world_mut().run_system_once(server_mining_system).unwrap();
+
+    let w = app.world().get::<Worker>(worker_e).unwrap();
+    assert_eq!(w.state, WorkerState::Idle, "Manual override worker must stay Idle");
+    assert_eq!(w.target_building, None);
+    assert_eq!(w.target_node, None);
+    assert!(w.manual_override, "manual_override flag must remain true");
+}
+
+#[test]
+fn test_handle_stop_and_repair_commands_clear_manual_override() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    app.insert_resource(Time::<()>::default());
+    let mut mm = Matchmaker::new();
+    let mut room = Room::new(1, None, GameMode::Multiplayer1v1, Some(101), Some(102));
+    room.is_active = true;
+    room.countdown_timer = 0.0;
+    mm.rooms.insert(1, room);
+    mm.players.insert(
+        101,
+        PlayerSession {
+            peer_id: 101,
+            name: "Alice".to_string(),
+            room_id: 1,
+            faction: Faction::Player1,
+            color: FactionColor::Blue,
+            platform: ClientPlatform::Desktop,
+        },
+    );
+    app.insert_resource(mm);
+
+    let (_tx_in, rx_in) = crossbeam_channel::unbounded();
+    let (tx_out, _rx_out) = tokio::sync::mpsc::unbounded_channel();
+    app.insert_resource(ServerNetworkChannels {
+        rx_incoming: rx_in,
+        tx_outgoing: tx_out,
+    });
+
+    let world = app.world_mut();
+
+    let bldg_e = world.spawn((
+        Building::new("Barracks", Vec2::new(60.0, 60.0), 10.0, true),
+        Health::new(500.0),
+        Radius(30.0),
+        Faction::Player1,
+        RoomId(1),
+        NetEntity { net_id: 10, owner_peer_id: 101 },
+        Transform::from_xyz(0.0, -950.0, 1.0),
+    )).id();
+
+    let mut w = Worker::default();
+    w.manual_override = true;
+    let worker_e = world.spawn((
+        Transform::from_xyz(0.0, -800.0, 2.0),
+        MoveSpeed(100.0),
+        Faction::Player1,
+        RoomId(1),
+        NetEntity { net_id: 50, owner_peer_id: 101 },
+        w,
+    )).id();
+
+    // 1. Issue repair command via handle_repair inside run_system_once
+    app.world_mut().run_system_once(
+        |mut commands: Commands,
+         channels: Res<ServerNetworkChannels>,
+         matchmaker: Res<Matchmaker>,
+         mut unit_query: crate::sim::commands::UnitQuery,
+         bldg_query: crate::sim::commands::BuildingQuery| {
+            crate::sim::commands::economy::handle_repair(
+                &mut commands,
+                &channels,
+                &matchmaker,
+                &mut unit_query,
+                &bldg_query,
+                101,
+                &[50],
+                10,
+            );
+        },
+    ).unwrap();
+
+    let w_after_repair = app.world().get::<Worker>(worker_e).unwrap();
+    assert_eq!(w_after_repair.state, WorkerState::MovingToRepair);
+    assert_eq!(w_after_repair.target_building, Some(bldg_e));
+    assert!(!w_after_repair.manual_override, "Repair order must clear manual_override");
+
+    // 2. Set manual_override back to true and issue stop
+    app.world_mut().get_mut::<Worker>(worker_e).unwrap().manual_override = true;
+
+    app.world_mut().run_system_once(
+        |mut commands: Commands,
+         channels: Res<ServerNetworkChannels>,
+         matchmaker: Res<Matchmaker>,
+         mut unit_query: crate::sim::commands::UnitQuery| {
+            crate::sim::commands::movement::handle_stop(
+                &mut commands,
+                &channels,
+                &matchmaker,
+                &mut unit_query,
+                101,
+                &[50],
+            );
+        },
+    ).unwrap();
+
+    let w_after_stop = app.world().get::<Worker>(worker_e).unwrap();
+    assert_eq!(w_after_stop.state, WorkerState::Idle);
+    assert!(!w_after_stop.manual_override, "Stop order must clear manual_override");
+}
+
+
 
 
 

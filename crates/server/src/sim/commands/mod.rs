@@ -39,6 +39,12 @@ pub type ProdQuery<'w, 's> = Query<
     (Entity, &'static NetEntity, &'static Faction, &'static RoomId, &'static mut ProductionBuilding),
 >;
 
+pub type BuildingQuery<'w, 's> = Query<
+    'w,
+    's,
+    (Entity, &'static NetEntity, &'static RoomId, &'static Faction, &'static Building),
+>;
+
 /// Helper to look up a peer's assigned faction and active room ID
 #[inline]
 pub fn get_player_and_room(matchmaker: &Matchmaker, peer_id: u64) -> (Faction, u32) {
