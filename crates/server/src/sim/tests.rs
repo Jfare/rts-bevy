@@ -2217,6 +2217,104 @@ fn test_handle_stop_and_repair_commands_clear_manual_override() {
     assert!(!w_after_stop.manual_override, "Stop order must clear manual_override");
 }
 
+#[test]
+fn test_workers_mine_distinct_spread_out_spots_on_rock() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    app.insert_resource(Time::<()>::default());
+    let mut mm = Matchmaker::new();
+    let mut room = Room::new(1, None, GameMode::Multiplayer1v1, Some(101), Some(102));
+    room.is_active = true;
+    room.countdown_timer = 0.0;
+    mm.rooms.insert(1, room);
+    app.insert_resource(mm);
+
+    let world = app.world_mut();
+
+    // Friendly base at (0, -1000)
+    world.spawn((
+        Transform::from_xyz(0.0, -1000.0, 1.0),
+        Faction::Player1,
+        RoomId(1),
+        BaseHQ {
+            supply_provided: 10,
+            dropoff_radius: 70.0,
+        },
+    ));
+
+    // Friendly mineral rock at (0, -1200)
+    let home_rock = world.spawn((
+        Transform::from_xyz(0.0, -1200.0, 0.5),
+        ResourceNode::new(2000),
+        NetEntity { net_id: 10, owner_peer_id: 0 },
+        RoomId(1),
+    )).id();
+
+    // Spawn 5 idle friendly workers near base
+    let mut worker_ents = Vec::new();
+    for i in 0..5 {
+        let ent = world.spawn((
+            Transform::from_xyz(i as f32 * 5.0, -1050.0, 2.0),
+            MoveSpeed(WORKER_MOVE_SPEED),
+            Faction::Player1,
+            RoomId(1),
+            Worker::default(),
+        )).id();
+        worker_ents.push(ent);
+    }
+
+    // Tick 1: Workers auto-mine the rock
+    app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_millis(100));
+    app.world_mut().run_system_once(server_mining_system).unwrap();
+
+    let mut claimed_spots = std::collections::HashSet::new();
+    for &w_ent in &worker_ents {
+        let w = app.world().get::<Worker>(w_ent).unwrap();
+        assert_eq!(w.state, WorkerState::MovingToResource);
+        assert_eq!(w.target_node, Some(home_rock));
+        let spot = w.mining_spot_index.expect("Every worker must have claimed a spot");
+        assert!(spot < MINING_SPOTS_PER_ROCK);
+        claimed_spots.insert(spot);
+    }
+
+    assert_eq!(claimed_spots.len(), 5, "All 5 workers must have claimed unique, distinct mining spots");
+
+    let mut recorded_mining_positions = std::collections::HashMap::new();
+
+    // Advance up to 3.5 seconds (35 ticks of 100ms) and record worker mining states
+    for _ in 0..35 {
+        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_millis(100));
+        app.world_mut().run_system_once(server_mining_system).unwrap();
+
+        for &w_ent in &worker_ents {
+            let w = app.world().get::<Worker>(w_ent).unwrap();
+            let tf = app.world().get::<Transform>(w_ent).unwrap();
+            if w.state == WorkerState::Mining && !recorded_mining_positions.contains_key(&w_ent) {
+                // Check orientation: Worker must be facing inward toward the rock center (0, -1200)
+                let rock_center = Vec2::new(0.0, -1200.0);
+                let expected_dir = (rock_center - tf.translation.truncate()).normalize();
+                let forward = tf.rotation * Vec3::X;
+                let dot = forward.truncate().normalize().dot(expected_dir);
+                assert!(dot > 0.95, "Worker must face inward toward rock center (dot = {})", dot);
+
+                recorded_mining_positions.insert(w_ent, tf.translation.truncate());
+            }
+        }
+    }
+
+    assert_eq!(recorded_mining_positions.len(), 5, "All 5 workers must reach Mining state");
+
+    let positions: Vec<Vec2> = recorded_mining_positions.values().copied().collect();
+    // Verify all workers mined at distinct, spaced out positions around the rock
+    for i in 0..positions.len() {
+        for j in (i + 1)..positions.len() {
+            let dist = positions[i].distance(positions[j]);
+            assert!(dist > 40.0, "Workers {} and {} mined too close (dist = {}), they must be spread out", i, j, dist);
+        }
+    }
+}
+
+
 
 
 

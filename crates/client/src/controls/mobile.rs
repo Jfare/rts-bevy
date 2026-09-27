@@ -809,6 +809,7 @@ fn mobile_touch_interaction_system(
                                 worker.target_building = None;
                                 worker.state = WorkerState::MovingToResource;
                                 worker.manual_override = false;
+                                worker.mining_spot_index = None;
                             }
                         }
                     }

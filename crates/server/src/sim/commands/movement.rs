@@ -62,6 +62,7 @@ pub fn handle_move(
                     worker.target_node = None;
                     worker.target_building = None;
                     worker.manual_override = true;
+                    worker.mining_spot_index = None;
                 }
                 if let Some(mut stance) = stance_opt {
                     *stance = TacticalStance::Aggressive;

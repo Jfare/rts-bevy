@@ -99,6 +99,7 @@ fn handle_mining_click_orders(
                 worker.state = WorkerState::MovingToResource;
                 worker.harvest_timer = 0.0;
                 worker.carried_minerals = 0;
+                worker.mining_spot_index = None;
                 commands.entity(worker_entity).remove::<MoveTarget>();
 
                 if let Some(net) = net_opt {
@@ -159,6 +160,8 @@ fn worker_mining_state_machine(
 
     // Track active miners targeting each resource node to enforce MAX_WORKERS_PER_ROCK
     let mut node_worker_counts: std::collections::HashMap<Entity, usize> = std::collections::HashMap::new();
+    // Track occupied spots per resource node (0..MINING_SPOTS_PER_ROCK)
+    let mut node_occupied_spots: std::collections::HashMap<Entity, [bool; MINING_SPOTS_PER_ROCK]> = std::collections::HashMap::new();
     let mut building_worker_counts: std::collections::HashMap<Entity, usize> = std::collections::HashMap::new();
 
     for (_, worker, _, _, _, move_target_opt) in &worker_query {
@@ -166,6 +169,12 @@ fn worker_mining_state_machine(
             if worker.state != WorkerState::Idle {
                 if let Some(target) = worker.target_node {
                     *node_worker_counts.entry(target).or_default() += 1;
+                    if let Some(spot) = worker.mining_spot_index {
+                        if spot < MINING_SPOTS_PER_ROCK && (worker.state == WorkerState::MovingToResource || worker.state == WorkerState::Mining) {
+                            let spots = node_occupied_spots.entry(target).or_insert([false; MINING_SPOTS_PER_ROCK]);
+                            spots[spot] = true;
+                        }
+                    }
                 }
             }
             if worker.state == WorkerState::MovingToBuilding || worker.state == WorkerState::Building {
@@ -223,7 +232,13 @@ fn worker_mining_state_machine(
                         if let Some(c) = node_worker_counts.get_mut(&target_node) {
                             *c = c.saturating_sub(1);
                         }
+                        if let Some(spot) = w.mining_spot_index {
+                            if let Some(spots) = node_occupied_spots.get_mut(&target_node) {
+                                spots[spot] = false;
+                            }
+                        }
                     }
+                    w.mining_spot_index = None;
                     w.target_node = None;
                     w.carried_minerals = 0;
                     w.target_building = Some(b_ent);
@@ -245,12 +260,18 @@ fn worker_mining_state_machine(
                 if let Some(c) = node_worker_counts.get_mut(&target) {
                     *c = c.saturating_sub(1);
                 }
+                if let Some(spot) = worker.mining_spot_index {
+                    if let Some(spots) = node_occupied_spots.get_mut(&target) {
+                        spots[spot] = false;
+                    }
+                }
             }
             if let Some(target_b) = worker.target_building {
                 if let Some(c) = building_worker_counts.get_mut(&target_b) {
                     *c = c.saturating_sub(1);
                 }
             }
+            worker.mining_spot_index = None;
             worker.state = WorkerState::Idle;
             worker.target_node = None;
             worker.target_building = None;
@@ -283,6 +304,7 @@ fn worker_mining_state_machine(
                         if let Some((b_ent, b_pos)) = best_bldg {
                             worker.target_building = Some(b_ent);
                             worker.target_node = None;
+                            worker.mining_spot_index = None;
                             worker.state = WorkerState::MovingToBuilding;
                             *building_worker_counts.entry(b_ent).or_default() += 1;
                             let dir = (b_pos - worker_pos).normalize_or_zero();
@@ -341,7 +363,12 @@ fn worker_mining_state_machine(
                             *node_worker_counts.entry(node_ent).or_default() += 1;
                             worker.target_node = Some(node_ent);
                             worker.state = WorkerState::MovingToResource;
-                            let dir = (n_pos - worker_pos).normalize_or_zero();
+                            let spots = node_occupied_spots.entry(node_ent).or_insert([false; MINING_SPOTS_PER_ROCK]);
+                            let spot_idx = find_closest_open_mining_spot(n_pos, worker_pos, spots);
+                            spots[spot_idx] = true;
+                            worker.mining_spot_index = Some(spot_idx);
+                            let target_pos = get_mining_spot_position(n_pos, spot_idx);
+                            let dir = (target_pos - worker_pos).normalize_or_zero();
                             if dir.length_squared() > 0.0 {
                                 worker_transform.rotation = Quat::from_rotation_z(dir.y.atan2(dir.x));
                             }
@@ -363,6 +390,7 @@ fn worker_mining_state_machine(
                             if let Some((b_ent, b_pos)) = best_repair_bldg {
                                 worker.target_building = Some(b_ent);
                                 worker.target_node = None;
+                                worker.mining_spot_index = None;
                                 worker.state = WorkerState::MovingToRepair;
                                 let dir = (b_pos - worker_pos).normalize_or_zero();
                                 if dir.length_squared() > 0.0 {
@@ -554,12 +582,14 @@ fn worker_mining_state_machine(
                 worker.carried_minerals = 0;
 
                 let Some(node_entity) = worker.target_node else {
+                    worker.mining_spot_index = None;
                     worker.state = WorkerState::Idle;
                     continue;
                 };
 
                 let Ok((_, node_transform, node)) = node_query.get_mut(node_entity) else {
                     // Node is gone or despawned
+                    worker.mining_spot_index = None;
                     worker.target_node = None;
                     worker.state = WorkerState::Idle;
                     continue;
@@ -567,6 +597,12 @@ fn worker_mining_state_machine(
 
                 if node.remaining_minerals == 0 {
                     // Node depleted, find another closest node
+                    if let Some(spot) = worker.mining_spot_index {
+                        if let Some(spots) = node_occupied_spots.get_mut(&node_entity) {
+                            spots[spot] = false;
+                        }
+                    }
+                    worker.mining_spot_index = None;
                     worker.target_node = None;
                     worker.state = WorkerState::Idle;
                     continue;
@@ -574,21 +610,40 @@ fn worker_mining_state_machine(
 
                 let worker_pos = worker_transform.translation.truncate();
                 let node_pos = node_transform.translation.truncate();
-                let dist = worker_pos.distance(node_pos);
 
-                if dist <= worker.interact_distance {
-                    // Arrived at mineral patch, begin mining
+                let spot_idx = match worker.mining_spot_index {
+                    Some(idx) => idx,
+                    None => {
+                        let spots = node_occupied_spots.entry(node_entity).or_insert([false; MINING_SPOTS_PER_ROCK]);
+                        let chosen = find_closest_open_mining_spot(node_pos, worker_pos, spots);
+                        spots[chosen] = true;
+                        worker.mining_spot_index = Some(chosen);
+                        chosen
+                    }
+                };
+
+                let spot_pos = get_mining_spot_position(node_pos, spot_idx);
+                let dist = worker_pos.distance(spot_pos);
+
+                if dist <= (move_speed.0 * dt).max(6.0) {
+                    // Arrived at designated mining spot, begin mining
+                    worker_transform.translation.x = spot_pos.x;
+                    worker_transform.translation.y = spot_pos.y;
                     worker.state = WorkerState::Mining;
                     worker.harvest_timer = 0.0;
                     worker.carried_minerals = 0;
+                    let face_dir = (node_pos - spot_pos).normalize_or_zero();
+                    if face_dir.length_squared() > 0.0 {
+                        worker_transform.rotation = Quat::from_rotation_z(face_dir.y.atan2(face_dir.x));
+                    }
                 } else {
-                    // Move towards node
-                    let dir = (node_pos - worker_pos).normalize_or_zero();
+                    // Move towards spot
+                    let dir = (spot_pos - worker_pos).normalize_or_zero();
                     let step = dir * move_speed.0 * dt;
                     worker_transform.translation.x += step.x;
                     worker_transform.translation.y += step.y;
 
-                    // Face node
+                    // Face spot
                     if dir.length_squared() > 0.0 {
                         let angle = dir.y.atan2(dir.x);
                         worker_transform.rotation = Quat::from_rotation_z(angle);
@@ -598,11 +653,18 @@ fn worker_mining_state_machine(
 
             WorkerState::Mining => {
                 let Some(node_entity) = worker.target_node else {
+                    worker.mining_spot_index = None;
                     worker.state = WorkerState::Idle;
                     continue;
                 };
 
                 let Ok((_, node_transform, mut node)) = node_query.get_mut(node_entity) else {
+                    if let Some(spot) = worker.mining_spot_index {
+                        if let Some(spots) = node_occupied_spots.get_mut(&node_entity) {
+                            spots[spot] = false;
+                        }
+                    }
+                    worker.mining_spot_index = None;
                     worker.state = WorkerState::MovingToBase;
                     continue;
                 };
@@ -624,6 +686,12 @@ fn worker_mining_state_machine(
                     worker.carried_minerals = harvested;
                     worker.harvest_timer = 0.0;
                     worker.state = WorkerState::MovingToBase;
+                    if let Some(spot) = worker.mining_spot_index {
+                        if let Some(spots) = node_occupied_spots.get_mut(&node_entity) {
+                            spots[spot] = false;
+                        }
+                    }
+                    worker.mining_spot_index = None;
                     if *faction == net_client.my_faction {
                         sound_events.send(SoundEffect::LaserMining);
                     }
@@ -683,6 +751,17 @@ fn worker_mining_state_machine(
 
                 let Some(base_pos) = target_base_pos else {
                     // No base available, idle
+                    if let Some(target) = worker.target_node {
+                        if let Some(c) = node_worker_counts.get_mut(&target) {
+                            *c = c.saturating_sub(1);
+                        }
+                        if let Some(spot) = worker.mining_spot_index {
+                            if let Some(spots) = node_occupied_spots.get_mut(&target) {
+                                spots[spot] = false;
+                            }
+                        }
+                    }
+                    worker.mining_spot_index = None;
                     worker.state = WorkerState::Idle;
                     continue;
                 };
@@ -700,8 +779,8 @@ fn worker_mining_state_machine(
                     }
 
                     // If original mineral patch still has minerals and friendly base nearby, return to it!
-                    let node_valid = if let Some(node_entity) = worker.target_node {
-                        if let Ok((_, node_tf, node)) = node_query.get(node_entity) {
+                    if let Some(node_entity) = worker.target_node {
+                        let node_valid = if let Ok((_, node_tf, node)) = node_query.get(node_entity) {
                             if node.remaining_minerals > 0 {
                                 let n_pos = node_tf.translation.truncate();
                                 base_query.iter().any(|(b_ent, b_tf, b_fac, _)| {
@@ -713,24 +792,42 @@ fn worker_mining_state_machine(
                             }
                         } else {
                             false
+                        };
+
+                        if node_valid {
+                            worker.state = WorkerState::MovingToResource;
+                            worker.mining_spot_index = None;
+                            if let Ok((_, node_tf, ..)) = node_query.get(node_entity) {
+                                let n_pos = node_tf.translation.truncate();
+                                let spots = node_occupied_spots.entry(node_entity).or_insert([false; MINING_SPOTS_PER_ROCK]);
+                                let spot_idx = find_closest_open_mining_spot(n_pos, worker_pos, spots);
+                                spots[spot_idx] = true;
+                                worker.mining_spot_index = Some(spot_idx);
+                                let spot_pos = get_mining_spot_position(n_pos, spot_idx);
+                                let dir = (spot_pos - worker_pos).normalize_or_zero();
+                                if dir.length_squared() > 0.0 {
+                                    worker_transform.rotation = Quat::from_rotation_z(dir.y.atan2(dir.x));
+                                }
+                            }
+                            continue;
                         }
-                    } else {
-                        false
-                    };
 
-                    if node_valid {
-                        worker.state = WorkerState::MovingToResource;
-                        continue;
-                    }
-
-                    // Node is depleted or lacks friendly Base HQ: become Idle
-                    if let Some(target) = worker.target_node {
-                        if let Some(c) = node_worker_counts.get_mut(&target) {
+                        // Node is depleted or lacks friendly Base HQ: become Idle
+                        if let Some(c) = node_worker_counts.get_mut(&node_entity) {
                             *c = c.saturating_sub(1);
                         }
+                        if let Some(spot) = worker.mining_spot_index {
+                            if let Some(spots) = node_occupied_spots.get_mut(&node_entity) {
+                                spots[spot] = false;
+                            }
+                        }
+                        worker.mining_spot_index = None;
+                        worker.target_node = None;
+                        worker.state = WorkerState::Idle;
+                    } else {
+                        worker.mining_spot_index = None;
+                        worker.state = WorkerState::Idle;
                     }
-                    worker.target_node = None;
-                    worker.state = WorkerState::Idle;
                 } else {
                     // Move towards Base HQ
                     let dir = (base_pos - worker_pos).normalize_or_zero();

@@ -55,6 +55,7 @@ pub fn handle_harvest(
                         worker.state = WorkerState::MovingToResource;
                         worker.harvest_timer = 0.0;
                         worker.manual_override = false;
+                        worker.mining_spot_index = None;
                     }
                     valid_net_ids.push(net_entity.net_id);
                 }
@@ -103,6 +104,7 @@ pub fn handle_construct(
                 if let Some(mut worker) = worker_opt {
                     worker.target_building = Some(b_ent);
                     worker.target_node = None;
+                    worker.mining_spot_index = None;
                     worker.state = WorkerState::MovingToBuilding;
                     worker.manual_override = false;
                 }
@@ -152,6 +154,7 @@ pub fn handle_repair(
                 if let Some(mut worker) = worker_opt {
                     worker.target_building = Some(b_ent);
                     worker.target_node = None;
+                    worker.mining_spot_index = None;
                     worker.state = WorkerState::MovingToRepair;
                     worker.manual_override = false;
                 }

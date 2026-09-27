@@ -213,6 +213,54 @@ pub const WORKER_AUTO_MINE_RANGE: f32 = 450.0;
 /// Maximum workers permitted to simultaneously target and mine a single gold deposit
 pub const MAX_WORKERS_PER_ROCK: usize = 5;
 
+/// Number of discrete physical mining spots distributed equally around each gold rock
+pub const MINING_SPOTS_PER_ROCK: usize = MAX_WORKERS_PER_ROCK;
+
+/// Radial distance from the gold rock center to the mining spot positions
+pub const MINING_SPOT_DISTANCE: f32 = 48.0;
+
+/// Returns the 2D world position of a mining spot on a resource rock given rock center and spot index (0..5).
+pub fn get_mining_spot_position(rock_center: Vec2, spot_index: usize) -> Vec2 {
+    let angle = (spot_index as f32) * (2.0 * std::f32::consts::PI / MINING_SPOTS_PER_ROCK as f32);
+    rock_center + Vec2::new(angle.cos(), angle.sin()) * MINING_SPOT_DISTANCE
+}
+
+/// Finds the closest open mining spot index on a rock given worker position and an array of occupied spot flags.
+pub fn find_closest_open_mining_spot(
+    rock_center: Vec2,
+    worker_pos: Vec2,
+    occupied_spots: &[bool; MINING_SPOTS_PER_ROCK],
+) -> usize {
+    let mut best_idx = None;
+    let mut best_dist = f32::MAX;
+
+    for i in 0..MINING_SPOTS_PER_ROCK {
+        if !occupied_spots[i] {
+            let spot_pos = get_mining_spot_position(rock_center, i);
+            let dist = worker_pos.distance(spot_pos);
+            if dist < best_dist {
+                best_dist = dist;
+                best_idx = Some(i);
+            }
+        }
+    }
+
+    // Fallback: If all spots are occupied, pick the closest spot overall
+    best_idx.unwrap_or_else(|| {
+        let mut min_d = f32::MAX;
+        let mut idx = 0;
+        for i in 0..MINING_SPOTS_PER_ROCK {
+            let spot_pos = get_mining_spot_position(rock_center, i);
+            let d = worker_pos.distance(spot_pos);
+            if d < min_d {
+                min_d = d;
+                idx = i;
+            }
+        }
+        idx
+    })
+}
+
 /// Maximum distance between a friendly constructed Base HQ and a gold rock for automated mining
 pub const BASE_HQ_RESOURCE_RADIUS: f32 = 380.0;
 
@@ -232,6 +280,7 @@ pub struct Worker {
     pub target_base: Option<Entity>,
     pub target_building: Option<Entity>,
     pub manual_override: bool,
+    pub mining_spot_index: Option<usize>,
 }
 
 impl Default for Worker {
@@ -248,6 +297,7 @@ impl Default for Worker {
             target_base: None,
             target_building: None,
             manual_override: false,
+            mining_spot_index: None,
         }
     }
 }
@@ -543,6 +593,51 @@ mod tests {
         assert_eq!(melee.attack_range, 32.0);
         assert_eq!(melee.attack_damage, 24.0);
         assert_eq!(melee.attack_cooldown, 0.75);
+    }
+
+    #[test]
+    fn test_mining_spots_equally_distributed_and_spaced() {
+        let rock_pos = Vec2::new(100.0, 200.0);
+        let mut spots = Vec::new();
+
+        for i in 0..MINING_SPOTS_PER_ROCK {
+            let p = get_mining_spot_position(rock_pos, i);
+            spots.push(p);
+            // Each spot must be exactly MINING_SPOT_DISTANCE from rock center
+            let dist = p.distance(rock_pos);
+            assert!((dist - MINING_SPOT_DISTANCE).abs() < 1e-4, "Spot {} distance should be {}, got {}", i, MINING_SPOT_DISTANCE, dist);
+        }
+
+        assert_eq!(spots.len(), 5);
+
+        // Verify pairwise spacing: Adjacent spots must be > 50px apart (worker diameter is 28)
+        for i in 0..5 {
+            let next = (i + 1) % 5;
+            let d = spots[i].distance(spots[next]);
+            assert!(d > 50.0, "Adjacent spots {} and {} should be spaced > 50px, got {}", i, next, d);
+        }
+    }
+
+    #[test]
+    fn test_find_closest_open_mining_spot_selection() {
+        let rock_pos = Vec2::new(0.0, 0.0);
+        let occupied = [false; MINING_SPOTS_PER_ROCK];
+
+        // Worker directly East of the rock at (100, 0) -> closest spot is spot 0 (angle 0)
+        let worker_pos = Vec2::new(100.0, 0.0);
+        let spot0 = find_closest_open_mining_spot(rock_pos, worker_pos, &occupied);
+        assert_eq!(spot0, 0, "Worker at East should pick spot 0");
+
+        // If spot 0 is occupied, worker should pick spot 1 (72 deg) or spot 4 (288 deg)
+        let mut occupied_with_0 = [false; MINING_SPOTS_PER_ROCK];
+        occupied_with_0[0] = true;
+        let next_spot = find_closest_open_mining_spot(rock_pos, worker_pos, &occupied_with_0);
+        assert!(next_spot == 1 || next_spot == 4, "Should pick adjacent open spot 1 or 4, got {}", next_spot);
+
+        // Worker at North at (0, 100) -> closest spot should be spot 1 (72 deg, y > 0)
+        let worker_north = Vec2::new(0.0, 100.0);
+        let spot_north = find_closest_open_mining_spot(rock_pos, worker_north, &occupied);
+        assert!(spot_north == 1 || spot_north == 2, "Worker from North should pick spot 1 or 2, got {}", spot_north);
     }
 }
 
