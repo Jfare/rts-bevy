@@ -106,8 +106,8 @@ fn spawn_quick_btn_build_menu(parent: &mut ChildBuilder) {
             BuildMenuToggleButton,
             MobileQuickAction::ToggleBuildMenu,
             Node {
-                width: Val::Px(44.0),
-                height: Val::Px(44.0),
+                width: Val::Px(50.0),
+                height: Val::Px(46.0),
                 padding: UiRect::all(Val::Px(2.0)),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,

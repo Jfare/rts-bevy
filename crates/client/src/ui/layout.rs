@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy::ui::FocusPolicy;
 
 use super::{
-    spawn_bottom_bar, spawn_countdown_overlay, spawn_desktop_quick_train_button,
+    spawn_bottom_bar, spawn_countdown_overlay,
     spawn_game_menu_modal, spawn_mobile_build_menu, spawn_mobile_deselect_button,
     spawn_mobile_placement_prompt, spawn_mobile_quick_bar,
     spawn_mobile_unit_production_menu, spawn_post_match_banner, spawn_top_bar,
@@ -39,9 +39,6 @@ pub fn setup_hud(mut commands: Commands) {
 
             // Minimap Frame in top-right corner
             spawn_minimap_frame(root);
-
-            // Desktop Quick-Train Worker Button (pinned right below minimap)
-            spawn_desktop_quick_train_button(root);
 
             // Right Bottom BUILD Action Button (Mobile Touch only, positioned above X button)
             spawn_mobile_quick_bar(root);

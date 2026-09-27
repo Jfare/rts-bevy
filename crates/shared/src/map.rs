@@ -72,14 +72,14 @@ pub struct MapObstacle {
 
 pub const STATIC_MAP_OBSTACLES: &[MapObstacle] = &[
     // ── South Base Back Cliff Wall (Placed BEHIND South Minerals at y = -1320..-1340) ──
-    MapObstacle { position: Vec2::new(-200.0, -1320.0), radius: 80.0, kind: ObstacleKind::CliffRidge },
+    MapObstacle { position: Vec2::new(-130.0, -1330.0), radius: 80.0, kind: ObstacleKind::CliffRidge },
     MapObstacle { position: Vec2::new(0.0, -1340.0), radius: 80.0, kind: ObstacleKind::CliffRidge },
-    MapObstacle { position: Vec2::new(200.0, -1320.0), radius: 80.0, kind: ObstacleKind::CliffRidge },
+    MapObstacle { position: Vec2::new(130.0, -1330.0), radius: 80.0, kind: ObstacleKind::CliffRidge },
 
     // ── North Base Back Cliff Wall (Placed BEHIND North Minerals at y = 1320..1340) ──
-    MapObstacle { position: Vec2::new(200.0, 1320.0), radius: 80.0, kind: ObstacleKind::CliffRidge },
+    MapObstacle { position: Vec2::new(130.0, 1330.0), radius: 80.0, kind: ObstacleKind::CliffRidge },
     MapObstacle { position: Vec2::new(0.0, 1340.0), radius: 80.0, kind: ObstacleKind::CliffRidge },
-    MapObstacle { position: Vec2::new(-200.0, 1320.0), radius: 80.0, kind: ObstacleKind::CliffRidge },
+    MapObstacle { position: Vec2::new(-130.0, 1330.0), radius: 80.0, kind: ObstacleKind::CliffRidge },
 
     // ── South Base Ramp Bluffs (Flanking the South Choke at (0, -720)) ──
     MapObstacle { position: Vec2::new(-240.0, -720.0), radius: 75.0, kind: ObstacleKind::BaseRampBluff },

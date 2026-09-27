@@ -8,7 +8,7 @@ use crate::audio_sfx::SoundEffect;
 use crate::net::{NetClient, NetStatus};
 use crate::stats::MatchStats;
 
-/// Marker component for the desktop quick-train container pinned below the minimap
+/// Marker component for the desktop quick-train container positioned above the command card
 #[derive(Component)]
 pub struct DesktopQuickTrainContainer;
 
@@ -16,17 +16,15 @@ pub struct DesktopQuickTrainContainer;
 #[derive(Component)]
 pub struct QuickTrainWorkerButton;
 
-/// Spawns the desktop quick-train worker button pinned on the right edge below the minimap
+/// Spawns the desktop quick-train worker button positioned above the command card
 pub fn spawn_desktop_quick_train_button(parent: &mut ChildBuilder) {
     parent
         .spawn((
             DesktopQuickTrainContainer,
             Node {
-                position_type: PositionType::Absolute,
-                right: Val::Px(12.0),
-                top: Val::Px(248.0),
                 width: Val::Px(170.0),
-                height: Val::Px(44.0),
+                height: Val::Px(34.0),
+                align_self: AlignSelf::FlexEnd,
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
                 display: Display::Flex, // Visible on desktop, hidden on mobile by responsive system
@@ -48,13 +46,13 @@ pub fn spawn_desktop_quick_train_button(parent: &mut ChildBuilder) {
                         border: UiRect::all(Val::Px(1.5)),
                         ..default()
                     },
-                    BorderRadius::all(Val::Px(6.0)),
+                    BorderRadius::all(Val::Px(4.0)),
                     BackgroundColor(Color::srgba(0.08, 0.12, 0.18, 0.94)),
                     BorderColor(Color::srgba(0.90, 0.75, 0.25, 0.85)),
                 ))
                 .with_children(|btn| {
                     btn.spawn((
-                        Text::new("⛏️ Worker [V]"),
+                        Text::new("Worker [V]"),
                         TextFont {
                             font_size: 12.0,
                             ..default()
@@ -63,9 +61,9 @@ pub fn spawn_desktop_quick_train_button(parent: &mut ChildBuilder) {
                         FocusPolicy::Pass,
                     ));
                     btn.spawn((
-                        Text::new("50 🪙"),
+                        Text::new("50 Gold"),
                         TextFont {
-                            font_size: 11.5,
+                            font_size: 11.0,
                             ..default()
                         },
                         TextColor(Color::srgb(1.0, 0.85, 0.30)),
@@ -75,43 +73,44 @@ pub fn spawn_desktop_quick_train_button(parent: &mut ChildBuilder) {
         });
 }
 
-/// Spawns the compact 44x44 mobile quick-train worker button docked in thumb reach
+/// Spawns the compact mobile quick-train worker button docked in thumb reach
 pub fn spawn_quick_btn_train_worker(parent: &mut ChildBuilder) {
     parent
         .spawn((
             Button,
             QuickTrainWorkerButton,
             Node {
-                width: Val::Px(44.0),
-                height: Val::Px(44.0),
+                width: Val::Px(50.0),
+                height: Val::Px(46.0),
                 padding: UiRect::all(Val::Px(2.0)),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
                 flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(1.0),
                 border: UiRect::all(Val::Px(2.0)),
                 ..default()
             },
             BorderRadius::all(Val::Px(10.0)),
-            BackgroundColor(Color::srgba(0.22, 0.18, 0.08, 0.94)),
-            BorderColor(Color::srgba(0.95, 0.80, 0.25, 0.85)),
+            BackgroundColor(Color::srgba(0.12, 0.16, 0.22, 0.95)),
+            BorderColor(Color::srgba(0.95, 0.80, 0.25, 0.90)),
         ))
         .with_children(|btn| {
             btn.spawn((
-                Text::new("⛏️"),
+                Text::new("WORKER"),
                 TextFont {
-                    font_size: 14.0,
+                    font_size: 9.0,
                     ..default()
                 },
                 TextColor(Color::WHITE),
                 FocusPolicy::Pass,
             ));
             btn.spawn((
-                Text::new("50🪙"),
+                Text::new("50G"),
                 TextFont {
-                    font_size: 9.0,
+                    font_size: 8.5,
                     ..default()
                 },
-                TextColor(Color::srgb(1.0, 0.88, 0.35)),
+                TextColor(Color::srgb(1.0, 0.85, 0.25)),
                 FocusPolicy::Pass,
             ));
         });

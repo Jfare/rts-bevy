@@ -2,7 +2,8 @@ use bevy::prelude::*;
 use bevy::ui::FocusPolicy;
 
 use super::{
-    spawn_command_card_ui, ProductionQueueText, SelectionDetailsText, SelectionTitleText,
+    spawn_command_card_ui, spawn_desktop_quick_train_button, ProductionQueueText,
+    SelectionDetailsText, SelectionTitleText,
 };
 
 /// Marker component for the bottom row container
@@ -79,8 +80,21 @@ pub fn spawn_bottom_bar(parent: &mut ChildBuilder) {
                     ));
                 });
 
-            // Right Panel: Interactive Context-Sensitive Command Card
-            spawn_command_card_ui(bottom_row);
+            // Right Column: Quick-Train Worker Button (above) & Command Card (below)
+            bottom_row
+                .spawn((
+                    Node {
+                        flex_direction: FlexDirection::Column,
+                        align_items: AlignItems::Stretch,
+                        row_gap: Val::Px(6.0),
+                        ..default()
+                    },
+                    FocusPolicy::Pass,
+                ))
+                .with_children(|right_col| {
+                    spawn_desktop_quick_train_button(right_col);
+                    spawn_command_card_ui(right_col);
+                });
         });
 }
 
