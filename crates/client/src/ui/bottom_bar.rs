@@ -35,11 +35,11 @@ pub fn spawn_bottom_bar(parent: &mut ChildBuilder) {
                     SelectionCardPanel,
                     Node {
                         flex_grow: 1.0,
-                        max_width: Val::Px(460.0),
-                        padding: UiRect::all(Val::Px(14.0)),
+                        max_width: Val::Px(368.0),
+                        padding: UiRect::all(Val::Px(10.0)),
                         border: UiRect::all(Val::Px(1.0)),
                         flex_direction: FlexDirection::Column,
-                        row_gap: Val::Px(6.0),
+                        row_gap: Val::Px(4.0),
                         ..default()
                     },
                     BorderRadius::all(Val::Px(4.0)),
@@ -51,7 +51,7 @@ pub fn spawn_bottom_bar(parent: &mut ChildBuilder) {
                     card.spawn((
                         Text::new("No Units Selected"),
                         TextFont {
-                            font_size: 16.0,
+                            font_size: 13.5,
                             ..default()
                         },
                         TextColor(Color::srgb(0.92, 0.95, 0.98)),
@@ -61,7 +61,7 @@ pub fn spawn_bottom_bar(parent: &mut ChildBuilder) {
                     card.spawn((
                         Text::new("Drag left-click to select | Right-click ground to Move, enemy to Attack"),
                         TextFont {
-                            font_size: 12.0,
+                            font_size: 10.5,
                             ..default()
                         },
                         TextColor(Color::srgb(0.60, 0.68, 0.75)),
@@ -71,7 +71,7 @@ pub fn spawn_bottom_bar(parent: &mut ChildBuilder) {
                     card.spawn((
                         Text::new(""),
                         TextFont {
-                            font_size: 13.0,
+                            font_size: 11.0,
                             ..default()
                         },
                         TextColor(Color::srgb(0.35, 0.85, 1.0)),

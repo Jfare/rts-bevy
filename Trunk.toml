@@ -8,7 +8,7 @@ release = false
 watch = ["index.html", "crates/client", "crates/shared", "crates/bot_ai"]
 
 [serve]
-addresses = ["127.0.0.1"]
+addresses = ["0.0.0.0"]
 port = 8000
 open = false
 ws_protocol = "ws"

@@ -30,9 +30,13 @@ pub use hud_systems::{
     update_responsive_hud_layout_system, update_selection_info_text,
 };
 pub use layout::setup_hud;
+#[allow(unused_imports)]
 pub use menu_modal::{
     close_menu_on_game_start, handle_lobby_button_interactions, spawn_game_menu_modal,
-    update_lobby_modal_status_text,
+    update_fullscreen_button_text_system, update_lobby_modal_status_text,
+    update_responsive_menu_modal_system, FullscreenButtonText, LobbyModalActionsBox,
+    LobbyModalControlsBox, LobbyModalControlsHeader, LobbyModalControlsText, LobbyModalDialog,
+    LobbyModalSubtitleText, LobbyModalTitleText,
 };
 pub use mobile_hud::{
     handle_mobile_build_menu_interactions, handle_mobile_deselect_button_interaction,
@@ -76,6 +80,8 @@ impl Plugin for RtsUiPlugin {
                     handle_play_again_button_interaction,
                     handle_return_to_landing_button_interaction,
                     update_lobby_modal_status_text,
+                    update_fullscreen_button_text_system,
+                    update_responsive_menu_modal_system,
                     update_responsive_hud_layout_system,
                 ),
             )
@@ -116,6 +122,8 @@ pub enum LobbyButtonAction {
     CloseModal,
     ForfeitMatch,
     ToggleFullscreen,
+    #[allow(dead_code)]
+    ExitFullscreen,
 }
 
 #[derive(Component)]

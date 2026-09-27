@@ -181,6 +181,7 @@ pub fn cleanup_on_lobby_enter(
     mut stats_opt: Option<ResMut<crate::stats::MatchStats>>,
     mut placement_opt: Option<ResMut<crate::placement::PlacementState>>,
     mut attack_move_opt: Option<ResMut<crate::ui::AttackMovePending>>,
+    mut chat_log_opt: Option<ResMut<crate::chat::ChatLog>>,
 ) {
     info!("🧹 [AppState::Lobby] Cleaning up match entities and resetting match state.");
     for ent in cleanup_query.iter() {
@@ -209,6 +210,9 @@ pub fn cleanup_on_lobby_enter(
     }
     if let Some(ref mut attack_move) = attack_move_opt {
         attack_move.0 = false;
+    }
+    if let Some(ref mut chat_log) = chat_log_opt {
+        chat_log.clear();
     }
 }
 

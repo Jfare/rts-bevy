@@ -134,7 +134,13 @@ fn mobile_camera_pan_system(
     placement_state: Option<Res<PlacementState>>,
     mut gesture_state: ResMut<TouchGestureState>,
     mut camera_query: Query<(&mut Transform, Option<&OrthographicProjection>), With<Camera2d>>,
+    modal_query: Query<&Node, With<crate::ui::LobbyModalContainer>>,
 ) {
+    if modal_query.iter().any(|node| node.display != Display::None) {
+        gesture_state.last_pan_pos = None;
+        return;
+    }
+
     if box_select.0 {
         gesture_state.last_pan_pos = None;
         return;
@@ -224,7 +230,12 @@ fn apply_pan_delta(
 fn mobile_pinch_zoom_system(
     touches: Res<Touches>,
     mut camera_query: Query<(&mut RtsCamera, Option<&mut OrthographicProjection>)>,
+    modal_query: Query<&Node, With<crate::ui::LobbyModalContainer>>,
 ) {
+    if modal_query.iter().any(|node| node.display != Display::None) {
+        return;
+    }
+
     if touches.iter().count() != 2 {
         return;
     }
@@ -294,7 +305,12 @@ fn mobile_touch_interaction_system(
         Option<&mut MeleeFighter>,
         Option<&Building>,
     )>,
+    modal_query: Query<&Node, With<crate::ui::LobbyModalContainer>>,
 ) {
+    if modal_query.iter().any(|node| node.display != Display::None) {
+        return;
+    }
+
     let MobileTouchParams {
         mut commands,
         time,

@@ -104,7 +104,7 @@ pub fn handle_server_message(
             p1_pos,
             p2_pos,
             wave_initial_delay: _,
-        } => session::handle_game_started(net_client, next_state, camera_query, p1_pos, p2_pos),
+        } => session::handle_game_started(net_client, next_state, camera_query, chat_log_opt, p1_pos, p2_pos),
 
         ServerMessage::InitialWorldState {
             entities,
@@ -283,7 +283,7 @@ pub fn handle_server_message(
         }
 
         ServerMessage::MatchEnded { winning_faction, .. } => {
-            session::handle_match_ended(outcome_opt, sound_events, net_client.my_faction, winning_faction)
+            session::handle_match_ended(outcome_opt, sound_events, chat_log_opt, net_client.my_faction, winning_faction)
         }
 
         ServerMessage::Pong { client_timestamp, .. } => {

@@ -99,11 +99,15 @@ pub fn handle_play_again_button_interaction(
     >,
     mut net_client: ResMut<NetClient>,
     mut next_state: ResMut<NextState<AppState>>,
+    mut chat_log_opt: Option<ResMut<crate::chat::ChatLog>>,
 ) {
     for (interaction, mut bg_color) in &mut interaction_query {
         match *interaction {
             Interaction::Pressed => {
                 info!("🔄 Play Again / Return to lobby requested.");
+                if let Some(ref mut chat_log) = chat_log_opt {
+                    chat_log.clear();
+                }
                 net_client.send(&ClientMessage::ForfeitMatch);
                 net_client.status = NetStatus::Connected;
                 next_state.set(AppState::Lobby);
@@ -129,11 +133,15 @@ pub fn handle_return_to_landing_button_interaction(
     >,
     mut net_client: ResMut<NetClient>,
     mut next_state: ResMut<NextState<AppState>>,
+    mut chat_log_opt: Option<ResMut<crate::chat::ChatLog>>,
 ) {
     for (interaction, mut bg_color) in &mut interaction_query {
         match *interaction {
             Interaction::Pressed => {
                 info!("🏠 Return to Landing Page requested.");
+                if let Some(ref mut chat_log) = chat_log_opt {
+                    chat_log.clear();
+                }
                 net_client.send(&ClientMessage::ForfeitMatch);
                 net_client.status = NetStatus::Connected;
                 next_state.set(AppState::Lobby);

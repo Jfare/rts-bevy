@@ -260,9 +260,19 @@ pub fn update_responsive_hud_layout_system(
     mut minimap_frame_query: Query<&mut Node, (With<super::layout::MinimapFrame>, Without<super::layout::RootUiContainer>, Without<super::top_bar::TopBarContainer>, Without<super::command_card::CommandCardRoot>, Without<super::bottom_bar::SelectionCardPanel>, Without<super::top_bar::TopBarTitleText>, Without<super::top_bar::TopBarResourceGroup>, Without<super::top_bar::TopBarMenuButton>, Without<super::ApmText>)>,
     mut command_card_query: Query<&mut Node, (With<super::command_card::CommandCardRoot>, Without<super::layout::RootUiContainer>, Without<super::top_bar::TopBarContainer>, Without<super::layout::MinimapFrame>, Without<super::bottom_bar::SelectionCardPanel>, Without<super::top_bar::TopBarTitleText>, Without<super::top_bar::TopBarResourceGroup>, Without<super::top_bar::TopBarMenuButton>, Without<super::ApmText>)>,
     mut selection_panel_query: Query<&mut Node, (With<super::bottom_bar::SelectionCardPanel>, Without<super::layout::RootUiContainer>, Without<super::top_bar::TopBarContainer>, Without<super::layout::MinimapFrame>, Without<super::command_card::CommandCardRoot>, Without<super::top_bar::TopBarTitleText>, Without<super::top_bar::TopBarResourceGroup>, Without<super::top_bar::TopBarMenuButton>, Without<super::ApmText>)>,
-    mut min_font_query: Query<&mut TextFont, (With<super::MineralsText>, Without<super::SupplyText>, Without<super::NetworkStatusText>)>,
-    mut sup_font_query: Query<&mut TextFont, (With<super::SupplyText>, Without<super::MineralsText>, Without<super::NetworkStatusText>)>,
-    mut net_font_query: Query<&mut TextFont, (With<super::NetworkStatusText>, Without<super::MineralsText>, Without<super::SupplyText>)>,
+    (
+        mut min_font_query,
+        mut sup_font_query,
+        mut net_font_query,
+        mut sel_title_font_query,
+        mut sel_details_font_query,
+    ): (
+        Query<&mut TextFont, (With<super::MineralsText>, Without<super::SupplyText>, Without<super::NetworkStatusText>, Without<super::SelectionTitleText>, Without<super::SelectionDetailsText>)>,
+        Query<&mut TextFont, (With<super::SupplyText>, Without<super::MineralsText>, Without<super::NetworkStatusText>, Without<super::SelectionTitleText>, Without<super::SelectionDetailsText>)>,
+        Query<&mut TextFont, (With<super::NetworkStatusText>, Without<super::MineralsText>, Without<super::SupplyText>, Without<super::SelectionTitleText>, Without<super::SelectionDetailsText>)>,
+        Query<&mut TextFont, (With<super::SelectionTitleText>, Without<super::SelectionDetailsText>, Without<super::MineralsText>, Without<super::SupplyText>, Without<super::NetworkStatusText>)>,
+        Query<&mut TextFont, (With<super::SelectionDetailsText>, Without<super::SelectionTitleText>, Without<super::MineralsText>, Without<super::SupplyText>, Without<super::NetworkStatusText>)>,
+    ),
     mut desktop_quick_train_query: Query<&mut Node, (With<super::quick_train_hud::DesktopQuickTrainContainer>, Without<super::layout::RootUiContainer>, Without<super::top_bar::TopBarContainer>, Without<super::layout::MinimapFrame>, Without<super::command_card::CommandCardRoot>, Without<super::bottom_bar::SelectionCardPanel>, Without<super::top_bar::TopBarTitleText>, Without<super::top_bar::TopBarResourceGroup>, Without<super::top_bar::TopBarMenuButton>, Without<super::ApmText>)>,
 ) {
     let win_mobile = window_query.get_single().map_or(false, |w| w.width() < 960.0 || w.height() < 550.0);
@@ -303,6 +313,12 @@ pub fn update_responsive_hud_layout_system(
         for mut font in &mut net_font_query {
             font.font_size = 11.0;
         }
+        for mut font in &mut sel_title_font_query {
+            font.font_size = 11.0;
+        }
+        for mut font in &mut sel_details_font_query {
+            font.font_size = 9.0;
+        }
         for mut node in &mut minimap_frame_query {
             node.right = Val::Px(8.0);
             node.top = Val::Px(36.0);
@@ -313,8 +329,9 @@ pub fn update_responsive_hud_layout_system(
             node.display = Display::None;
         }
         for mut node in &mut selection_panel_query {
-            node.max_width = Val::Px(240.0);
-            node.padding = UiRect::all(Val::Px(6.0));
+            node.max_width = Val::Px(192.0);
+            node.padding = UiRect::all(Val::Px(5.0));
+            node.row_gap = Val::Px(3.0);
             node.margin = UiRect::default();
         }
     } else {
@@ -347,6 +364,12 @@ pub fn update_responsive_hud_layout_system(
         for mut font in &mut net_font_query {
             font.font_size = 13.0;
         }
+        for mut font in &mut sel_title_font_query {
+            font.font_size = 13.5;
+        }
+        for mut font in &mut sel_details_font_query {
+            font.font_size = 10.5;
+        }
         for mut node in &mut minimap_frame_query {
             node.right = Val::Px(12.0);
             node.top = Val::Px(70.0);
@@ -362,8 +385,9 @@ pub fn update_responsive_hud_layout_system(
             node.margin = UiRect::default();
         }
         for mut node in &mut selection_panel_query {
-            node.max_width = Val::Px(460.0);
-            node.padding = UiRect::all(Val::Px(14.0));
+            node.max_width = Val::Px(368.0);
+            node.padding = UiRect::all(Val::Px(10.0));
+            node.row_gap = Val::Px(4.0);
             node.margin = UiRect::default();
         }
         for mut node in &mut desktop_quick_train_query {
@@ -432,7 +456,7 @@ mod tests {
         assert_eq!(cmd_node.min_width, Val::Px(330.0));
         assert_eq!(cmd_node.min_height, Val::Px(170.0));
         let sel_node = app.world().get::<Node>(sel_panel).unwrap();
-        assert_eq!(sel_node.max_width, Val::Px(460.0));
+        assert_eq!(sel_node.max_width, Val::Px(368.0));
 
         // 2. Switch to Mobile Touch on a 800x400 mobile screen
         *app.world_mut().resource_mut::<ControlScheme>() = ControlScheme::MobileTouch;
@@ -458,7 +482,7 @@ mod tests {
         let cmd_node_mob = app.world().get::<Node>(cmd_card).unwrap();
         assert_eq!(cmd_node_mob.display, Display::None);
         let sel_node_mob = app.world().get::<Node>(sel_panel).unwrap();
-        assert_eq!(sel_node_mob.max_width, Val::Px(240.0));
+        assert_eq!(sel_node_mob.max_width, Val::Px(192.0));
     }
 
     #[test]

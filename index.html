@@ -781,17 +781,18 @@
                     <div class="updates-header">
                         <div class="updates-title">
                             <span class="updates-badge">LATEST UPDATE</span>
-                            <span class="updates-version">v0.6.0</span>
+                            <span class="updates-version">v0.7.0</span>
                         </div>
-                        <div class="updates-date">September 26, 2026</div>
+                        <div class="updates-date">September 27, 2026</div>
                     </div>
                     <ul class="updates-list">
-                        <li><strong>⛏️ Autonomous Workers & 5-Cap Mineral Saturation:</strong> Newly produced workers automatically navigate to the nearest gold rock deposit near your Base HQ and start mining. Rocks strictly enforce a 5-miner saturation cap with live HUD indicators (<code>Miners: N/5</code>) to eliminate micro-management while encouraging base expansion.</li>
-                        <li><strong>🏗️ Worker-Driven Collaborative Construction:</strong> Buildings now require physical worker labor to construct! Idle workers automatically rush to foundations, and multiple workers build collaboratively with proportional speedups. If all workers are busy, the nearest miner is autonomously drafted.</li>
-                        <li><strong>🔧 Autonomous Building Repairs & Field Welding:</strong> Idle workers automatically seek out and restore damaged friendly structures at 20 HP/s with no gold cost. Contextual right-click (desktop) and tap (mobile) repair orders allow manual prioritization with emerald-green feedback markers.</li>
-                        <li><strong>🛡️ Tactical Manual Evasion:</strong> Manually retreating workers hold their ground and refuse to wander back into combat or auto-task until you issue an explicit work order or press <span class="kbd">S</span> (Stop).</li>
-                        <li><strong>⚡ Quick-Train Worker HUD & Hotkey:</strong> Dedicated persistent [⛏️ Worker] HUD button on desktop (under minimap) and mobile (above build menu), plus a global <span class="kbd">V</span> hotkey to train workers from anywhere without deselecting your army or checking your base.</li>
-                        <li><strong>✨ Enhanced Arc Flash & Welding VFX:</strong> Dynamic electric cyan arcs and directional molten sparks illuminate active construction sites and field repairs in real time.</li>
+                        <li><strong>📱 Mobile Landscape Game Menu Optimization:</strong> Fully responsive, auto-centered in-game Game Menu modal specifically designed for phone screens in landscape mode (320px–400px height). Features a top-right <span class="kbd">✕</span> close button, mobile touch controls reference, and a streamlined horizontal action bar ensuring all options remain 100% visible and accessible without vertical clipping.</li>
+                        <li><strong>⛶ Dynamic Fullscreen Exit & Toggle:</strong> Directly exit or enter full screen mode from the in-game Game Menu at any time. Features live fullscreen state detection that dynamically labels the button <code>⛶ EXIT FULLSCREEN</code> or <code>⛶ FULLSCREEN</code>, with unified web and desktop window management.</li>
+                        <li><strong>🛡️ Menu Touch Input Isolation:</strong> Taps and gestures inside the Game Menu modal no longer bleed through to the battlefield, preventing accidental troop movement, camera panning, or pinch zoom while reviewing settings.</li>
+                        <li><strong>💬 Mobile & Desktop In-Game Chat Enhancements:</strong> Adaptive font sizing, touch-friendly input handling, and automatic message expiration timers for clean mobile HUD gameplay.</li>
+                        <li><strong>⛏️ Autonomous Workers & 5-Cap Mineral Saturation:</strong> Newly produced workers automatically navigate to the nearest gold rock deposit near your Base HQ and start mining. Rocks strictly enforce a 5-miner saturation cap with live HUD indicators (<code>Miners: N/5</code>) and radial miner positioning.</li>
+                        <li><strong>🏗️ Collaborative Construction & Field Repairs:</strong> Buildings require physical worker labor to construct with collaborative speedups. Idle workers automatically seek out and restore damaged friendly structures.</li>
+                        <li><strong>⚡ Quick-Train Worker HUD:</strong> Dedicated persistent [⛏️ Worker] HUD button on desktop and mobile, plus a global <span class="kbd">V</span> hotkey to train workers from anywhere without deselecting your army.</li>
                     </ul>
                 </div>
 
@@ -1036,6 +1037,10 @@
                 return true;
             } catch (err) {
                 return false;
+            } finally {
+                updateFullscreenUI();
+                setTimeout(syncCanvasSize, 50);
+                setTimeout(syncCanvasSize, 200);
             }
         }
 
@@ -1049,6 +1054,9 @@
                     await document.msExitFullscreen();
                 }
             } catch (err) {}
+            updateFullscreenUI();
+            setTimeout(syncCanvasSize, 50);
+            setTimeout(syncCanvasSize, 200);
         }
 
         function toggleAppFullscreen() {
@@ -1059,6 +1067,8 @@
             }
         }
         window.__rts_toggle_fullscreen = toggleAppFullscreen;
+        window.__rts_exit_fullscreen = exitAppFullscreen;
+        window.__rts_request_fullscreen = requestAppFullscreen;
         window.__rts_is_fullscreen = isCurrentlyFullscreen;
 
         function updateFullscreenUI() {

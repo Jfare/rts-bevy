@@ -35,12 +35,16 @@ pub fn handle_game_started(
     net_client: &mut NetClient,
     next_state: &mut NextState<AppState>,
     camera_query: &mut CameraQuery,
+    chat_log_opt: &mut Option<ResMut<ChatLog>>,
     p1_pos: Vec2,
     p2_pos: Vec2,
 ) {
     info!("⚔️ [NetClient] Match started! Initializing battlefield cameras.");
     net_client.status = NetStatus::InGame;
     next_state.set(AppState::InGame);
+    if let Some(ref mut chat_log) = chat_log_opt {
+        chat_log.clear();
+    }
 
     // Center camera on player spawn base
     let spawn_pos = if net_client.my_faction == Faction::Player1 {
@@ -99,6 +103,7 @@ pub fn handle_match_found(
 pub fn handle_match_ended(
     outcome_opt: &mut Option<ResMut<MatchOutcome>>,
     sound_events: &mut EventWriter<SoundEffect>,
+    chat_log_opt: &mut Option<ResMut<ChatLog>>,
     my_faction: Faction,
     winning_faction: Faction,
 ) {
@@ -110,6 +115,9 @@ pub fn handle_match_ended(
             **outcome = MatchOutcome::Defeat;
             sound_events.send(SoundEffect::Defeat);
         }
+    }
+    if let Some(ref mut chat_log) = chat_log_opt {
+        chat_log.clear();
     }
 }
 
