@@ -2314,6 +2314,140 @@ fn test_workers_mine_distinct_spread_out_spots_on_rock() {
     }
 }
 
+#[test]
+fn test_worker_cannot_penetrate_base_hq() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+
+    let hq_pos = Vec2::new(0.0, -1000.0);
+    let _hq = app.world_mut().spawn((
+        Building::new("Base HQ", Vec2::new(110.0, 110.0), 5.0, true),
+        BaseHQ {
+            supply_provided: 10,
+            dropoff_radius: 70.0,
+        },
+        Transform::from_xyz(hq_pos.x, hq_pos.y, 0.0),
+        Radius(55.0),
+        Faction::Player1,
+        RoomId(1),
+    )).id();
+
+    // Active worker placed inside Base HQ perimeter at (0, -980) [distance 20 from center]
+    let mut worker = Worker::default();
+    worker.state = WorkerState::MovingToBuilding;
+    let worker_ent = app.world_mut().spawn((
+        Transform::from_xyz(hq_pos.x, hq_pos.y + 20.0, 0.0),
+        Radius(14.0),
+        Faction::Player1,
+        RoomId(1),
+        Unit { name: "Worker".to_string(), supply_cost: 1 },
+        worker,
+    )).id();
+
+    app.add_systems(Update, server_unit_separation_and_collision_system);
+    app.update();
+
+    let w_pos = app.world().entity(worker_ent).get::<Transform>().unwrap().translation.truncate();
+    let half_y = 55.0;
+    assert!(w_pos.y >= (hq_pos.y + half_y + 13.9), "Active worker must be ejected outside Base HQ box, got y = {}", w_pos.y);
+}
+
+#[test]
+fn test_building_aabb_corners_prevent_unit_overlap() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+
+    // 100x100 Barracks at (0, 0). Half extents: x: [-50, 50], y: [-50, 50].
+    let _bldg = app.world_mut().spawn((
+        Building::new("Barracks", Vec2::new(100.0, 100.0), 3.0, true),
+        Transform::from_xyz(0.0, 0.0, 0.0),
+        Radius(46.0),
+        Faction::Player1,
+        RoomId(1),
+    )).id();
+
+    // Unit near corner at (48, 48) - with inscribed circle collider (radius 46), distance to (0,0) is ~67.88 which is > 46
+    // But with AABB box, (48, 48) is INSIDE the box!
+    let unit = app.world_mut().spawn((
+        Transform::from_xyz(48.0, 48.0, 0.0),
+        Radius(16.0),
+        Faction::Player1,
+        RoomId(1),
+        Unit { name: "Marine".to_string(), supply_cost: 1 },
+    )).id();
+
+    app.add_systems(Update, server_unit_separation_and_collision_system);
+    app.update();
+
+    let u_pos = app.world().entity(unit).get::<Transform>().unwrap().translation.truncate();
+    assert!(u_pos.x >= 65.9 || u_pos.y >= 65.9, "Unit at corner must be ejected outside box boundary, got {:?}", u_pos);
+}
+
+#[test]
+fn test_server_movement_does_not_overshoot_waypoints() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    app.insert_resource(Time::<()>::default());
+    let mut mm = Matchmaker::new();
+    let mut room = Room::new(1, None, GameMode::Multiplayer1v1, Some(101), Some(102));
+    room.is_active = true;
+    room.countdown_timer = 0.0;
+    mm.rooms.insert(1, room);
+    app.insert_resource(mm);
+
+    let start = Vec2::new(0.0, 0.0);
+    let goal = Vec2::new(20.0, 0.0); // Outside arrival radius (12.0)
+    let unit = app.world_mut().spawn((
+        Transform::from_xyz(start.x, start.y, 0.0),
+        MoveSpeed(1000.0), // In 0.033s, speed * dt = 33.0 units, which is > 20.0 dist!
+        Velocity::default(),
+        MoveTarget::with_waypoints(goal, false, vec![goal]),
+        RoomId(1),
+        Unit { name: "Marine".to_string(), supply_cost: 1 },
+    )).id();
+
+    app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_millis(33));
+    app.world_mut().run_system_once(server_movement_system).unwrap();
+
+    let u_pos = app.world().entity(unit).get::<Transform>().unwrap().translation.truncate();
+    assert!((u_pos.x - goal.x).abs() <= 0.001, "Unit must not overshoot goal, expected 20.0, got {}", u_pos.x);
+}
+
+#[test]
+fn test_intermediate_waypoint_stall_timeout() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    app.insert_resource(Time::<()>::default());
+    let mut mm = Matchmaker::new();
+    let mut room = Room::new(1, None, GameMode::Multiplayer1v1, Some(101), Some(102));
+    room.is_active = true;
+    room.countdown_timer = 0.0;
+    mm.rooms.insert(1, room);
+    app.insert_resource(mm);
+
+    let wp1 = Vec2::new(100.0, 0.0);
+    let wp2 = Vec2::new(200.0, 0.0);
+    let mut mt = MoveTarget::with_waypoints(wp2, false, vec![wp1, wp2]);
+    mt.stall_timer = 1.25;
+    mt.last_pos = Vec2::new(0.0, 0.0);
+
+    let unit = app.world_mut().spawn((
+        Transform::from_xyz(0.0, 0.0, 0.0),
+        MoveSpeed(180.0),
+        Velocity::default(),
+        mt,
+        RoomId(1),
+        Unit { name: "Marine".to_string(), supply_cost: 1 },
+    )).id();
+
+    app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_millis(33));
+    app.world_mut().run_system_once(server_movement_system).unwrap();
+
+    let updated_mt = app.world().entity(unit).get::<MoveTarget>().unwrap();
+    assert_eq!(updated_mt.current_waypoint_idx, 1, "Stalled intermediate waypoint must advance to next waypoint");
+    assert_eq!(updated_mt.stall_timer, 0.0, "Stall timer must reset on waypoint advance");
+}
+
 
 
 

@@ -184,6 +184,28 @@ impl NavGrid {
         }
     }
 
+    /// Marks an axis-aligned rectangular obstacle area as blocked with unit clearance padding
+    pub fn mark_box(&mut self, center: Vec2, size: Vec2, padding: f32) {
+        let half = size * 0.5 + Vec2::splat(padding);
+        let min_pos = center - half;
+        let max_pos = center + half;
+
+        if min_pos.x > 1600.0 || max_pos.x < -1600.0 || min_pos.y > 1600.0 || max_pos.y < -1600.0 {
+            return;
+        }
+
+        let min_gx = (((min_pos.x - (-1600.0)) / NAV_CELL_SIZE).floor() as isize).clamp(0, (NAV_GRID_DIM - 1) as isize) as usize;
+        let min_gy = (((min_pos.y - (-1600.0)) / NAV_CELL_SIZE).floor() as isize).clamp(0, (NAV_GRID_DIM - 1) as isize) as usize;
+        let max_gx = (((max_pos.x - (-1600.0)) / NAV_CELL_SIZE).floor() as isize).clamp(0, (NAV_GRID_DIM - 1) as isize) as usize;
+        let max_gy = (((max_pos.y - (-1600.0)) / NAV_CELL_SIZE).floor() as isize).clamp(0, (NAV_GRID_DIM - 1) as isize) as usize;
+
+        for gy in min_gy..=max_gy {
+            for gx in min_gx..=max_gx {
+                self.set_blocked(gx, gy, true);
+            }
+        }
+    }
+
     /// Checks if line of sight between two world points is unblocked
     pub fn is_line_clear(&self, p1: Vec2, p2: Vec2) -> bool {
         let dist = p1.distance(p2);

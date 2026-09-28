@@ -73,17 +73,43 @@ pub fn handle_tick_snapshot_batch(
                     worker.carried_minerals = snap.carried_minerals;
                 }
 
+                let is_active_moving_worker = worker_opt.as_ref().map_or(false, |w| {
+                    matches!(
+                        w.state,
+                        WorkerState::MovingToResource
+                            | WorkerState::MovingToBase
+                            | WorkerState::MovingToBuilding
+                            | WorkerState::MovingToRepair
+                    )
+                });
+
                 let cur_pos = tf.translation.truncate();
                 let dist = cur_pos.distance(snap.position);
 
-                if dist > 2.0 {
+                if dist > 1.0 {
                     let target_3d = Vec3::new(snap.position.x, snap.position.y, tf.translation.z);
-                    if dist > 25.0 {
+                    if dist > 40.0 {
                         tf.translation = target_3d;
-                    } else if !has_move {
-                        tf.translation = tf.translation.lerp(target_3d, 0.40);
+                    } else if has_move {
+                        // When locally steering along predicted waypoints, do not fight network latency.
+                        // Only correct if discrepancy exceeds expected latency deadband (> 25px).
+                        if dist > 25.0 {
+                            tf.translation = tf.translation.lerp(target_3d, 0.15);
+                        }
+                    } else if is_active_moving_worker {
+                        // Online workers moving via server authoritative mining/building loop
+                        if dist > 25.0 {
+                            tf.translation = target_3d;
+                        } else {
+                            tf.translation = tf.translation.lerp(target_3d, 0.35);
+                        }
                     } else {
-                        tf.translation = tf.translation.lerp(target_3d, 0.20);
+                        // Idle or stopped units cleanly settling at destination
+                        if dist > 25.0 {
+                            tf.translation = target_3d;
+                        } else {
+                            tf.translation = tf.translation.lerp(target_3d, 0.20);
+                        }
                     }
                 }
 

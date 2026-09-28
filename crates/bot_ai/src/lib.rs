@@ -150,7 +150,7 @@ fn wave_spawner_system(
                         attack_cooldown: 0.9,
                         ..default()
                     },
-                    MoveSpeed(175.0),
+                    MoveSpeed(180.0),
                 ));
             }
         }

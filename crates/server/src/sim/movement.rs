@@ -12,14 +12,14 @@ pub fn update_server_nav_grid_system(
 ) {
     nav_grid.clear();
     shared::map::mark_static_obstacles(&mut nav_grid);
-    for (tf, radius, building) in &buildings {
+    for (tf, _, building) in &buildings {
         let pos = tf.translation.truncate();
-        let r = if building.name.contains("Base HQ") {
-            radius.0 + 8.0
+        let padding = if building.name.contains("Base HQ") {
+            20.0
         } else {
-            radius.0 + 4.0
+            16.0
         };
-        nav_grid.mark_circle(pos, r);
+        nav_grid.mark_box(pos, building.size, padding);
     }
     for (tf, radius) in &resources {
         let pos = tf.translation.truncate();
@@ -145,8 +145,8 @@ pub fn server_movement_system(
 
         let is_final_waypoint = move_target.current_waypoint_idx >= (move_target.waypoints.len() - 1);
 
-        // Advance waypoint if close to intermediate
-        if !is_final_waypoint && dist <= 20.0 {
+        // Advance waypoint if close to intermediate, or if stalled against obstacle
+        if !is_final_waypoint && (dist <= 20.0 || move_target.stall_timer > 1.20) {
             move_target.advance_waypoint();
             move_target.stall_timer = 0.0;
             move_target.last_pos = current_pos;
@@ -162,9 +162,10 @@ pub fn server_movement_system(
             }
 
         let dir = diff.normalize_or_zero();
-        velocity.0 = dir * speed.0;
-        transform.translation.x += velocity.0.x * dt;
-        transform.translation.y += velocity.0.y * dt;
+        let move_amount = (speed.0 * dt).min(dist);
+        velocity.0 = dir * (move_amount / dt.max(0.0001));
+        transform.translation.x += dir.x * move_amount;
+        transform.translation.y += dir.y * move_amount;
 
         let angle = dir.y.atan2(dir.x);
         transform.rotation = Quat::from_rotation_z(angle);
@@ -175,7 +176,6 @@ struct ServerUnitPosSnapshot {
     entity: Entity,
     pos: Vec2,
     radius: f32,
-    faction: Faction,
     room_id: u32,
     is_active_worker: bool,
     is_moving: bool,
@@ -183,12 +183,12 @@ struct ServerUnitPosSnapshot {
 
 /// Dedicated server hard circle-circle unit collision and obstacle resolution
 pub fn server_unit_separation_and_collision_system(
-    mut unit_query: Query<(Entity, &mut Transform, &Radius, &Faction, &RoomId, Option<&Worker>, Option<&MoveTarget>), With<Unit>>,
-    building_query: Query<(&Transform, &Radius, &Faction, &RoomId, Option<&BaseHQ>), (With<Building>, Without<Unit>)>,
+    mut unit_query: Query<(Entity, &mut Transform, &Radius, &RoomId, Option<&Worker>, Option<&MoveTarget>), With<Unit>>,
+    building_query: Query<(&Transform, &Building, &Radius, &RoomId), (With<Building>, Without<Unit>)>,
     resource_query: Query<(&Transform, &Radius, &RoomId), (With<ResourceNode>, Without<Unit>)>,
 ) {
     let mut snapshots = Vec::with_capacity(unit_query.iter().len());
-    for (entity, transform, radius, faction, room_id, worker_opt, move_opt) in &unit_query {
+    for (entity, transform, radius, room_id, worker_opt, move_opt) in &unit_query {
         let is_active_worker = worker_opt
             .map(|w| w.state != WorkerState::Idle)
             .unwrap_or(false);
@@ -197,7 +197,6 @@ pub fn server_unit_separation_and_collision_system(
             entity,
             pos: transform.translation.truncate(),
             radius: radius.0,
-            faction: *faction,
             room_id: room_id.0,
             is_active_worker,
             is_moving: move_opt.is_some(),
@@ -257,25 +256,44 @@ pub fn server_unit_separation_and_collision_system(
 
     // 2. Hard Obstacle Collision (Buildings & Mineral Nodes per Room)
     for snap in &mut snapshots {
-        for (b_trans, b_radius, b_faction, b_room, base_hq_opt) in &building_query {
+        for (b_trans, building, _b_radius, b_room) in &building_query {
             if b_room.0 != snap.room_id {
-                continue;
-            }
-            if snap.is_active_worker && base_hq_opt.is_some() && b_faction == &snap.faction {
                 continue;
             }
 
             let b_pos = b_trans.translation.truncate();
-            let d = snap.pos.distance(b_pos);
-            let min_b_dist = snap.radius + b_radius.0;
+            let half = building.size * 0.5;
+            let inside_x = snap.pos.x >= (b_pos.x - half.x) && snap.pos.x <= (b_pos.x + half.x);
+            let inside_y = snap.pos.y >= (b_pos.y - half.y) && snap.pos.y <= (b_pos.y + half.y);
 
-            if d < min_b_dist {
-                let push_dir = if d > 0.001 {
-                    (snap.pos - b_pos) / d
+            if inside_x && inside_y {
+                // Unit center is inside building rectangle: eject to nearest edge
+                let dx_pos = (b_pos.x + half.x) - snap.pos.x;
+                let dx_neg = snap.pos.x - (b_pos.x - half.x);
+                let dy_pos = (b_pos.y + half.y) - snap.pos.y;
+                let dy_neg = snap.pos.y - (b_pos.y - half.y);
+                let min_d = dx_pos.min(dx_neg).min(dy_pos.min(dy_neg));
+
+                if min_d == dx_pos {
+                    snap.pos.x = b_pos.x + half.x + snap.radius;
+                } else if min_d == dx_neg {
+                    snap.pos.x = b_pos.x - half.x - snap.radius;
+                } else if min_d == dy_pos {
+                    snap.pos.y = b_pos.y + half.y + snap.radius;
                 } else {
-                    Vec2::new(0.0, 1.0)
-                };
-                snap.pos = b_pos + push_dir * min_b_dist;
+                    snap.pos.y = b_pos.y - half.y - snap.radius;
+                }
+            } else {
+                // Unit center is outside: clamp to closest point on box perimeter
+                let closest_point = Vec2::new(
+                    snap.pos.x.clamp(b_pos.x - half.x, b_pos.x + half.x),
+                    snap.pos.y.clamp(b_pos.y - half.y, b_pos.y + half.y),
+                );
+                let delta = snap.pos - closest_point;
+                let dist = delta.length();
+                if dist < snap.radius && dist > 0.0001 {
+                    snap.pos = closest_point + (delta / dist) * snap.radius;
+                }
             }
         }
 
@@ -315,11 +333,12 @@ pub fn server_unit_separation_and_collision_system(
         }
     }
 
-    // 3. Write back resolved positions
-    for (i, (_entity, mut transform, ..)) in unit_query.iter_mut().enumerate() {
-        if i < snapshots.len() {
-            transform.translation.x = snapshots[i].pos.x;
-            transform.translation.y = snapshots[i].pos.y;
+    // 3. Write back resolved positions safely matching entities
+    let snap_map: std::collections::HashMap<Entity, Vec2> = snapshots.into_iter().map(|s| (s.entity, s.pos)).collect();
+    for (entity, mut transform, ..) in &mut unit_query {
+        if let Some(pos) = snap_map.get(&entity) {
+            transform.translation.x = pos.x;
+            transform.translation.y = pos.y;
         }
     }
 }
