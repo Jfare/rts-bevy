@@ -13,6 +13,8 @@ pub fn spawn_match_entities(
     mode: GameMode,
     p1_peer: u64,
     p2_peer: Option<u64>,
+    p1_faction_type: PlayableFaction,
+    p2_faction_type: PlayableFaction,
 ) -> Vec<EntityState> {
     let mut initial_states = Vec::new();
 
@@ -41,6 +43,7 @@ pub fn spawn_match_entities(
         },
         Health::new(BuildingKind::BaseHQ.max_health()),
         Faction::Player1,
+        p1_faction_type,
         Radius(55.0),
         RoomId(room_id),
         NetEntity {
@@ -58,6 +61,7 @@ pub fn spawn_match_entities(
         rotation: 0.0,
         current_hp: BuildingKind::BaseHQ.max_health(),
         max_hp: BuildingKind::BaseHQ.max_health(),
+        playable_faction: Some(p1_faction_type),
     });
 
     // P1 Starting Mineral Field (1 Golden Rock Deposit with 2000 Gold)
@@ -87,6 +91,7 @@ pub fn spawn_match_entities(
             rotation: 0.0,
             current_hp: 2000.0,
             max_hp: 2000.0,
+            playable_faction: None,
         });
     }
 
@@ -112,6 +117,7 @@ pub fn spawn_match_entities(
             MoveSpeed(WORKER_MOVE_SPEED),
             Velocity::default(),
             Faction::Player1,
+            p1_faction_type,
             RoomId(room_id),
             NetEntity {
                 net_id: scv_id,
@@ -128,6 +134,7 @@ pub fn spawn_match_entities(
             rotation: rot,
             current_hp: 80.0,
             max_hp: 80.0,
+            playable_faction: Some(p1_faction_type),
         });
     }
 
@@ -161,6 +168,7 @@ pub fn spawn_match_entities(
         },
         Health::new(BuildingKind::BaseHQ.max_health()),
         p2_faction,
+        p2_faction_type,
         Radius(55.0),
         RoomId(room_id),
         NetEntity {
@@ -178,6 +186,7 @@ pub fn spawn_match_entities(
         rotation: 0.0,
         current_hp: BuildingKind::BaseHQ.max_health(),
         max_hp: BuildingKind::BaseHQ.max_health(),
+        playable_faction: Some(p2_faction_type),
     });
 
     // P2 / AI Starting Mineral Field (1 Golden Rock Deposit with 2000 Gold)
@@ -207,6 +216,7 @@ pub fn spawn_match_entities(
             rotation: 0.0,
             current_hp: 2000.0,
             max_hp: 2000.0,
+            playable_faction: None,
         });
     }
 
@@ -232,6 +242,7 @@ pub fn spawn_match_entities(
             MoveSpeed(WORKER_MOVE_SPEED),
             Velocity::default(),
             p2_faction,
+            p2_faction_type,
             RoomId(room_id),
             NetEntity {
                 net_id: scv_id,
@@ -248,6 +259,7 @@ pub fn spawn_match_entities(
             rotation: rot,
             current_hp: 80.0,
             max_hp: 80.0,
+            playable_faction: Some(p2_faction_type),
         });
     }
 
@@ -283,6 +295,7 @@ pub fn spawn_match_entities(
                 rotation: 0.0,
                 current_hp: 2000.0,
                 max_hp: 2000.0,
+                playable_faction: None,
             });
         }
     }

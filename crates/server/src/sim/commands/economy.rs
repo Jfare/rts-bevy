@@ -221,6 +221,8 @@ pub fn handle_build(
     }
 
 
+    let player_playable_faction = matchmaker.players.get(&peer_id).map(|p| p.playable_faction);
+
     let has_funds = matchmaker
         .rooms
         .get_mut(&player_room)
@@ -254,6 +256,10 @@ pub fn handle_build(
             },
             Transform::from_xyz(position.x, position.y, 1.0),
         ));
+
+        if let Some(pf) = player_playable_faction {
+            entity_cmds.insert(pf);
+        }
 
         match building_kind {
             BuildingKind::BaseHQ => {
@@ -296,6 +302,7 @@ pub fn handle_build(
                 msg: ServerMessage::BuildingSpawned {
                     net_id,
                     faction: player_faction,
+                    playable_faction: player_playable_faction,
                     building_kind,
                     position,
                     max_hp: building_kind.max_health(),

@@ -77,9 +77,10 @@ pub fn update_selection_info_text(
         Option<&Soldier>,
         Option<&MeleeFighter>,
         Option<&TacticalStance>,
+        Option<&shared::factions::PlayableFaction>,
         &Transform,
     )>,
-    building_query: Query<(&Building, &Faction, &Health, &Selectable, Option<&ProductionBuilding>, Option<&GunTurret>)>,
+    building_query: Query<(&Building, &Faction, &Health, &Selectable, Option<&ProductionBuilding>, Option<&GunTurret>, Option<&shared::factions::PlayableFaction>)>,
     resource_query: Query<(Entity, &Transform, &ResourceNode, &Selectable)>,
     mut title_query: Query<&mut Text, (With<SelectionTitleText>, Without<SelectionDetailsText>, Without<ProductionQueueText>)>,
     mut details_query: Query<&mut Text, (With<SelectionDetailsText>, Without<SelectionTitleText>, Without<ProductionQueueText>)>,
@@ -98,15 +99,15 @@ pub fn update_selection_info_text(
     let mut selected_building = None;
     let mut selected_resource = None;
 
-    for (unit, faction, health, selectable, worker_opt, soldier_opt, melee_opt, stance_opt, _) in &unit_query {
+    for (unit, faction, health, selectable, worker_opt, soldier_opt, melee_opt, stance_opt, p_fac, _) in &unit_query {
         if selectable.is_selected {
-            selected_units.push((unit, faction, health, worker_opt, soldier_opt, melee_opt, stance_opt));
+            selected_units.push((unit, faction, health, worker_opt, soldier_opt, melee_opt, stance_opt, p_fac));
         }
     }
 
-    for (building, faction, health, selectable, prod_opt, turret_opt) in &building_query {
+    for (building, faction, health, selectable, prod_opt, turret_opt, p_fac) in &building_query {
         if selectable.is_selected {
-            selected_building = Some((building, faction, health, prod_opt, turret_opt));
+            selected_building = Some((building, faction, health, prod_opt, turret_opt, p_fac));
             break;
         }
     }
@@ -137,9 +138,10 @@ pub fn update_selection_info_text(
     };
     let mut queue_str = String::new();
 
-    if let Some((building, faction, health, prod_opt, turret_opt)) = selected_building {
+    if let Some((building, faction, health, prod_opt, turret_opt, p_fac)) = selected_building {
         let fac_str = if *faction == Faction::Player1 { "Player 1" } else if *faction == Faction::Player2 { "Player 2" } else { "Hostile" };
-        title_str = format!("{} ({}) - HP: {:.0}/{:.0}", building.name, fac_str, health.current, health.max);
+        let faction_badge = p_fac.map(|pf| format!(" [{}]", pf.name())).unwrap_or_default();
+        title_str = format!("{}{} ({}) - HP: {:.0}/{:.0}", building.name, faction_badge, fac_str, health.current, health.max);
 
         if !building.is_constructed {
             details_str = format!("Under Construction... ({:.0}%)", building.progress() * 100.0);
@@ -166,7 +168,7 @@ pub fn update_selection_info_text(
         }
     } else if let Some((node_e, node_pos, resource)) = selected_resource {
         title_str = "Gold Rock Deposit".to_string();
-        let miner_count = unit_query.iter().filter(|(_, _, _, _, worker_opt, _, _, _, tf)| {
+        let miner_count = unit_query.iter().filter(|(_, _, _, _, worker_opt, _, _, _, _, tf)| {
             worker_opt.as_ref().map_or(false, |w| {
                 w.state != WorkerState::Idle && (
                     w.target_node == Some(node_e)
@@ -177,13 +179,13 @@ pub fn update_selection_info_text(
         details_str = format!("Remaining Gold: {} / {} | Miners: {}/{}", resource.remaining_minerals, resource.max_minerals, miner_count, shared::components::MAX_WORKERS_PER_ROCK);
     } else if !selected_units.is_empty() {
         if selected_units.len() == 1 {
-            let (unit, _, health, worker_opt, soldier_opt, _, stance_opt) = selected_units[0];
-            title_str = format!("{} - HP: {:.0}/{:.0}", unit.name, health.current, health.max);
-
+            let (unit, _, health, worker_opt, soldier_opt, _, stance_opt, p_fac) = selected_units[0];
             let stance_suffix = match stance_opt {
                 Some(TacticalStance::HoldPosition) => " [HOLD]",
                 _ => "",
             };
+            let faction_badge = p_fac.map(|pf| format!(" [{}]", pf.name())).unwrap_or_default();
+            title_str = format!("{}{}{} - HP: {:.0}/{:.0}", unit.name, faction_badge, stance_suffix, health.current, health.max);
 
             if worker_opt.is_some() {
                 details_str = if is_mobile {

@@ -13,7 +13,7 @@ pub fn server_solo_wave_spawner_system(
     net_channels: Res<ServerNetworkChannels>,
     mut matchmaker: ResMut<Matchmaker>,
     nav_grid: Res<NavGrid>,
-    base_query: Query<(&Transform, &Faction, &RoomId), With<BaseHQ>>,
+    base_query: Query<(&Transform, &Faction, Option<&PlayableFaction>, &RoomId), With<BaseHQ>>,
 ) {
     let dt = time.delta_secs();
     let mut waves_to_spawn = Vec::new();
@@ -27,12 +27,14 @@ pub fn server_solo_wave_spawner_system(
 
         // Check if Hostile AI Base HQ exists in this room
         let mut ai_base_pos = None;
+        let mut ai_playable_faction = None;
         let mut p1_base_pos = shared::map::P1_BASE_POS;
 
-        for (tf, faction, b_room) in &base_query {
+        for (tf, faction, pf, b_room) in &base_query {
             if b_room.0 == *room_id {
                 if *faction == Faction::HostileAi {
                     ai_base_pos = Some(tf.translation.truncate());
+                    ai_playable_faction = pf.copied();
                 } else if *faction == Faction::Player1 {
                     p1_base_pos = tf.translation.truncate();
                 }
@@ -56,11 +58,11 @@ pub fn server_solo_wave_spawner_system(
                 w => 14 + (w - 4) * 3,
             };
 
-            waves_to_spawn.push((*room_id, room.current_wave, count, base_spawn, p1_base_pos));
+            waves_to_spawn.push((*room_id, room.current_wave, count, base_spawn, p1_base_pos, ai_playable_faction));
         }
     }
 
-    for (room_id, wave_num, count, base_spawn, target_pos) in waves_to_spawn {
+    for (room_id, wave_num, count, base_spawn, target_pos, ai_playable_faction) in waves_to_spawn {
         info!(
             "⚔️ [Server WaveAi] Room #{}: Wave {} Incoming! Spawning {} Hostile Units",
             room_id, wave_num, count
@@ -106,6 +108,10 @@ pub fn server_solo_wave_spawner_system(
                 Transform::from_xyz(spawn_pos.x, spawn_pos.y, 2.0),
             ));
 
+            if let Some(pf) = ai_playable_faction {
+                unit_cmds.insert(pf);
+            }
+
             if is_melee {
                 unit_cmds.insert((
                     MeleeFighter {
@@ -141,6 +147,7 @@ pub fn server_solo_wave_spawner_system(
                         unit_kind,
                         position: spawn_pos,
                         max_hp: unit_kind.max_health(),
+                        playable_faction: ai_playable_faction,
                     },
                 });
             }

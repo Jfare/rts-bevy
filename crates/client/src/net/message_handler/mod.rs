@@ -91,6 +91,7 @@ pub fn handle_server_message(
             room_id,
             room_code,
             is_game_ready,
+            playable_faction,
         } => session::handle_lobby_joined(
             net_client,
             player_id,
@@ -98,6 +99,7 @@ pub fn handle_server_message(
             room_id,
             room_code,
             is_game_ready,
+            playable_faction,
         ),
 
         ServerMessage::GameStarted {
@@ -213,7 +215,8 @@ pub fn handle_server_message(
             building_kind,
             position,
             max_hp,
-        } => world::handle_building_spawned(commands, net_id, faction, building_kind, position, max_hp),
+            playable_faction,
+        } => world::handle_building_spawned(commands, net_id, faction, building_kind, position, max_hp, playable_faction),
 
         ServerMessage::UnitSpawned {
             net_id,
@@ -221,7 +224,8 @@ pub fn handle_server_message(
             unit_kind,
             position,
             max_hp,
-        } => world::handle_unit_spawned(commands, net_id, faction, unit_kind, position, max_hp),
+            playable_faction,
+        } => world::handle_unit_spawned(commands, net_id, faction, unit_kind, position, max_hp, playable_faction),
 
         ServerMessage::QueueUpdated {
             building_net_id,
@@ -329,6 +333,7 @@ pub fn handle_server_message(
             opponent_color,
             countdown_seconds,
             opponent_platform,
+            opponent_faction,
         } => session::handle_match_found(
             net_client,
             countdown_opt,
@@ -337,6 +342,7 @@ pub fn handle_server_message(
             opponent_color,
             countdown_seconds,
             opponent_platform,
+            opponent_faction,
         ),
 
         ServerMessage::QueueCancelled => session::handle_queue_cancelled(net_client, next_state),

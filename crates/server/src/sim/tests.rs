@@ -201,6 +201,7 @@ fn test_disconnect_cleans_up_room_entities_and_telemetry() {
             name: "Commander".to_string(),
             room_id: 1,
             faction: Faction::Player1,
+            playable_faction: PlayableFaction::FactionA,
             color: FactionColor::Blue,
             platform: ClientPlatform::Desktop,
         },
@@ -262,6 +263,7 @@ fn test_forfeit_cleans_up_room_entities_and_telemetry() {
             name: "SoloCommander".to_string(),
             room_id: 1,
             faction: Faction::Player1,
+            playable_faction: PlayableFaction::FactionA,
             color: FactionColor::Blue,
             platform: ClientPlatform::Desktop,
         },
@@ -321,6 +323,7 @@ fn test_tick_snapshots_are_partitioned_per_room() {
             name: "Player 1".to_string(),
             room_id: 1,
             faction: Faction::Player1,
+            playable_faction: PlayableFaction::FactionA,
             color: FactionColor::Blue,
             platform: ClientPlatform::Desktop,
         },
@@ -338,6 +341,7 @@ fn test_tick_snapshots_are_partitioned_per_room() {
             name: "Player 2".to_string(),
             room_id: 2,
             faction: Faction::Player1,
+            playable_faction: PlayableFaction::FactionB,
             color: FactionColor::Teal,
             platform: ClientPlatform::Desktop,
         },
@@ -431,6 +435,7 @@ fn test_custom_private_room_matching_by_code() {
             room_code: None,
             faction_color: Some(FactionColor::Teal),
             platform: Some(ClientPlatform::Desktop),
+            playable_faction: Some(PlayableFaction::FactionA),
         },
     }).unwrap();
 
@@ -458,6 +463,7 @@ fn test_custom_private_room_matching_by_code() {
             room_code: Some(generated_code.clone()),
             faction_color: Some(FactionColor::Red),
             platform: Some(ClientPlatform::Desktop),
+            playable_faction: Some(PlayableFaction::FactionB),
         },
     }).unwrap();
 
@@ -504,6 +510,7 @@ fn test_chat_and_ping_dispatching() {
             name: "Alice".to_string(),
             room_id: 1,
             faction: Faction::Player1,
+            playable_faction: PlayableFaction::FactionA,
             color: FactionColor::Blue,
             platform: ClientPlatform::Desktop,
         },
@@ -515,6 +522,7 @@ fn test_chat_and_ping_dispatching() {
             name: "Bob".to_string(),
             room_id: 1,
             faction: Faction::Player2,
+            playable_faction: PlayableFaction::FactionB,
             color: FactionColor::Red,
             platform: ClientPlatform::Desktop,
         },
@@ -917,6 +925,7 @@ fn test_queue_cancellation_and_telemetry() {
             room_code: None,
             faction_color: Some(FactionColor::Blue),
             platform: Some(ClientPlatform::Desktop),
+            playable_faction: Some(PlayableFaction::FactionA),
         },
     }).unwrap();
     app.update();
@@ -965,6 +974,7 @@ fn test_match_found_triggers_3s_countdown() {
             room_code: None,
             faction_color: Some(FactionColor::Blue),
             platform: Some(ClientPlatform::Desktop),
+            playable_faction: Some(PlayableFaction::FactionA),
         },
     }).unwrap();
     app.update();
@@ -978,6 +988,7 @@ fn test_match_found_triggers_3s_countdown() {
             room_code: None,
             faction_color: Some(FactionColor::Red),
             platform: Some(ClientPlatform::Mobile),
+            playable_faction: Some(PlayableFaction::FactionB),
         },
     }).unwrap();
     app.update();
@@ -1019,6 +1030,7 @@ fn test_room_economy_isolation() {
             room_code: None,
             faction_color: Some(FactionColor::Blue),
             platform: Some(ClientPlatform::Desktop),
+            playable_faction: Some(PlayableFaction::FactionA),
         },
     }).unwrap();
     app.update();
@@ -1032,6 +1044,7 @@ fn test_room_economy_isolation() {
             room_code: None,
             faction_color: Some(FactionColor::Teal),
             platform: Some(ClientPlatform::Desktop),
+            playable_faction: Some(PlayableFaction::FactionB),
         },
     }).unwrap();
     app.update();
@@ -1082,6 +1095,7 @@ fn test_consecutive_matches_have_fresh_economy() {
             room_code: None,
             faction_color: Some(FactionColor::Blue),
             platform: Some(ClientPlatform::Desktop),
+            playable_faction: Some(PlayableFaction::FactionA),
         },
     }).unwrap();
     app.update();
@@ -1122,6 +1136,7 @@ fn test_consecutive_matches_have_fresh_economy() {
             room_code: None,
             faction_color: Some(FactionColor::Blue),
             platform: Some(ClientPlatform::Desktop),
+            playable_faction: Some(PlayableFaction::FactionA),
         },
     }).unwrap();
     app.update();
@@ -1512,6 +1527,7 @@ fn test_manual_harvest_respects_5_worker_saturation_limit() {
         name: "Player 1".to_string(),
         room_id: 1,
         faction: Faction::Player1,
+        playable_faction: PlayableFaction::FactionA,
         color: FactionColor::Blue,
         platform: ClientPlatform::Desktop,
     });
@@ -2132,6 +2148,7 @@ fn test_handle_stop_and_repair_commands_clear_manual_override() {
             name: "Alice".to_string(),
             room_id: 1,
             faction: Faction::Player1,
+            playable_faction: PlayableFaction::FactionA,
             color: FactionColor::Blue,
             platform: ClientPlatform::Desktop,
         },
@@ -2446,6 +2463,135 @@ fn test_intermediate_waypoint_stall_timeout() {
     let updated_mt = app.world().entity(unit).get::<MoveTarget>().unwrap();
     assert_eq!(updated_mt.current_waypoint_idx, 1, "Stalled intermediate waypoint must advance to next waypoint");
     assert_eq!(updated_mt.stall_timer, 0.0, "Stall timer must reset on waypoint advance");
+}
+
+#[test]
+fn test_solo_vs_ai_assigns_player_faction_and_random_ai_faction() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    let (tx_in, rx_in) = crossbeam_channel::unbounded();
+    let (tx_out, mut rx_out) = tokio::sync::mpsc::unbounded_channel();
+    app.insert_resource(ServerNetworkChannels {
+        rx_incoming: rx_in,
+        tx_outgoing: tx_out,
+    });
+    app.insert_resource(Matchmaker::new());
+    app.insert_resource(NavGrid::default());
+    app.add_systems(Update, handle_incoming_network_events);
+
+    // Player joins SoloVsAi as FactionB
+    tx_in.send(IncomingNetEvent::MessageReceived {
+        peer_id: 101,
+        msg: ClientMessage::JoinLobby {
+            player_name: "SoloCommander".to_string(),
+            mode: GameMode::SoloVsAi,
+            room_code: None,
+            faction_color: Some(FactionColor::Blue),
+            platform: Some(ClientPlatform::Desktop),
+            playable_faction: Some(PlayableFaction::FactionB),
+        },
+    }).unwrap();
+    app.update();
+
+    let mm = app.world().resource::<Matchmaker>();
+    let player = mm.players.get(&101).expect("Player session must exist");
+    assert_eq!(player.playable_faction, PlayableFaction::FactionB);
+
+    let mut got_lobby_joined = false;
+    let mut initial_states = Vec::new();
+    while let Ok(ev) = rx_out.try_recv() {
+        if let OutgoingNetEvent::SendToPeer { peer_id, msg } = ev {
+            if peer_id == 101 {
+                match msg {
+                    ServerMessage::LobbyJoined { playable_faction, .. } => {
+                        assert_eq!(playable_faction, Some(PlayableFaction::FactionB));
+                        got_lobby_joined = true;
+                    }
+                    ServerMessage::InitialWorldState { entities, .. } => {
+                        initial_states = entities;
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    assert!(got_lobby_joined, "Must send LobbyJoined with player's faction");
+    assert!(!initial_states.is_empty(), "Initial entities must be spawned");
+
+    // Verify player entities have FactionB
+    let player_hq = initial_states
+        .iter()
+        .find(|e| e.faction == Faction::Player1 && matches!(e.kind, shared::protocol::EntityKind::Building(_)))
+        .expect("Player HQ must exist");
+    assert_eq!(player_hq.playable_faction, Some(PlayableFaction::FactionB));
+
+    // Verify AI entities have either FactionA or FactionB (randomly rolled)
+    let ai_hq = initial_states
+        .iter()
+        .find(|e| e.faction == Faction::HostileAi && matches!(e.kind, shared::protocol::EntityKind::Building(_)))
+        .expect("AI HQ must exist");
+    assert!(
+        ai_hq.playable_faction == Some(PlayableFaction::FactionA)
+            || ai_hq.playable_faction == Some(PlayableFaction::FactionB),
+        "AI must be assigned a valid PlayableFaction (allowing mirror matches)"
+    );
+}
+
+#[test]
+fn test_multiplayer_1v1_playable_factions_and_mirror_match() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    let (tx_in, rx_in) = crossbeam_channel::unbounded();
+    let (tx_out, mut rx_out) = tokio::sync::mpsc::unbounded_channel();
+    app.insert_resource(ServerNetworkChannels {
+        rx_incoming: rx_in,
+        tx_outgoing: tx_out,
+    });
+    app.insert_resource(Matchmaker::new());
+    app.insert_resource(PlayerEconomy::new());
+    app.insert_resource(NavGrid::default());
+    app.add_systems(Update, handle_incoming_network_events);
+
+    // Both players choose FactionA (Mirror Match!)
+    tx_in.send(IncomingNetEvent::MessageReceived {
+        peer_id: 101,
+        msg: ClientMessage::JoinLobby {
+            player_name: "Alice".to_string(),
+            mode: GameMode::Multiplayer1v1,
+            room_code: None,
+            faction_color: Some(FactionColor::Blue),
+            platform: Some(ClientPlatform::Desktop),
+            playable_faction: Some(PlayableFaction::FactionA),
+        },
+    }).unwrap();
+    app.update();
+
+    tx_in.send(IncomingNetEvent::MessageReceived {
+        peer_id: 102,
+        msg: ClientMessage::JoinLobby {
+            player_name: "Bob".to_string(),
+            mode: GameMode::Multiplayer1v1,
+            room_code: None,
+            faction_color: Some(FactionColor::Red),
+            platform: Some(ClientPlatform::Desktop),
+            playable_faction: Some(PlayableFaction::FactionA),
+        },
+    }).unwrap();
+    app.update();
+
+    let mut match_found_count = 0;
+    while let Ok(ev) = rx_out.try_recv() {
+        if let OutgoingNetEvent::SendToPeer { peer_id: _peer_id, msg } = ev {
+            if let ServerMessage::MatchFound { opponent_faction, .. } = msg {
+                assert_eq!(opponent_faction, Some(PlayableFaction::FactionA), "Opponent faction in mirror match must be FactionA");
+                match_found_count += 1;
+            } else if let ServerMessage::LobbyJoined { playable_faction, .. } = msg {
+                assert_eq!(playable_faction, Some(PlayableFaction::FactionA));
+            }
+        }
+    }
+    assert_eq!(match_found_count, 2, "Both players must receive MatchFound with opponent's faction");
 }
 
 

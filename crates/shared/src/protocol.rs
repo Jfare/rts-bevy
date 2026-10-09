@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use crate::components::{Faction, WorkerState};
+use crate::factions::PlayableFaction;
 use crate::grid::BuildingKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Reflect)]
@@ -162,6 +163,8 @@ pub enum ClientMessage {
         faction_color: Option<FactionColor>,
         #[serde(default)]
         platform: Option<ClientPlatform>,
+        #[serde(default)]
+        playable_faction: Option<PlayableFaction>,
     },
     RequestBuild {
         building_kind: BuildingKind,
@@ -245,6 +248,8 @@ pub struct EntityState {
     pub rotation: f32,
     pub current_hp: f32,
     pub max_hp: f32,
+    #[serde(default)]
+    pub playable_faction: Option<PlayableFaction>,
 }
 
 /// Messages sent from Server to Client
@@ -256,6 +261,8 @@ pub enum ServerMessage {
         room_id: u32,
         room_code: Option<String>,
         is_game_ready: bool,
+        #[serde(default)]
+        playable_faction: Option<PlayableFaction>,
     },
     MatchFound {
         opponent_name: String,
@@ -263,6 +270,8 @@ pub enum ServerMessage {
         countdown_seconds: f32,
         #[serde(default)]
         opponent_platform: Option<ClientPlatform>,
+        #[serde(default)]
+        opponent_faction: Option<PlayableFaction>,
     },
     QueueCancelled,
     LobbyStats {
@@ -305,6 +314,8 @@ pub enum ServerMessage {
         building_kind: BuildingKind,
         position: Vec2,
         max_hp: f32,
+        #[serde(default)]
+        playable_faction: Option<PlayableFaction>,
     },
     UnitSpawned {
         net_id: u32,
@@ -312,6 +323,8 @@ pub enum ServerMessage {
         unit_kind: UnitKind,
         position: Vec2,
         max_hp: f32,
+        #[serde(default)]
+        playable_faction: Option<PlayableFaction>,
     },
     QueueUpdated {
         building_net_id: u32,
@@ -435,6 +448,7 @@ mod tests {
             room_code: None,
             faction_color: Some(FactionColor::Blue),
             platform: Some(ClientPlatform::Mobile),
+            playable_faction: None,
         };
 
         let encoded = encode_client_msg(&msg).expect("Failed to encode");
@@ -454,6 +468,7 @@ mod tests {
             opponent_color: FactionColor::Red,
             countdown_seconds: 3.0,
             opponent_platform: Some(ClientPlatform::Desktop),
+            opponent_faction: None,
         };
 
         let encoded = encode_server_msg(&msg).expect("Failed to encode");
@@ -461,6 +476,44 @@ mod tests {
 
         if let ServerMessage::MatchFound { opponent_platform, .. } = decoded {
             assert_eq!(opponent_platform, Some(ClientPlatform::Desktop));
+        } else {
+            panic!("Decoded message was not MatchFound");
+        }
+    }
+
+    #[test]
+    fn test_playable_faction_protocol_roundtrip() {
+        let msg = ClientMessage::JoinLobby {
+            player_name: "CommanderA".to_string(),
+            mode: GameMode::SoloVsAi,
+            room_code: None,
+            faction_color: Some(FactionColor::Teal),
+            platform: Some(ClientPlatform::Desktop),
+            playable_faction: Some(PlayableFaction::FactionB),
+        };
+
+        let encoded = encode_client_msg(&msg).expect("Failed to encode");
+        let decoded = decode_client_msg(&encoded).expect("Failed to decode");
+
+        if let ClientMessage::JoinLobby { playable_faction, .. } = decoded {
+            assert_eq!(playable_faction, Some(PlayableFaction::FactionB));
+        } else {
+            panic!("Decoded message was not JoinLobby");
+        }
+
+        let s_msg = ServerMessage::MatchFound {
+            opponent_name: "OpponentB".to_string(),
+            opponent_color: FactionColor::Amber,
+            countdown_seconds: 3.0,
+            opponent_platform: Some(ClientPlatform::Mobile),
+            opponent_faction: Some(PlayableFaction::FactionB),
+        };
+
+        let s_encoded = encode_server_msg(&s_msg).expect("Failed to encode");
+        let s_decoded = decode_server_msg(&s_encoded).expect("Failed to decode");
+
+        if let ServerMessage::MatchFound { opponent_faction, .. } = s_decoded {
+            assert_eq!(opponent_faction, Some(PlayableFaction::FactionB));
         } else {
             panic!("Decoded message was not MatchFound");
         }

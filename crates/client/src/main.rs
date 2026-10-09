@@ -5,6 +5,7 @@ mod camera;
 mod chat;
 mod combat;
 mod command_marker;
+mod factions;
 mod fog_of_war;
 mod mining;
 mod minimap;

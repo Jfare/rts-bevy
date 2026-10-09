@@ -89,6 +89,10 @@ pub fn handle_initial_world_state(
             Transform::from_xyz(pos.x, pos.y, 1.0),
         ));
 
+        if let Some(pf) = ent_state.playable_faction {
+            b_cmds.insert(pf);
+        }
+
         match kind {
             BuildingKind::BaseHQ => {
                 b_cmds.insert((
@@ -143,6 +147,10 @@ pub fn handle_initial_world_state(
             Transform::from_xyz(pos.x, pos.y, 2.0)
                 .with_rotation(Quat::from_rotation_z(ent_state.rotation)),
         ));
+
+        if let Some(pf) = ent_state.playable_faction {
+            u_cmds.insert(pf);
+        }
 
         match kind {
             UnitKind::Worker => {
@@ -207,10 +215,11 @@ pub fn handle_building_spawned(
     building_kind: BuildingKind,
     position: Vec2,
     max_hp: f32,
+    playable_faction: Option<shared::factions::PlayableFaction>,
 ) {
     info!(
-        "🏗️ [NetClient] Server spawned building #{}: {:?}",
-        net_id, building_kind
+        "🏗️ [NetClient] Server spawned building #{}: {:?} ({:?})",
+        net_id, building_kind, playable_faction
     );
     let mut entity_cmds = commands.spawn((
         Building::new(
@@ -229,6 +238,10 @@ pub fn handle_building_spawned(
         },
         Transform::from_xyz(position.x, position.y, 1.0),
     ));
+
+    if let Some(pf) = playable_faction {
+        entity_cmds.insert(pf);
+    }
 
     match building_kind {
         BuildingKind::BaseHQ => {
@@ -274,8 +287,9 @@ pub fn handle_unit_spawned(
     unit_kind: UnitKind,
     position: Vec2,
     max_hp: f32,
+    playable_faction: Option<shared::factions::PlayableFaction>,
 ) {
-    info!("🎖️ [NetClient] Server spawned unit #{}: {:?}", net_id, unit_kind);
+    info!("🎖️ [NetClient] Server spawned unit #{}: {:?} ({:?})", net_id, unit_kind, playable_faction);
     let mut unit_cmds = commands.spawn((
         Unit {
             name: unit_kind.name().to_string(),
@@ -290,6 +304,10 @@ pub fn handle_unit_spawned(
         },
         Transform::from_xyz(position.x, position.y, 2.0),
     ));
+
+    if let Some(pf) = playable_faction {
+        unit_cmds.insert(pf);
+    }
 
     match unit_kind {
         UnitKind::Worker => {

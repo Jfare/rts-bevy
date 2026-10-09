@@ -16,6 +16,8 @@ pub enum AppState {
 // FACTION & IDENTITY
 // ─────────────────────────────────────────────────────────────────────────────
 
+pub use crate::factions::PlayableFaction;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Component, Reflect)]
 #[derive(Default)]
 pub enum Faction {

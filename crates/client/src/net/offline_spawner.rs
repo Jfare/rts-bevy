@@ -10,8 +10,13 @@ pub fn spawn_standalone_offline_match(
     mut wave_ai_opt: Option<&mut bot_ai::WaveAiState>,
     camera_query: &mut Query<&mut Transform, (With<Camera2d>, Without<NetEntity>, Without<Unit>, Without<Building>, Without<ResourceNode>)>,
     cleanup_query: &Query<Entity, Or<(With<NetEntity>, With<Unit>, With<Building>, With<ResourceNode>)>>,
+    player_faction: shared::factions::PlayableFaction,
 ) {
-    info!("🤖 [Offline] Initializing standalone local Solo vs AI match");
+    let ai_faction = shared::factions::PlayableFaction::random();
+    info!(
+        "🤖 [Offline] Initializing standalone local Solo vs AI match (Player: {:?}, AI: {:?})",
+        player_faction, ai_faction
+    );
     for ent in cleanup_query.iter() {
         commands.entity(ent).despawn_recursive();
     }
@@ -59,6 +64,7 @@ pub fn spawn_standalone_offline_match(
         },
         Health::new(1500.0),
         Faction::Player1,
+        player_faction,
         Selectable::default(),
         Radius(55.0),
         NetEntity { net_id: 1, owner_peer_id: 1 },
@@ -96,6 +102,7 @@ pub fn spawn_standalone_offline_match(
             },
             Health::new(80.0),
             Faction::Player1,
+            player_faction,
             Selectable::default(),
             Radius(14.0),
             MoveSpeed(WORKER_MOVE_SPEED),
@@ -115,6 +122,7 @@ pub fn spawn_standalone_offline_match(
         },
         Health::new(1500.0),
         Faction::HostileAi,
+        ai_faction,
         Selectable::default(),
         Radius(55.0),
         NetEntity { net_id: 100, owner_peer_id: 2 },
@@ -152,6 +160,7 @@ pub fn spawn_standalone_offline_match(
             },
             Health::new(80.0),
             Faction::HostileAi,
+            ai_faction,
             Selectable::default(),
             Radius(14.0),
             MoveSpeed(WORKER_MOVE_SPEED),

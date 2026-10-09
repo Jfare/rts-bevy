@@ -13,6 +13,7 @@ pub struct PlayerSession {
     pub name: String,
     pub room_id: u32,
     pub faction: Faction,
+    pub playable_faction: PlayableFaction,
     pub color: FactionColor,
     pub platform: ClientPlatform,
 }
@@ -221,6 +222,8 @@ mod tests {
             GameMode::Multiplayer1v1,
             101,
             Some(102),
+            PlayableFaction::FactionA,
+            PlayableFaction::FactionB,
         );
 
         let states_r2 = spawn_match_entities(
@@ -230,6 +233,8 @@ mod tests {
             GameMode::SoloVsAi,
             201,
             None,
+            PlayableFaction::FactionA,
+            PlayableFaction::FactionB,
         );
 
         app.update();
@@ -262,6 +267,7 @@ mod tests {
                 name: "Player 1".to_string(),
                 room_id: 1,
                 faction: Faction::Player1,
+                playable_faction: PlayableFaction::FactionA,
                 color: FactionColor::Blue,
                 platform: ClientPlatform::Desktop,
             },
@@ -273,6 +279,7 @@ mod tests {
                 name: "Player 2".to_string(),
                 room_id: 1,
                 faction: Faction::Player2,
+                playable_faction: PlayableFaction::FactionB,
                 color: FactionColor::Red,
                 platform: ClientPlatform::Mobile,
             },
@@ -290,6 +297,7 @@ mod tests {
                 name: "Solo Commander".to_string(),
                 room_id: 2,
                 faction: Faction::Player1,
+                playable_faction: PlayableFaction::FactionA,
                 color: FactionColor::Teal,
                 platform: ClientPlatform::Desktop,
             },
@@ -332,6 +340,7 @@ mod tests {
                 name: "P1".to_string(),
                 room_id: 1,
                 faction: Faction::Player1,
+                playable_faction: PlayableFaction::FactionA,
                 color: FactionColor::Blue,
                 platform: ClientPlatform::Desktop,
             },
@@ -343,6 +352,7 @@ mod tests {
                 name: "P2".to_string(),
                 room_id: 1,
                 faction: Faction::Player2,
+                playable_faction: PlayableFaction::FactionB,
                 color: FactionColor::Red,
                 platform: ClientPlatform::Mobile,
             },
@@ -359,6 +369,7 @@ mod tests {
                 name: "Solo".to_string(),
                 room_id: 2,
                 faction: Faction::Player1,
+                playable_faction: PlayableFaction::FactionA,
                 color: FactionColor::Amber,
                 platform: ClientPlatform::Desktop,
             },
