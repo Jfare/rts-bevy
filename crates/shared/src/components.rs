@@ -16,6 +16,8 @@ pub enum AppState {
 // FACTION & IDENTITY
 // ─────────────────────────────────────────────────────────────────────────────
 
+pub use crate::factions::PlayableFaction;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Component, Reflect)]
 #[derive(Default)]
 pub enum Faction {
@@ -266,6 +268,11 @@ pub const BASE_HQ_RESOURCE_RADIUS: f32 = 380.0;
 
 /// Repair rate in HP per second per active worker
 pub const WORKER_REPAIR_RATE: f32 = 20.0;
+
+/// Max distance from a worker's centre to the Base HQ's *edge* at which minerals are deposited.
+/// Worker radius is 14, and the box collider holds workers exactly 14px from the edge,
+/// so 24 leaves a 10px margin for jostling between workers.
+pub const BASE_DROPOFF_EDGE_DISTANCE: f32 = 24.0;
 
 #[derive(Debug, Clone, PartialEq, Component, Reflect)]
 pub struct Worker {

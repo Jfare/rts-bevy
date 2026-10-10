@@ -33,6 +33,14 @@ pub fn poll_web_portal_launch_requests(
             }
         }
 
+        if let Ok(val) = js_sys::eval("window.__rts_selected_faction || ''") {
+            if let Some(fac_str) = val.as_string() {
+                if !fac_str.is_empty() {
+                    net_client.my_playable_faction = shared::factions::PlayableFaction::from_id(&fac_str);
+                }
+            }
+        }
+
         if let Ok(val) = js_sys::eval("window.__rts_cancel_queue || false") {
             if val.as_bool().unwrap_or(false) {
                 let _ = js_sys::eval("window.__rts_cancel_queue = false;");
@@ -47,7 +55,7 @@ pub fn poll_web_portal_launch_requests(
                 if !mode_str.is_empty() {
                     let _ = js_sys::eval("window.__rts_requested_mode = null;");
                     if mode_str == "1v1" {
-                        info!("⚔️ [Portal] Launching 1v1 Multiplayer matchmaking");
+                        info!("⚔️ [Portal] Launching 1v1 Multiplayer matchmaking ({:?})", net_client.my_playable_faction);
                         net_client.current_mode = GameMode::Multiplayer1v1;
                         if let Some(ref mut wave_ai) = wave_ai_opt {
                             wave_ai.is_active = false;
@@ -62,10 +70,11 @@ pub fn poll_web_portal_launch_requests(
                                 room_code: None,
                                 faction_color: Some(net_client.my_color),
                                 platform: Some(net_client.my_platform),
+                                playable_faction: Some(net_client.my_playable_faction),
                             });
                         }
                     } else if mode_str == "solo" {
-                        info!("🤖 [Portal] Launching Solo vs AI match");
+                        info!("🤖 [Portal] Launching Solo vs AI match ({:?})", net_client.my_playable_faction);
                         net_client.current_mode = GameMode::SoloVsAi;
                         if net_client.status == NetStatus::Connecting {
                             info!("⏳ [Portal] WebSocket connecting; buffering Solo vs AI match request.");
@@ -83,6 +92,7 @@ pub fn poll_web_portal_launch_requests(
                                 wave_ai_opt.as_deref_mut(),
                                 &mut camera_query,
                                 &cleanup_query,
+                                net_client.my_playable_faction,
                             );
                             next_state.set(AppState::InGame);
                         } else {
@@ -95,6 +105,7 @@ pub fn poll_web_portal_launch_requests(
                                 room_code: None,
                                 faction_color: Some(net_client.my_color),
                                 platform: Some(net_client.my_platform),
+                                playable_faction: Some(net_client.my_playable_faction),
                             });
                         }
                     }

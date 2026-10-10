@@ -56,7 +56,9 @@ pub struct NetClient {
     pub my_faction: Faction,
     pub my_color: FactionColor,
     pub my_platform: ClientPlatform,
+    pub my_playable_faction: shared::factions::PlayableFaction,
     pub opponent_platform: Option<ClientPlatform>,
+    pub opponent_playable_faction: Option<shared::factions::PlayableFaction>,
     pub player_name: String,
     pub current_room_code: Option<String>,
     pub current_mode: GameMode,
@@ -80,7 +82,9 @@ impl Default for NetClient {
             my_faction: Faction::Player1,
             my_color: FactionColor::Blue,
             my_platform: ClientPlatform::Desktop,
+            my_playable_faction: shared::factions::PlayableFaction::FactionA,
             opponent_platform: None,
+            opponent_playable_faction: None,
             player_name: "Commander".to_string(),
             current_room_code: None,
             current_mode: GameMode::SoloVsAi,
@@ -299,6 +303,7 @@ pub fn poll_network_events(
                         room_code: None,
                         faction_color: Some(net_client.my_color),
                         platform: Some(net_client.my_platform),
+                        playable_faction: Some(net_client.my_playable_faction),
                     });
                 }
             }

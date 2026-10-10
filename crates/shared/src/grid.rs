@@ -84,6 +84,13 @@ impl BuildingKind {
         }
     }
 
+    /// Circular footprint radius used for placement checks and the building's `Radius` component.
+    pub fn footprint_radius(&self) -> f32 {
+        let s = self.size();
+        s.x.max(s.y) * 0.5
+    }
+
+
     pub fn build_duration(&self) -> f32 {
         match self {
             BuildingKind::BaseHQ => 5.0,
@@ -103,12 +110,27 @@ impl BuildingKind {
     }
 }
 
+/// Shortest distance from `point` to the edge of an axis-aligned box centred on `center`.
+/// Returns `0.0` when the point is inside the box.
+pub fn distance_to_aabb(point: Vec2, center: Vec2, size: Vec2) -> f32 {
+    let half = size * 0.5;
+    let closest = Vec2::new(
+        point.x.clamp(center.x - half.x, center.x + half.x),
+        point.y.clamp(center.y - half.y, center.y + half.y),
+    );
+    point.distance(closest)
+}
+
+
 // ─────────────────────────────────────────────────────────────────────────────
 // A* NAVIGATION GRID & PATHFINDING
 // ─────────────────────────────────────────────────────────────────────────────
 
 pub const NAV_GRID_DIM: usize = 64;
 pub const NAV_CELL_SIZE: f32 = 50.0; // 64 * 50 = 3200 px
+/// Half the world-space width of the nav grid (grid spans -HALF..HALF on both axes).
+pub const NAV_GRID_HALF_EXTENT: f32 = 1600.0;
+
 
 #[derive(Debug, Clone, Resource, Reflect)]
 pub struct NavGrid {
@@ -180,6 +202,29 @@ impl NavGrid {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    /// Marks an axis-aligned rectangular obstacle area as blocked with unit clearance padding
+    pub fn mark_box(&mut self, center: Vec2, size: Vec2, padding: f32) {
+        let half = size * 0.5 + Vec2::splat(padding);
+        let min_pos = center - half;
+        let max_pos = center + half;
+
+        if min_pos.x > NAV_GRID_HALF_EXTENT || max_pos.x < -NAV_GRID_HALF_EXTENT || min_pos.y > NAV_GRID_HALF_EXTENT || max_pos.y < -NAV_GRID_HALF_EXTENT {
+            return;
+        }
+
+        let min_gx = (((min_pos.x - (-NAV_GRID_HALF_EXTENT)) / NAV_CELL_SIZE).floor() as isize).clamp(0, (NAV_GRID_DIM - 1) as isize) as usize;
+        let min_gy = (((min_pos.y - (-NAV_GRID_HALF_EXTENT)) / NAV_CELL_SIZE).floor() as isize).clamp(0, (NAV_GRID_DIM - 1) as isize) as usize;
+        let max_gx = (((max_pos.x - (-NAV_GRID_HALF_EXTENT)) / NAV_CELL_SIZE).floor() as isize).clamp(0, (NAV_GRID_DIM - 1) as isize) as usize;
+        let max_gy = (((max_pos.y - (-NAV_GRID_HALF_EXTENT)) / NAV_CELL_SIZE).floor() as isize).clamp(0, (NAV_GRID_DIM - 1) as isize) as usize;
+
+
+        for gy in min_gy..=max_gy {
+            for gx in min_gx..=max_gx {
+                self.set_blocked(gx, gy, true);
             }
         }
     }
@@ -499,6 +544,23 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn test_distance_to_aabb() {
+        let c = Vec2::ZERO;
+        let s = Vec2::new(110.0, 110.0);
+        assert_eq!(distance_to_aabb(Vec2::new(0.0, 0.0), c, s), 0.0); // inside
+        assert!((distance_to_aabb(Vec2::new(69.0, 0.0), c, s) - 14.0).abs() < 0.001); // face
+        let corner = distance_to_aabb(Vec2::new(65.0, 65.0), c, s); // diagonal
+        assert!((corner - 200.0_f32.sqrt()).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_nav_grid_half_extent_matches_dimensions() {
+        assert_eq!(NAV_GRID_HALF_EXTENT, NAV_GRID_DIM as f32 * NAV_CELL_SIZE / 2.0);
+    }
 }
+
+
 
 

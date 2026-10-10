@@ -633,7 +633,12 @@ pub fn server_mining_system(
                 }
 
                 if let Some(base_pos) = best_base {
-                    if min_dist <= worker.base_interact_distance {
+                    let edge_dist = shared::grid::distance_to_aabb(
+                        w_pos,
+                        base_pos,
+                        shared::grid::BuildingKind::BaseHQ.size(),
+                    );
+                    if edge_dist <= BASE_DROPOFF_EDGE_DISTANCE {
                         if let Some(room) = matchmaker.rooms.get_mut(&worker_room.0) {
                             room.economy.add_minerals(*faction, worker.carried_minerals);
                         }

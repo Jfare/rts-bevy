@@ -16,9 +16,11 @@ pub fn handle_join_lobby(
     room_code: Option<String>,
     faction_color: Option<FactionColor>,
     platform: Option<ClientPlatform>,
+    playable_faction: Option<PlayableFaction>,
 ) {
     let color = faction_color.unwrap_or(FactionColor::Blue);
     let plat = platform.unwrap_or(ClientPlatform::Desktop);
+    let player_faction_type = playable_faction.unwrap_or(PlayableFaction::FactionA);
 
     match mode {
         GameMode::SoloVsAi => {
@@ -35,6 +37,12 @@ pub fn handle_join_lobby(
             let room_id = matchmaker.next_room_id;
             matchmaker.next_room_id += 1;
 
+            let ai_faction_type = PlayableFaction::random();
+            info!(
+                "🤖 [Server] Starting Solo vs AI room #{} (Player: {:?}, AI: {:?})",
+                room_id, player_faction_type, ai_faction_type
+            );
+
             matchmaker.players.insert(
                 peer_id,
                 PlayerSession {
@@ -42,6 +50,7 @@ pub fn handle_join_lobby(
                     name: player_name.clone(),
                     room_id,
                     faction: Faction::Player1,
+                    playable_faction: player_faction_type,
                     color,
                     platform: plat,
                 },
@@ -62,6 +71,8 @@ pub fn handle_join_lobby(
                 GameMode::SoloVsAi,
                 peer_id,
                 None,
+                player_faction_type,
+                ai_faction_type,
             );
 
             let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::SendToPeer {
@@ -72,6 +83,7 @@ pub fn handle_join_lobby(
                     room_id,
                     room_code: None,
                     is_game_ready: true,
+                    playable_faction: Some(player_faction_type),
                 },
             });
 
@@ -157,6 +169,13 @@ pub fn handle_join_lobby(
                     .unwrap_or(ClientPlatform::Desktop);
                 let p2_plat = plat;
 
+                let p1_faction_type = matchmaker
+                    .players
+                    .get(&waiting_p1)
+                    .map(|p| p.playable_faction)
+                    .unwrap_or(PlayableFaction::FactionA);
+                let p2_faction_type = player_faction_type;
+
                 let p2_color = if color == p1_color { FactionColor::Red } else { color };
 
                 matchmaker.players.insert(
@@ -166,6 +185,7 @@ pub fn handle_join_lobby(
                         name: p1_name.clone(),
                         room_id,
                         faction: Faction::Player1,
+                        playable_faction: p1_faction_type,
                         color: p1_color,
                         platform: p1_plat,
                     },
@@ -178,6 +198,7 @@ pub fn handle_join_lobby(
                         name: player_name.clone(),
                         room_id,
                         faction: Faction::Player2,
+                        playable_faction: p2_faction_type,
                         color: p2_color,
                         platform: p2_plat,
                     },
@@ -200,11 +221,13 @@ pub fn handle_join_lobby(
                     GameMode::Multiplayer1v1,
                     waiting_p1,
                     Some(peer_id),
+                    p1_faction_type,
+                    p2_faction_type,
                 );
 
-                for (p_id, faction, opp_name, opp_color, opp_plat) in [
-                    (waiting_p1, Faction::Player1, player_name.clone(), p2_color, p2_plat),
-                    (peer_id, Faction::Player2, p1_name.clone(), p1_color, p1_plat),
+                for (p_id, faction, p_faction_type, opp_name, opp_color, opp_plat, opp_faction_type) in [
+                    (waiting_p1, Faction::Player1, p1_faction_type, player_name.clone(), p2_color, p2_plat, p2_faction_type),
+                    (peer_id, Faction::Player2, p2_faction_type, p1_name.clone(), p1_color, p1_plat, p1_faction_type),
                 ] {
                     let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::SendToPeer {
                         peer_id: p_id,
@@ -213,6 +236,7 @@ pub fn handle_join_lobby(
                             opponent_color: opp_color,
                             countdown_seconds: 3.0,
                             opponent_platform: Some(opp_plat),
+                            opponent_faction: Some(opp_faction_type),
                         },
                     });
 
@@ -224,6 +248,7 @@ pub fn handle_join_lobby(
                             room_id,
                             room_code: None,
                             is_game_ready: true,
+                            playable_faction: Some(p_faction_type),
                         },
                     });
 
@@ -284,6 +309,7 @@ pub fn handle_join_lobby(
                         name: player_name,
                         room_id: 0,
                         faction: Faction::Player1,
+                        playable_faction: player_faction_type,
                         color,
                         platform: plat,
                     },
@@ -294,6 +320,7 @@ pub fn handle_join_lobby(
                     msg: ServerMessage::LobbyJoined {
                         player_id: peer_id,
                         assigned_faction: Faction::Player1,
+                        playable_faction: Some(player_faction_type),
                         room_id: 0,
                         room_code: None,
                         is_game_ready: false,
@@ -342,8 +369,15 @@ pub fn handle_join_lobby(
                         .get(&waiting_p1)
                         .map(|p| p.platform)
                         .unwrap_or(ClientPlatform::Desktop);
-                    let p2_plat = plat;
 
+                    let p1_playable_faction = matchmaker
+                        .players
+                        .get(&waiting_p1)
+                        .map(|p| p.playable_faction)
+                        .unwrap_or(PlayableFaction::FactionA);
+
+                    let p2_plat = plat;
+                    let p2_playable_faction = player_faction_type;
                     let p2_color = if color == p1_color { FactionColor::Red } else { color };
 
                     matchmaker.players.insert(
@@ -353,6 +387,7 @@ pub fn handle_join_lobby(
                             name: player_name.clone(),
                             room_id: target_room_id,
                             faction: Faction::Player2,
+                            playable_faction: p2_playable_faction,
                             color: p2_color,
                             platform: p2_plat,
                         },
@@ -365,6 +400,8 @@ pub fn handle_join_lobby(
                         GameMode::Multiplayer1v1,
                         waiting_p1,
                         Some(peer_id),
+                        p1_playable_faction,
+                        p2_playable_faction,
                     );
 
                     let (p1_cur_sup, p1_max_sup, p1_minerals, p2_cur_sup, p2_max_sup, p2_minerals) = {
@@ -381,15 +418,16 @@ pub fn handle_join_lobby(
                         )
                     };
 
-                    for (p_id, faction, opp_name, opp_color, opp_plat) in [
-                        (waiting_p1, Faction::Player1, player_name.clone(), p2_color, p2_plat),
-                        (peer_id, Faction::Player2, p1_name.clone(), p1_color, p1_plat),
+                    for (p_id, faction, my_p_faction, opp_name, opp_color, opp_plat, opp_faction) in [
+                        (waiting_p1, Faction::Player1, p1_playable_faction, player_name.clone(), p2_color, p2_plat, p2_playable_faction),
+                        (peer_id, Faction::Player2, p2_playable_faction, p1_name.clone(), p1_color, p1_plat, p1_playable_faction),
                     ] {
                         let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::SendToPeer {
                             peer_id: p_id,
                             msg: ServerMessage::MatchFound {
                                 opponent_name: opp_name,
                                 opponent_color: opp_color,
+                                opponent_faction: Some(opp_faction),
                                 countdown_seconds: 3.0,
                                 opponent_platform: Some(opp_plat),
                             },
@@ -400,6 +438,7 @@ pub fn handle_join_lobby(
                             msg: ServerMessage::LobbyJoined {
                                 player_id: p_id,
                                 assigned_faction: faction,
+                                playable_faction: Some(my_p_faction),
                                 room_id: target_room_id,
                                 room_code: Some(code.clone()),
                                 is_game_ready: true,
@@ -474,6 +513,7 @@ pub fn handle_join_lobby(
                         name: player_name.clone(),
                         room_id,
                         faction: Faction::Player1,
+                        playable_faction: player_faction_type,
                         color,
                         platform: plat,
                     },
@@ -495,6 +535,7 @@ pub fn handle_join_lobby(
                     msg: ServerMessage::LobbyJoined {
                         player_id: peer_id,
                         assigned_faction: Faction::Player1,
+                        playable_faction: Some(player_faction_type),
                         room_id,
                         room_code: Some(generated_code.clone()),
                         is_game_ready: false,

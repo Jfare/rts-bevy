@@ -44,14 +44,17 @@ pub fn handle_units_ordered_move(
                 }
 
                 let unit_pos = tf.translation.truncate();
-                let waypoints = nav_grid.find_path(unit_pos, dest);
 
                 if let Some(mut mt) = move_target_opt {
-                    mt.destination = dest;
+                    let needs_new_path = mt.destination.distance(dest) > 8.0 || mt.waypoints.is_empty();
+                    if needs_new_path {
+                        mt.destination = dest;
+                        mt.waypoints = nav_grid.find_path(unit_pos, dest);
+                        mt.current_waypoint_idx = 0;
+                    }
                     mt.is_attack_move = is_attack_move;
-                    mt.waypoints = waypoints;
-                    mt.current_waypoint_idx = 0;
                 } else {
+                    let waypoints = nav_grid.find_path(unit_pos, dest);
                     commands
                         .entity(entity)
                         .insert(MoveTarget::with_waypoints(dest, is_attack_move, waypoints));

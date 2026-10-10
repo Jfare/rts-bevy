@@ -216,6 +216,159 @@
             100% { transform: scale(0.9); opacity: 0.7; }
         }
 
+        /* ── Faction Selector Component ── */
+        .faction-selector-container {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            background: rgba(15, 23, 42, 0.65);
+            border: 1px solid rgba(56, 189, 248, 0.25);
+            border-radius: 10px;
+            padding: 12px 14px;
+        }
+
+        .faction-selector-label {
+            font-size: 0.78rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-dim);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .faction-selector-label span:last-child {
+            color: var(--primary);
+            font-size: 0.75rem;
+            text-transform: none;
+            letter-spacing: 0.02em;
+        }
+
+        .faction-options {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        @media (max-width: 520px) {
+            .faction-options {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .faction-card {
+            background: rgba(10, 16, 26, 0.75);
+            border: 2px solid rgba(148, 163, 184, 0.2);
+            border-radius: 8px;
+            padding: 10px 14px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            position: relative;
+            overflow: hidden;
+            font: inherit;
+            color: inherit;
+            text-align: left;
+            width: 100%;
+        }
+
+        .faction-card:hover {
+            border-color: rgba(56, 189, 248, 0.5);
+            background: rgba(15, 23, 42, 0.85);
+            transform: translateY(-1px);
+        }
+
+        .faction-card:focus-visible {
+            outline: 2px solid #38bdf8;
+            outline-offset: 2px;
+        }
+
+        .faction-card-badge,
+        .faction-card-name,
+        .faction-card-desc {
+            display: block;
+        }
+
+        .faction-card.active {
+            background: rgba(14, 30, 50, 0.9);
+        }
+
+        .faction-card[data-faction="FactionA"].active {
+            border-color: #38bdf8;
+            box-shadow: 0 0 16px rgba(56, 189, 248, 0.4);
+        }
+
+        .faction-card[data-faction="FactionB"].active {
+            border-color: #f59e0b;
+            box-shadow: 0 0 16px rgba(245, 158, 11, 0.4);
+        }
+
+        .faction-card-badge {
+            font-size: 1.6rem;
+            line-height: 1;
+            filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
+        }
+
+        .faction-card-info {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            flex: 1;
+        }
+
+        .faction-card-name {
+            font-size: 0.95rem;
+            font-weight: 800;
+            letter-spacing: 0.05em;
+            color: #ffffff;
+        }
+
+        .faction-card[data-faction="FactionA"] .faction-card-name {
+            color: #7dd3fc;
+        }
+
+        .faction-card[data-faction="FactionB"] .faction-card-name {
+            color: #fcd34d;
+        }
+
+        .faction-card-desc {
+            font-size: 0.72rem;
+            color: #94a3b8;
+            letter-spacing: 0.02em;
+        }
+
+        .faction-check-indicator {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+            font-weight: 800;
+            background: rgba(148, 163, 184, 0.15);
+            color: transparent;
+            border: 1px solid rgba(148, 163, 184, 0.3);
+            transition: all 0.2s ease;
+        }
+
+        .faction-card[data-faction="FactionA"].active .faction-check-indicator {
+            background: #38bdf8;
+            color: #070a0e;
+            border-color: #38bdf8;
+            box-shadow: 0 0 8px #38bdf8;
+        }
+
+        .faction-card[data-faction="FactionB"].active .faction-check-indicator {
+            background: #f59e0b;
+            color: #070a0e;
+            border-color: #f59e0b;
+            box-shadow: 0 0 8px #f59e0b;
+        }
+
         /* ── Action Buttons ── */
         .btn-group {
             display: grid;
@@ -766,6 +919,32 @@
                     </div>
                 </div>
 
+                <!-- Playable Faction Selection -->
+                <div class="faction-selector-container">
+                    <div class="faction-selector-label">
+                        <span>⚔️ PLAYABLE FACTION</span>
+                        <span id="faction-status-label">Active: Faction A 🅰️</span>
+                    </div>
+                    <div class="faction-options" role="group" aria-label="Playable faction">
+                        <button type="button" class="faction-card active" id="faction-card-a" data-faction="FactionA" aria-pressed="true">
+                            <span class="faction-card-badge" aria-hidden="true">🅰️</span>
+                            <span class="faction-card-info">
+                                <span class="faction-card-name">FACTION A</span>
+                                <span class="faction-card-desc">Sky Blue Crest • Standard Tactical Force</span>
+                            </span>
+                            <span class="faction-check-indicator" aria-hidden="true">✓</span>
+                        </button>
+                        <button type="button" class="faction-card" id="faction-card-b" data-faction="FactionB" aria-pressed="false">
+                            <span class="faction-card-badge" aria-hidden="true">🅱️</span>
+                            <span class="faction-card-info">
+                                <span class="faction-card-name">FACTION B</span>
+                                <span class="faction-card-desc">Solar Amber Crest • Standard Tactical Force</span>
+                            </span>
+                            <span class="faction-check-indicator" aria-hidden="true">✓</span>
+                        </button>
+                    </div>
+                </div>
+
                 <!-- Action Buttons -->
                 <div class="btn-group">
                     <button class="portal-btn btn-primary" id="btn-play-1v1">
@@ -853,17 +1032,19 @@
 
                 <div class="matchup-banner">
                     <div class="match-player">
-                        <div class="player-badge" style="background: rgba(56, 189, 248, 0.2); color: #38bdf8; border: 2px solid #38bdf8;">C</div>
+                        <div class="player-badge" id="my-badge" style="background: rgba(56, 189, 248, 0.2); color: #38bdf8; border: 2px solid #38bdf8;">C</div>
                         <div class="player-name">Commander</div>
                         <div class="player-role" style="font-size: 0.75rem; color: #38bdf8;">YOU (BLUE)</div>
-                        <div class="player-platform" id="my-platform-badge" style="font-size: 0.72rem; color: #94a3b8; margin-top: 3px; font-weight: 600;">🖥️ Desktop</div>
+                        <div class="player-faction" id="my-faction-badge" style="font-size: 0.76rem; color: #7dd3fc; margin-top: 3px; font-weight: 700;">🅰️ FACTION A</div>
+                        <div class="player-platform" id="my-platform-badge" style="font-size: 0.72rem; color: #94a3b8; margin-top: 2px; font-weight: 600;">🖥️ Desktop</div>
                     </div>
                     <div class="vs-text">VS</div>
                     <div class="match-player">
                         <div class="player-badge" id="opponent-badge" style="background: rgba(239, 68, 68, 0.2); color: #ef4444; border: 2px solid #ef4444;">E</div>
                         <div class="player-name" id="opponent-name-val">Challenger</div>
                         <div class="player-role" id="opponent-color-val" style="font-size: 0.75rem; color: #ef4444;">OPPONENT (RED)</div>
-                        <div class="player-platform" id="opponent-platform-badge" style="font-size: 0.72rem; color: #94a3b8; margin-top: 3px; font-weight: 600;">🖥️ Desktop</div>
+                        <div class="player-faction" id="opponent-faction-badge" style="font-size: 0.76rem; color: #fcd34d; margin-top: 3px; font-weight: 700;">🅱️ FACTION B</div>
+                        <div class="player-platform" id="opponent-platform-badge" style="font-size: 0.72rem; color: #94a3b8; margin-top: 2px; font-weight: 600;">🖥️ Desktop</div>
                     </div>
                 </div>
 
@@ -1201,6 +1382,58 @@
             }
         }
 
+        // ─────────────────────────────────────────────────────────────
+        // Playable Faction Selection State & Storage
+        // ─────────────────────────────────────────────────────────────
+        let selectedFaction = 'FactionA';
+        try {
+            const savedFaction = localStorage.getItem('mini_rts_selected_faction');
+            if (savedFaction === 'FactionA' || savedFaction === 'FactionB') {
+                selectedFaction = savedFaction;
+            }
+        } catch (e) {}
+        window.__rts_selected_faction = selectedFaction;
+
+        function setFaction(factionKey) {
+            selectedFaction = factionKey;
+            window.__rts_selected_faction = factionKey;
+            try {
+                localStorage.setItem('mini_rts_selected_faction', factionKey);
+            } catch (e) {}
+
+            const cardA = document.getElementById('faction-card-a');
+            const cardB = document.getElementById('faction-card-b');
+            const statusLabel = document.getElementById('faction-status-label');
+            const myFactionBadge = document.getElementById('my-faction-badge');
+
+            if (cardA && cardB) {
+                if (factionKey === 'FactionB') {
+                    cardA.classList.remove('active');
+                    cardB.classList.add('active');
+                } else {
+                    cardB.classList.remove('active');
+                    cardA.classList.add('active');
+                }
+                cardA.setAttribute('aria-pressed', factionKey === 'FactionB' ? 'false' : 'true');
+                cardB.setAttribute('aria-pressed', factionKey === 'FactionB' ? 'true' : 'false');
+            }
+
+            if (statusLabel) {
+                statusLabel.innerText = factionKey === 'FactionB' ? 'Active: Faction B 🅱️' : 'Active: Faction A 🅰️';
+            }
+            if (myFactionBadge) {
+                myFactionBadge.innerText = factionKey === 'FactionB' ? '🅱️ FACTION B' : '🅰️ FACTION A';
+                myFactionBadge.style.color = factionKey === 'FactionB' ? '#fcd34d' : '#7dd3fc';
+            }
+        }
+
+        const cardA = document.getElementById('faction-card-a');
+        const cardB = document.getElementById('faction-card-b');
+        if (cardA) cardA.addEventListener('click', () => setFaction('FactionA'));
+        if (cardB) cardB.addEventListener('click', () => setFaction('FactionB'));
+
+        setFaction(selectedFaction);
+
         // Tactical Views Management & Matchmaking
         let queueTimerInterval = null;
         let queueSeconds = 0;
@@ -1305,7 +1538,7 @@
                 fetchServerTelemetry();
             };
 
-            window.__rts_on_match_found = function(opponentName, opponentColor, countdownSecs, opponentPlatform) {
+            window.__rts_on_match_found = function(opponentName, opponentColor, countdownSecs, opponentPlatform, opponentFaction, myFaction) {
                 stopQueueTimer();
                 showView('portal-view-match-found');
 
@@ -1313,7 +1546,9 @@
                 const oppColorEl = document.getElementById('opponent-color-val');
                 const oppBadge = document.getElementById('opponent-badge');
                 const oppPlatformEl = document.getElementById('opponent-platform-badge');
+                const oppFactionEl = document.getElementById('opponent-faction-badge');
                 const myPlatformEl = document.getElementById('my-platform-badge');
+                const myFactionEl = document.getElementById('my-faction-badge');
                 const countNumEl = document.getElementById('match-countdown-number');
                 const countLblEl = document.getElementById('match-countdown-label');
 
@@ -1325,6 +1560,19 @@
                 if (oppBadge) oppBadge.innerText = oppName.charAt(0).toUpperCase();
                 if (oppPlatformEl) oppPlatformEl.innerText = opponentPlatform || '🖥️ Desktop';
                 if (myPlatformEl) myPlatformEl.innerText = isMobile ? '📱 Mobile' : '🖥️ Desktop';
+
+                if (oppFactionEl) {
+                    const isFacB = opponentFaction && (opponentFaction.includes('B') || opponentFaction === 'FactionB');
+                    oppFactionEl.innerText = isFacB ? '🅱️ FACTION B' : '🅰️ FACTION A';
+                    oppFactionEl.style.color = isFacB ? '#fcd34d' : '#7dd3fc';
+                }
+
+                if (myFactionEl) {
+                    const myFac = myFaction || selectedFaction;
+                    const isFacB = myFac && (myFac.includes('B') || myFac === 'FactionB');
+                    myFactionEl.innerText = isFacB ? '🅱️ FACTION B' : '🅰️ FACTION A';
+                    myFactionEl.style.color = isFacB ? '#fcd34d' : '#7dd3fc';
+                }
 
                 let count = Math.ceil(countdownSecs || 3);
                 if (countNumEl) {

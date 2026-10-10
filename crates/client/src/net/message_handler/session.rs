@@ -16,9 +16,13 @@ pub fn handle_lobby_joined(
     room_id: u32,
     room_code: Option<String>,
     is_game_ready: bool,
+    playable_faction: Option<shared::factions::PlayableFaction>,
 ) {
     net_client.my_peer_id = player_id;
     net_client.my_faction = assigned_faction;
+    if let Some(pf) = playable_faction {
+        net_client.my_playable_faction = pf;
+    }
     net_client.current_room_code = room_code.clone();
     net_client.status = if is_game_ready {
         NetStatus::InGame
@@ -26,8 +30,8 @@ pub fn handle_lobby_joined(
         NetStatus::InLobby
     };
     info!(
-        "🚪 [NetClient] Assigned Faction: {:?}, Room #{}, Code: {:?}, Status: {:?}",
-        assigned_faction, room_id, room_code, net_client.status
+        "🚪 [NetClient] Assigned Faction: {:?} ({:?}), Room #{}, Code: {:?}, Status: {:?}",
+        assigned_faction, net_client.my_playable_faction, room_id, room_code, net_client.status
     );
 }
 
@@ -67,24 +71,30 @@ pub fn handle_match_found(
     opponent_color: FactionColor,
     countdown_seconds: f32,
     opponent_platform: Option<shared::protocol::ClientPlatform>,
+    opponent_faction: Option<shared::factions::PlayableFaction>,
 ) {
     info!(
-        "⚔️ [NetClient] Match Found vs [{}] ({:?}, platform: {:?})! Countdown: {:.1}s",
-        opponent_name, opponent_color, opponent_platform, countdown_seconds
+        "⚔️ [NetClient] Match Found vs [{}] ({:?}, platform: {:?}, faction: {:?})! Countdown: {:.1}s",
+        opponent_name, opponent_color, opponent_platform, opponent_faction, countdown_seconds
     );
     sound_events.send(SoundEffect::CountdownBeep);
 
     net_client.opponent_platform = opponent_platform;
+    net_client.opponent_playable_faction = opponent_faction;
 
     #[cfg(target_arch = "wasm32")]
     {
         let plat_str = opponent_platform.map(|p| p.badge()).unwrap_or("🖥️ Desktop");
+        let opp_fac_str = opponent_faction.map(|f| f.name()).unwrap_or("Faction A");
+        let my_fac_str = net_client.my_playable_faction.name();
         let js_call = format!(
-            "if (window.__rts_on_match_found) {{ window.__rts_on_match_found('{}', '{}', {:.1}, '{}'); }}",
+            "if (window.__rts_on_match_found) {{ window.__rts_on_match_found('{}', '{}', {:.1}, '{}', '{}', '{}'); }}",
             opponent_name.replace('\'', "\\'"),
             opponent_color.name(),
             countdown_seconds,
-            plat_str
+            plat_str,
+            opp_fac_str,
+            my_fac_str
         );
         let _ = js_sys::eval(&js_call);
     }

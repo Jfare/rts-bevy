@@ -88,7 +88,7 @@ pub fn handle_construct(
     let peers = matchmaker.get_room_peers(player_room);
     let target_building = building_query
         .iter()
-        .find(|(_, net_entity, b_room, faction, b)| {
+        .find(|(_, net_entity, b_room, faction, b, ..)| {
             net_entity.net_id == building_net_id && b_room.0 == player_room && **faction == player_faction && !b.is_constructed
         })
         .map(|(e, ..)| e);
@@ -138,7 +138,7 @@ pub fn handle_repair(
     let peers = matchmaker.get_room_peers(player_room);
     let target_building = building_query
         .iter()
-        .find(|(_, net_entity, b_room, faction, b)| {
+        .find(|(_, net_entity, b_room, faction, b, ..)| {
             net_entity.net_id == building_net_id && b_room.0 == player_room && **faction == player_faction && b.is_constructed
         })
         .map(|(e, ..)| e);
@@ -174,20 +174,54 @@ pub fn handle_repair(
     }
 }
 
+fn send_build_rejected(net_channels: &ServerNetworkChannels, peer_id: u64, reason: &str) {
+    let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::SendToPeer {
+        peer_id,
+        msg: ServerMessage::ErrorMessage {
+            reason: reason.to_string(),
+        },
+    });
+}
+
 pub fn handle_build(
     commands: &mut Commands,
     net_channels: &ServerNetworkChannels,
     matchmaker: &mut Matchmaker,
+    building_query: &BuildingQuery,
+    node_query: &NodeQuery,
+    unit_query: &UnitQuery,
     peer_id: u64,
     building_kind: BuildingKind,
     position: Vec2,
 ) {
     let (player_faction, player_room) = get_player_and_room(matchmaker, peer_id);
 
-    let b_radius = building_kind.size().x.max(building_kind.size().y) * 0.5;
-    if shared::map::is_obstacle_blocked(position, b_radius, 4.0) {
+    let buildings_in_room = building_query
+        .iter()
+        .filter(|(_, _, b_room, ..)| b_room.0 == player_room)
+        .map(|(_, _, _, _, _, b_tf, b_rad)| (b_tf.translation.truncate(), b_rad.0));
+    let nodes_in_room = node_query
+        .iter()
+        .filter(|(_, _, _, r_room)| r_room.0 == player_room)
+        .map(|(_, _, r_tf, _)| r_tf.translation.truncate());
+    let units_in_room = unit_query
+        .iter()
+        .filter(|(_, _, _, _, u_room, ..)| u_room.0 == player_room)
+        .map(|(_, u_tf, ..)| u_tf.translation.truncate());
+
+    if !shared::placement::is_placement_clear(
+        building_kind,
+        position,
+        buildings_in_room,
+        nodes_in_room,
+        units_in_room,
+    ) {
+        send_build_rejected(net_channels, peer_id, "Cannot build there: location is blocked.");
         return;
     }
+
+
+    let player_playable_faction = matchmaker.players.get(&peer_id).map(|p| p.playable_faction);
 
     let has_funds = matchmaker
         .rooms
@@ -222,6 +256,10 @@ pub fn handle_build(
             },
             Transform::from_xyz(position.x, position.y, 1.0),
         ));
+
+        if let Some(pf) = player_playable_faction {
+            entity_cmds.insert(pf);
+        }
 
         match building_kind {
             BuildingKind::BaseHQ => {
@@ -264,6 +302,7 @@ pub fn handle_build(
                 msg: ServerMessage::BuildingSpawned {
                     net_id,
                     faction: player_faction,
+                    playable_faction: player_playable_faction,
                     building_kind,
                     position,
                     max_hp: building_kind.max_health(),

@@ -766,8 +766,12 @@ fn worker_mining_state_machine(
                     continue;
                 };
 
-                let dist = worker_pos.distance(base_pos);
-                if dist <= worker.base_interact_distance {
+                let edge_dist = shared::grid::distance_to_aabb(
+                    worker_pos,
+                    base_pos,
+                    shared::grid::BuildingKind::BaseHQ.size(),
+                );
+                if edge_dist <= shared::components::BASE_DROPOFF_EDGE_DISTANCE {
                     // Deposit minerals into economy!
                     if worker.carried_minerals > 0 {
                         economy.add_minerals(*faction, worker.carried_minerals);

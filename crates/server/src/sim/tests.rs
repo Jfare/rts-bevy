@@ -201,6 +201,7 @@ fn test_disconnect_cleans_up_room_entities_and_telemetry() {
             name: "Commander".to_string(),
             room_id: 1,
             faction: Faction::Player1,
+            playable_faction: PlayableFaction::FactionA,
             color: FactionColor::Blue,
             platform: ClientPlatform::Desktop,
         },
@@ -262,6 +263,7 @@ fn test_forfeit_cleans_up_room_entities_and_telemetry() {
             name: "SoloCommander".to_string(),
             room_id: 1,
             faction: Faction::Player1,
+            playable_faction: PlayableFaction::FactionA,
             color: FactionColor::Blue,
             platform: ClientPlatform::Desktop,
         },
@@ -321,6 +323,7 @@ fn test_tick_snapshots_are_partitioned_per_room() {
             name: "Player 1".to_string(),
             room_id: 1,
             faction: Faction::Player1,
+            playable_faction: PlayableFaction::FactionA,
             color: FactionColor::Blue,
             platform: ClientPlatform::Desktop,
         },
@@ -338,6 +341,7 @@ fn test_tick_snapshots_are_partitioned_per_room() {
             name: "Player 2".to_string(),
             room_id: 2,
             faction: Faction::Player1,
+            playable_faction: PlayableFaction::FactionB,
             color: FactionColor::Teal,
             platform: ClientPlatform::Desktop,
         },
@@ -431,6 +435,7 @@ fn test_custom_private_room_matching_by_code() {
             room_code: None,
             faction_color: Some(FactionColor::Teal),
             platform: Some(ClientPlatform::Desktop),
+            playable_faction: Some(PlayableFaction::FactionA),
         },
     }).unwrap();
 
@@ -458,6 +463,7 @@ fn test_custom_private_room_matching_by_code() {
             room_code: Some(generated_code.clone()),
             faction_color: Some(FactionColor::Red),
             platform: Some(ClientPlatform::Desktop),
+            playable_faction: Some(PlayableFaction::FactionB),
         },
     }).unwrap();
 
@@ -504,6 +510,7 @@ fn test_chat_and_ping_dispatching() {
             name: "Alice".to_string(),
             room_id: 1,
             faction: Faction::Player1,
+            playable_faction: PlayableFaction::FactionA,
             color: FactionColor::Blue,
             platform: ClientPlatform::Desktop,
         },
@@ -515,6 +522,7 @@ fn test_chat_and_ping_dispatching() {
             name: "Bob".to_string(),
             room_id: 1,
             faction: Faction::Player2,
+            playable_faction: PlayableFaction::FactionB,
             color: FactionColor::Red,
             platform: ClientPlatform::Desktop,
         },
@@ -917,6 +925,7 @@ fn test_queue_cancellation_and_telemetry() {
             room_code: None,
             faction_color: Some(FactionColor::Blue),
             platform: Some(ClientPlatform::Desktop),
+            playable_faction: Some(PlayableFaction::FactionA),
         },
     }).unwrap();
     app.update();
@@ -965,6 +974,7 @@ fn test_match_found_triggers_3s_countdown() {
             room_code: None,
             faction_color: Some(FactionColor::Blue),
             platform: Some(ClientPlatform::Desktop),
+            playable_faction: Some(PlayableFaction::FactionA),
         },
     }).unwrap();
     app.update();
@@ -978,6 +988,7 @@ fn test_match_found_triggers_3s_countdown() {
             room_code: None,
             faction_color: Some(FactionColor::Red),
             platform: Some(ClientPlatform::Mobile),
+            playable_faction: Some(PlayableFaction::FactionB),
         },
     }).unwrap();
     app.update();
@@ -1019,6 +1030,7 @@ fn test_room_economy_isolation() {
             room_code: None,
             faction_color: Some(FactionColor::Blue),
             platform: Some(ClientPlatform::Desktop),
+            playable_faction: Some(PlayableFaction::FactionA),
         },
     }).unwrap();
     app.update();
@@ -1032,6 +1044,7 @@ fn test_room_economy_isolation() {
             room_code: None,
             faction_color: Some(FactionColor::Teal),
             platform: Some(ClientPlatform::Desktop),
+            playable_faction: Some(PlayableFaction::FactionB),
         },
     }).unwrap();
     app.update();
@@ -1082,6 +1095,7 @@ fn test_consecutive_matches_have_fresh_economy() {
             room_code: None,
             faction_color: Some(FactionColor::Blue),
             platform: Some(ClientPlatform::Desktop),
+            playable_faction: Some(PlayableFaction::FactionA),
         },
     }).unwrap();
     app.update();
@@ -1122,6 +1136,7 @@ fn test_consecutive_matches_have_fresh_economy() {
             room_code: None,
             faction_color: Some(FactionColor::Blue),
             platform: Some(ClientPlatform::Desktop),
+            playable_faction: Some(PlayableFaction::FactionA),
         },
     }).unwrap();
     app.update();
@@ -1512,6 +1527,7 @@ fn test_manual_harvest_respects_5_worker_saturation_limit() {
         name: "Player 1".to_string(),
         room_id: 1,
         faction: Faction::Player1,
+        playable_faction: PlayableFaction::FactionA,
         color: FactionColor::Blue,
         platform: ClientPlatform::Desktop,
     });
@@ -2132,6 +2148,7 @@ fn test_handle_stop_and_repair_commands_clear_manual_override() {
             name: "Alice".to_string(),
             room_id: 1,
             faction: Faction::Player1,
+            playable_faction: PlayableFaction::FactionA,
             color: FactionColor::Blue,
             platform: ClientPlatform::Desktop,
         },
@@ -2312,6 +2329,269 @@ fn test_workers_mine_distinct_spread_out_spots_on_rock() {
             assert!(dist > 40.0, "Workers {} and {} mined too close (dist = {}), they must be spread out", i, j, dist);
         }
     }
+}
+
+#[test]
+fn test_worker_cannot_penetrate_base_hq() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+
+    let hq_pos = Vec2::new(0.0, -1000.0);
+    let _hq = app.world_mut().spawn((
+        Building::new("Base HQ", Vec2::new(110.0, 110.0), 5.0, true),
+        BaseHQ {
+            supply_provided: 10,
+            dropoff_radius: 70.0,
+        },
+        Transform::from_xyz(hq_pos.x, hq_pos.y, 0.0),
+        Radius(55.0),
+        Faction::Player1,
+        RoomId(1),
+    )).id();
+
+    // Active worker placed inside Base HQ perimeter at (0, -980) [distance 20 from center]
+    let mut worker = Worker::default();
+    worker.state = WorkerState::MovingToBuilding;
+    let worker_ent = app.world_mut().spawn((
+        Transform::from_xyz(hq_pos.x, hq_pos.y + 20.0, 0.0),
+        Radius(14.0),
+        Faction::Player1,
+        RoomId(1),
+        Unit { name: "Worker".to_string(), supply_cost: 1 },
+        worker,
+    )).id();
+
+    app.add_systems(Update, server_unit_separation_and_collision_system);
+    app.update();
+
+    let w_pos = app.world().entity(worker_ent).get::<Transform>().unwrap().translation.truncate();
+    let half_y = 55.0;
+    assert!(w_pos.y >= (hq_pos.y + half_y + 13.9), "Active worker must be ejected outside Base HQ box, got y = {}", w_pos.y);
+}
+
+#[test]
+fn test_building_aabb_corners_prevent_unit_overlap() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+
+    // 100x100 Barracks at (0, 0). Half extents: x: [-50, 50], y: [-50, 50].
+    let _bldg = app.world_mut().spawn((
+        Building::new("Barracks", Vec2::new(100.0, 100.0), 3.0, true),
+        Transform::from_xyz(0.0, 0.0, 0.0),
+        Radius(46.0),
+        Faction::Player1,
+        RoomId(1),
+    )).id();
+
+    // Unit near corner at (48, 48) - with inscribed circle collider (radius 46), distance to (0,0) is ~67.88 which is > 46
+    // But with AABB box, (48, 48) is INSIDE the box!
+    let unit = app.world_mut().spawn((
+        Transform::from_xyz(48.0, 48.0, 0.0),
+        Radius(16.0),
+        Faction::Player1,
+        RoomId(1),
+        Unit { name: "Marine".to_string(), supply_cost: 1 },
+    )).id();
+
+    app.add_systems(Update, server_unit_separation_and_collision_system);
+    app.update();
+
+    let u_pos = app.world().entity(unit).get::<Transform>().unwrap().translation.truncate();
+    assert!(u_pos.x >= 65.9 || u_pos.y >= 65.9, "Unit at corner must be ejected outside box boundary, got {:?}", u_pos);
+}
+
+#[test]
+fn test_server_movement_does_not_overshoot_waypoints() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    app.insert_resource(Time::<()>::default());
+    let mut mm = Matchmaker::new();
+    let mut room = Room::new(1, None, GameMode::Multiplayer1v1, Some(101), Some(102));
+    room.is_active = true;
+    room.countdown_timer = 0.0;
+    mm.rooms.insert(1, room);
+    app.insert_resource(mm);
+
+    let start = Vec2::new(0.0, 0.0);
+    let goal = Vec2::new(20.0, 0.0); // Outside arrival radius (12.0)
+    let unit = app.world_mut().spawn((
+        Transform::from_xyz(start.x, start.y, 0.0),
+        MoveSpeed(1000.0), // In 0.033s, speed * dt = 33.0 units, which is > 20.0 dist!
+        Velocity::default(),
+        MoveTarget::with_waypoints(goal, false, vec![goal]),
+        RoomId(1),
+        Unit { name: "Marine".to_string(), supply_cost: 1 },
+    )).id();
+
+    app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_millis(33));
+    app.world_mut().run_system_once(server_movement_system).unwrap();
+
+    let u_pos = app.world().entity(unit).get::<Transform>().unwrap().translation.truncate();
+    assert!((u_pos.x - goal.x).abs() <= 0.001, "Unit must not overshoot goal, expected 20.0, got {}", u_pos.x);
+}
+
+#[test]
+fn test_intermediate_waypoint_stall_timeout() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    app.insert_resource(Time::<()>::default());
+    let mut mm = Matchmaker::new();
+    let mut room = Room::new(1, None, GameMode::Multiplayer1v1, Some(101), Some(102));
+    room.is_active = true;
+    room.countdown_timer = 0.0;
+    mm.rooms.insert(1, room);
+    app.insert_resource(mm);
+
+    let wp1 = Vec2::new(100.0, 0.0);
+    let wp2 = Vec2::new(200.0, 0.0);
+    let mut mt = MoveTarget::with_waypoints(wp2, false, vec![wp1, wp2]);
+    mt.stall_timer = 1.25;
+    mt.last_pos = Vec2::new(0.0, 0.0);
+
+    let unit = app.world_mut().spawn((
+        Transform::from_xyz(0.0, 0.0, 0.0),
+        MoveSpeed(180.0),
+        Velocity::default(),
+        mt,
+        RoomId(1),
+        Unit { name: "Marine".to_string(), supply_cost: 1 },
+    )).id();
+
+    app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_millis(33));
+    app.world_mut().run_system_once(server_movement_system).unwrap();
+
+    let updated_mt = app.world().entity(unit).get::<MoveTarget>().unwrap();
+    assert_eq!(updated_mt.current_waypoint_idx, 1, "Stalled intermediate waypoint must advance to next waypoint");
+    assert_eq!(updated_mt.stall_timer, 0.0, "Stall timer must reset on waypoint advance");
+}
+
+#[test]
+fn test_solo_vs_ai_assigns_player_faction_and_random_ai_faction() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    let (tx_in, rx_in) = crossbeam_channel::unbounded();
+    let (tx_out, mut rx_out) = tokio::sync::mpsc::unbounded_channel();
+    app.insert_resource(ServerNetworkChannels {
+        rx_incoming: rx_in,
+        tx_outgoing: tx_out,
+    });
+    app.insert_resource(Matchmaker::new());
+    app.insert_resource(NavGrid::default());
+    app.add_systems(Update, handle_incoming_network_events);
+
+    // Player joins SoloVsAi as FactionB
+    tx_in.send(IncomingNetEvent::MessageReceived {
+        peer_id: 101,
+        msg: ClientMessage::JoinLobby {
+            player_name: "SoloCommander".to_string(),
+            mode: GameMode::SoloVsAi,
+            room_code: None,
+            faction_color: Some(FactionColor::Blue),
+            platform: Some(ClientPlatform::Desktop),
+            playable_faction: Some(PlayableFaction::FactionB),
+        },
+    }).unwrap();
+    app.update();
+
+    let mm = app.world().resource::<Matchmaker>();
+    let player = mm.players.get(&101).expect("Player session must exist");
+    assert_eq!(player.playable_faction, PlayableFaction::FactionB);
+
+    let mut got_lobby_joined = false;
+    let mut initial_states = Vec::new();
+    while let Ok(ev) = rx_out.try_recv() {
+        if let OutgoingNetEvent::SendToPeer { peer_id, msg } = ev {
+            if peer_id == 101 {
+                match msg {
+                    ServerMessage::LobbyJoined { playable_faction, .. } => {
+                        assert_eq!(playable_faction, Some(PlayableFaction::FactionB));
+                        got_lobby_joined = true;
+                    }
+                    ServerMessage::InitialWorldState { entities, .. } => {
+                        initial_states = entities;
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    assert!(got_lobby_joined, "Must send LobbyJoined with player's faction");
+    assert!(!initial_states.is_empty(), "Initial entities must be spawned");
+
+    // Verify player entities have FactionB
+    let player_hq = initial_states
+        .iter()
+        .find(|e| e.faction == Faction::Player1 && matches!(e.kind, shared::protocol::EntityKind::Building(_)))
+        .expect("Player HQ must exist");
+    assert_eq!(player_hq.playable_faction, Some(PlayableFaction::FactionB));
+
+    // Verify AI entities have either FactionA or FactionB (randomly rolled)
+    let ai_hq = initial_states
+        .iter()
+        .find(|e| e.faction == Faction::HostileAi && matches!(e.kind, shared::protocol::EntityKind::Building(_)))
+        .expect("AI HQ must exist");
+    assert!(
+        ai_hq.playable_faction == Some(PlayableFaction::FactionA)
+            || ai_hq.playable_faction == Some(PlayableFaction::FactionB),
+        "AI must be assigned a valid PlayableFaction (allowing mirror matches)"
+    );
+}
+
+#[test]
+fn test_multiplayer_1v1_playable_factions_and_mirror_match() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    let (tx_in, rx_in) = crossbeam_channel::unbounded();
+    let (tx_out, mut rx_out) = tokio::sync::mpsc::unbounded_channel();
+    app.insert_resource(ServerNetworkChannels {
+        rx_incoming: rx_in,
+        tx_outgoing: tx_out,
+    });
+    app.insert_resource(Matchmaker::new());
+    app.insert_resource(PlayerEconomy::new());
+    app.insert_resource(NavGrid::default());
+    app.add_systems(Update, handle_incoming_network_events);
+
+    // Both players choose FactionA (Mirror Match!)
+    tx_in.send(IncomingNetEvent::MessageReceived {
+        peer_id: 101,
+        msg: ClientMessage::JoinLobby {
+            player_name: "Alice".to_string(),
+            mode: GameMode::Multiplayer1v1,
+            room_code: None,
+            faction_color: Some(FactionColor::Blue),
+            platform: Some(ClientPlatform::Desktop),
+            playable_faction: Some(PlayableFaction::FactionA),
+        },
+    }).unwrap();
+    app.update();
+
+    tx_in.send(IncomingNetEvent::MessageReceived {
+        peer_id: 102,
+        msg: ClientMessage::JoinLobby {
+            player_name: "Bob".to_string(),
+            mode: GameMode::Multiplayer1v1,
+            room_code: None,
+            faction_color: Some(FactionColor::Red),
+            platform: Some(ClientPlatform::Desktop),
+            playable_faction: Some(PlayableFaction::FactionA),
+        },
+    }).unwrap();
+    app.update();
+
+    let mut match_found_count = 0;
+    while let Ok(ev) = rx_out.try_recv() {
+        if let OutgoingNetEvent::SendToPeer { peer_id: _peer_id, msg } = ev {
+            if let ServerMessage::MatchFound { opponent_faction, .. } = msg {
+                assert_eq!(opponent_faction, Some(PlayableFaction::FactionA), "Opponent faction in mirror match must be FactionA");
+                match_found_count += 1;
+            } else if let ServerMessage::LobbyJoined { playable_faction, .. } = msg {
+                assert_eq!(playable_faction, Some(PlayableFaction::FactionA));
+            }
+        }
+    }
+    assert_eq!(match_found_count, 2, "Both players must receive MatchFound with opponent's faction");
 }
 
 

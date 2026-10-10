@@ -42,7 +42,7 @@ pub type ProdQuery<'w, 's> = Query<
 pub type BuildingQuery<'w, 's> = Query<
     'w,
     's,
-    (Entity, &'static NetEntity, &'static RoomId, &'static Faction, &'static Building),
+    (Entity, &'static NetEntity, &'static RoomId, &'static Faction, &'static Building, &'static Transform, &'static Radius),
 >;
 
 /// Helper to look up a peer's assigned faction and active room ID

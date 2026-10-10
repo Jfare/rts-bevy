@@ -50,6 +50,7 @@ pub fn handle_incoming_network_events(
                         room_code,
                         faction_color,
                         platform,
+                        playable_faction,
                     } => {
                         handle_join_lobby(
                             &mut commands,
@@ -61,6 +62,7 @@ pub fn handle_incoming_network_events(
                             room_code,
                             faction_color,
                             platform,
+                            playable_faction,
                         );
                     }
                     shared::protocol::ClientMessage::CancelQueue => {
@@ -217,6 +219,9 @@ pub fn handle_incoming_network_events(
                             &mut commands,
                             &net_channels,
                             &mut matchmaker,
+                            &building_query,
+                            &node_query,
+                            &unit_query,
                             peer_id,
                             building_kind,
                             position,

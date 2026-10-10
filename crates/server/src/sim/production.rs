@@ -17,6 +17,7 @@ pub fn server_production_system(
         Entity,
         &NetEntity,
         &Faction,
+        Option<&PlayableFaction>,
         &RoomId,
         &Transform,
         &Building,
@@ -24,7 +25,7 @@ pub fn server_production_system(
     )>,
 ) {
     let dt = time.delta_secs();
-    for (_entity, net_entity, faction, room_id, transform, building, prod_opt) in
+    for (_entity, net_entity, faction, playable_faction, room_id, transform, building, prod_opt) in
         &mut buildings
     {
         let is_room_active = matchmaker.rooms.get(&room_id.0).map(|r| r.is_active && r.countdown_timer <= 0.0).unwrap_or(true);
@@ -80,6 +81,10 @@ pub fn server_production_system(
                             Transform::from_xyz(spawn_pos.x, spawn_pos.y, 2.0),
                         ));
 
+                        if let Some(pf) = playable_faction.copied() {
+                            unit_cmds.insert(pf);
+                        }
+
                         if unit_kind != UnitKind::Worker || has_custom_rally {
                             let rally = prod.rally_point;
                             let waypoints = nav_grid.find_path(spawn_pos, rally);
@@ -133,6 +138,7 @@ pub fn server_production_system(
                                     unit_kind,
                                     position: spawn_pos,
                                     max_hp: unit_kind.max_health(),
+                                    playable_faction: playable_faction.copied(),
                                 },
                             });
 
