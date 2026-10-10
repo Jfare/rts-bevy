@@ -3,8 +3,7 @@
 mod net_server;
 mod session;
 mod sim;
-#[allow(dead_code)]
-mod factions;
+
 
 use bevy::app::ScheduleRunnerPlugin;
 use bevy::prelude::*;

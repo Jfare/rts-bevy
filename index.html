@@ -269,12 +269,27 @@
             transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
             position: relative;
             overflow: hidden;
+            font: inherit;
+            color: inherit;
+            text-align: left;
+            width: 100%;
         }
 
         .faction-card:hover {
             border-color: rgba(56, 189, 248, 0.5);
             background: rgba(15, 23, 42, 0.85);
             transform: translateY(-1px);
+        }
+
+        .faction-card:focus-visible {
+            outline: 2px solid #38bdf8;
+            outline-offset: 2px;
+        }
+
+        .faction-card-badge,
+        .faction-card-name,
+        .faction-card-desc {
+            display: block;
         }
 
         .faction-card.active {
@@ -910,23 +925,23 @@
                         <span>⚔️ PLAYABLE FACTION</span>
                         <span id="faction-status-label">Active: Faction A 🅰️</span>
                     </div>
-                    <div class="faction-options">
-                        <div class="faction-card active" id="faction-card-a" data-faction="FactionA">
-                            <div class="faction-card-badge">🅰️</div>
-                            <div class="faction-card-info">
-                                <div class="faction-card-name">FACTION A</div>
-                                <div class="faction-card-desc">Sky Blue Crest • Standard Tactical Force</div>
-                            </div>
-                            <div class="faction-check-indicator">✓</div>
-                        </div>
-                        <div class="faction-card" id="faction-card-b" data-faction="FactionB">
-                            <div class="faction-card-badge">🅱️</div>
-                            <div class="faction-card-info">
-                                <div class="faction-card-name">FACTION B</div>
-                                <div class="faction-card-desc">Solar Amber Crest • Standard Tactical Force</div>
-                            </div>
-                            <div class="faction-check-indicator">✓</div>
-                        </div>
+                    <div class="faction-options" role="group" aria-label="Playable faction">
+                        <button type="button" class="faction-card active" id="faction-card-a" data-faction="FactionA" aria-pressed="true">
+                            <span class="faction-card-badge" aria-hidden="true">🅰️</span>
+                            <span class="faction-card-info">
+                                <span class="faction-card-name">FACTION A</span>
+                                <span class="faction-card-desc">Sky Blue Crest • Standard Tactical Force</span>
+                            </span>
+                            <span class="faction-check-indicator" aria-hidden="true">✓</span>
+                        </button>
+                        <button type="button" class="faction-card" id="faction-card-b" data-faction="FactionB" aria-pressed="false">
+                            <span class="faction-card-badge" aria-hidden="true">🅱️</span>
+                            <span class="faction-card-info">
+                                <span class="faction-card-name">FACTION B</span>
+                                <span class="faction-card-desc">Solar Amber Crest • Standard Tactical Force</span>
+                            </span>
+                            <span class="faction-check-indicator" aria-hidden="true">✓</span>
+                        </button>
                     </div>
                 </div>
 
@@ -1399,6 +1414,8 @@
                     cardB.classList.remove('active');
                     cardA.classList.add('active');
                 }
+                cardA.setAttribute('aria-pressed', factionKey === 'FactionB' ? 'false' : 'true');
+                cardB.setAttribute('aria-pressed', factionKey === 'FactionB' ? 'true' : 'false');
             }
 
             if (statusLabel) {

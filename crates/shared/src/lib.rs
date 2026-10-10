@@ -8,7 +8,7 @@ pub mod placement;
 
 pub use components::*;
 pub use economy::*;
-pub use factions::*;
+pub use factions::PlayableFaction;
 pub use grid::*;
 pub use map::*;
 pub use protocol::*;
