@@ -103,6 +103,18 @@ impl BuildingKind {
     }
 }
 
+/// Shortest distance from `point` to the edge of an axis-aligned box centred on `center`.
+/// Returns `0.0` when the point is inside the box.
+pub fn distance_to_aabb(point: Vec2, center: Vec2, size: Vec2) -> f32 {
+    let half = size * 0.5;
+    let closest = Vec2::new(
+        point.x.clamp(center.x - half.x, center.x + half.x),
+        point.y.clamp(center.y - half.y, center.y + half.y),
+    );
+    point.distance(closest)
+}
+
+
 // ─────────────────────────────────────────────────────────────────────────────
 // A* NAVIGATION GRID & PATHFINDING
 // ─────────────────────────────────────────────────────────────────────────────
@@ -521,6 +533,17 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn test_distance_to_aabb() {
+        let c = Vec2::ZERO;
+        let s = Vec2::new(110.0, 110.0);
+        assert_eq!(distance_to_aabb(Vec2::new(0.0, 0.0), c, s), 0.0); // inside
+        assert!((distance_to_aabb(Vec2::new(69.0, 0.0), c, s) - 14.0).abs() < 0.001); // face
+        let corner = distance_to_aabb(Vec2::new(65.0, 65.0), c, s); // diagonal
+        assert!((corner - 200.0_f32.sqrt()).abs() < 0.001);
+    }
 }
+
 
 

@@ -16,6 +16,8 @@ pub mod snapshots;
 pub mod waves;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_placement_dropoff;
 
 pub use combat::{server_combat_system, server_melee_fighter_combat_system, server_turret_combat_system};
 pub use mining::server_mining_system;
