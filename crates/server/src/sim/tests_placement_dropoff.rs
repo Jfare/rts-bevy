@@ -101,6 +101,7 @@ fn test_blocked_build_request_sends_error_message() {
             room_code: None,
             faction_color: Some(FactionColor::Blue),
             platform: Some(ClientPlatform::Desktop),
+            playable_faction: None,
         },
     }).unwrap();
     app.update();
