@@ -3,6 +3,7 @@ pub mod economy;
 pub mod grid;
 pub mod map;
 pub mod protocol;
+pub mod placement;
 
 pub use components::*;
 pub use economy::*;

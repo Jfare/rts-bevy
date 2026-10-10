@@ -77,3 +77,55 @@ fn test_worker_far_from_hq_edge_does_not_drop_off() {
     assert_eq!(worker.carried_minerals, 5);
     assert_eq!(p1_minerals(&app), before);
 }
+
+#[test]
+fn test_blocked_build_request_sends_error_message() {
+    use crate::net_server::{IncomingNetEvent, OutgoingNetEvent, ServerNetworkChannels};
+    use shared::grid::{BuildingKind, NavGrid};
+    use shared::protocol::{ClientMessage, ClientPlatform, FactionColor, ServerMessage};
+
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    let (tx_in, rx_in) = crossbeam_channel::unbounded();
+    let (tx_out, mut rx_out) = tokio::sync::mpsc::unbounded_channel();
+    app.insert_resource(ServerNetworkChannels { rx_incoming: rx_in, tx_outgoing: tx_out });
+    app.insert_resource(Matchmaker::new());
+    app.insert_resource(NavGrid::default());
+    app.add_systems(Update, handle_incoming_network_events);
+
+    tx_in.send(IncomingNetEvent::MessageReceived {
+        peer_id: 101,
+        msg: ClientMessage::JoinLobby {
+            player_name: "Builder".to_string(),
+            mode: GameMode::SoloVsAi,
+            room_code: None,
+            faction_color: Some(FactionColor::Blue),
+            platform: Some(ClientPlatform::Desktop),
+        },
+    }).unwrap();
+    app.update();
+    while rx_out.try_recv().is_ok() {}
+
+    // Directly on top of the player's own Base HQ: must be rejected
+    tx_in.send(IncomingNetEvent::MessageReceived {
+        peer_id: 101,
+        msg: ClientMessage::RequestBuild {
+            building_kind: BuildingKind::SupplyDepot,
+            position: shared::map::P1_BASE_POS,
+        },
+    }).unwrap();
+    app.update();
+
+    let mut got_error = false;
+    let mut got_spawn = false;
+    while let Ok(ev) = rx_out.try_recv() {
+        match ev {
+            OutgoingNetEvent::SendToPeer { peer_id: 101, msg: ServerMessage::ErrorMessage { .. } } => got_error = true,
+            OutgoingNetEvent::BroadcastToPeers { msg: ServerMessage::BuildingSpawned { .. }, .. } => got_spawn = true,
+            _ => {}
+        }
+    }
+    assert!(got_error, "Blocked build must send ErrorMessage to the requester");
+    assert!(!got_spawn, "Blocked build must not spawn a building");
+}
+

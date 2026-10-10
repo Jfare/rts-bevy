@@ -174,6 +174,15 @@ pub fn handle_repair(
     }
 }
 
+fn send_build_rejected(net_channels: &ServerNetworkChannels, peer_id: u64, reason: &str) {
+    let _ = net_channels.tx_outgoing.send(OutgoingNetEvent::SendToPeer {
+        peer_id,
+        msg: ServerMessage::ErrorMessage {
+            reason: reason.to_string(),
+        },
+    });
+}
+
 pub fn handle_build(
     commands: &mut Commands,
     net_channels: &ServerNetworkChannels,
@@ -187,40 +196,30 @@ pub fn handle_build(
 ) {
     let (player_faction, player_room) = get_player_and_room(matchmaker, peer_id);
 
-    let b_radius = building_kind.size().x.max(building_kind.size().y) * 0.5;
-    if shared::map::is_obstacle_blocked(position, b_radius, 4.0) {
+    let buildings_in_room = building_query
+        .iter()
+        .filter(|(_, _, b_room, ..)| b_room.0 == player_room)
+        .map(|(_, _, _, _, _, b_tf, b_rad)| (b_tf.translation.truncate(), b_rad.0));
+    let nodes_in_room = node_query
+        .iter()
+        .filter(|(_, _, _, r_room)| r_room.0 == player_room)
+        .map(|(_, _, r_tf, _)| r_tf.translation.truncate());
+    let units_in_room = unit_query
+        .iter()
+        .filter(|(_, _, _, _, u_room, ..)| u_room.0 == player_room)
+        .map(|(_, u_tf, ..)| u_tf.translation.truncate());
+
+    if !shared::placement::is_placement_clear(
+        building_kind,
+        position,
+        buildings_in_room,
+        nodes_in_room,
+        units_in_room,
+    ) {
+        send_build_rejected(net_channels, peer_id, "Cannot build there: location is blocked.");
         return;
     }
 
-    // Check overlap with existing buildings in the room
-    for (_, _, b_room, _, _, b_tf, b_rad) in building_query {
-        if b_room.0 == player_room {
-            let b_pos = b_tf.translation.truncate();
-            if position.distance(b_pos) < (b_radius + b_rad.0 + 8.0) {
-                return;
-            }
-        }
-    }
-
-    // Check overlap with resource nodes in the room
-    for (_, _, r_tf, r_room) in node_query {
-        if r_room.0 == player_room {
-            let r_pos = r_tf.translation.truncate();
-            if position.distance(r_pos) < (b_radius + 36.0 + 12.0) {
-                return;
-            }
-        }
-    }
-
-    // Check overlap with units in the room
-    for (_, u_tf, _, _, u_room, ..) in unit_query {
-        if u_room.0 == player_room {
-            let u_pos = u_tf.translation.truncate();
-            if position.distance(u_pos) < (b_radius + 16.0) {
-                return;
-            }
-        }
-    }
 
     let has_funds = matchmaker
         .rooms

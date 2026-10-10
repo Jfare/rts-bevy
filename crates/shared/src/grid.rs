@@ -84,6 +84,13 @@ impl BuildingKind {
         }
     }
 
+    /// Circular footprint radius used for placement checks and the building's `Radius` component.
+    pub fn footprint_radius(&self) -> f32 {
+        let s = self.size();
+        s.x.max(s.y) * 0.5
+    }
+
+
     pub fn build_duration(&self) -> f32 {
         match self {
             BuildingKind::BaseHQ => 5.0,

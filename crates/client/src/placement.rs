@@ -234,12 +234,8 @@ fn handle_placement_input(
                 let duration = building_kind.build_duration();
                 let max_hp = building_kind.max_health();
 
-                let radius = match building_kind {
-                    BuildingKind::BaseHQ => 55.0,
-                    BuildingKind::Barracks => 46.0,
-                    BuildingKind::SupplyDepot => 30.0,
-                    BuildingKind::Turret => 28.0,
-                };
+                let radius = building_kind.footprint_radius();
+
 
                 let mut entity_cmds = p.commands.spawn((
                     Building::new(building_kind.name(), size, duration, false),
@@ -333,57 +329,21 @@ pub fn is_placement_valid(
         return false;
     }
 
-    let size = building_kind.size();
-    let ghost_radius = match building_kind {
-        BuildingKind::BaseHQ => 55.0,
-        BuildingKind::Barracks => 46.0,
-        BuildingKind::SupplyDepot => 30.0,
-        BuildingKind::Turret => 28.0,
-    };
-
-    // 3. Check Map Boundaries (-1500 .. 1500)
-    if ghost_pos.x - size.x * 0.5 < -1500.0
-        || ghost_pos.x + size.x * 0.5 > 1500.0
-        || ghost_pos.y - size.y * 0.5 < -1500.0
-        || ghost_pos.y + size.y * 0.5 > 1500.0
-    {
-        return false;
-    }
-
-    // 4. Check Overlap with Existing Buildings
-    for (transform, radius, _, _) in building_query {
-        let b_pos = transform.translation.truncate();
-        let min_dist = ghost_radius + radius.0 + 8.0;
-        if ghost_pos.distance(b_pos) < min_dist {
-            return false;
-        }
-    }
-
-    // 5. Check Overlap with Resource Nodes
-    for (transform, radius) in resource_query {
-        let r_pos = transform.translation.truncate();
-        let min_dist = ghost_radius + radius.0 + 16.0;
-        if ghost_pos.distance(r_pos) < min_dist {
-            return false;
-        }
-    }
-
-    // 6. Check Overlap with Units
-    for (transform, radius) in unit_query {
-        let u_pos = transform.translation.truncate();
-        let min_dist = ghost_radius + radius.0;
-        if ghost_pos.distance(u_pos) < min_dist {
-            return false;
-        }
-    }
-
-    // 7. Check Overlap with Static Map Obstacles (Rocks, Cliff Bluffs)
-    if shared::map::is_obstacle_blocked(ghost_pos, ghost_radius, 8.0) {
-        return false;
-    }
-
-    true
+    shared::placement::is_placement_clear(
+        building_kind,
+        ghost_pos,
+        building_query
+            .iter()
+            .map(|(transform, radius, _, _)| (transform.translation.truncate(), radius.0)),
+        resource_query
+            .iter()
+            .map(|(transform, _)| transform.translation.truncate()),
+        unit_query
+            .iter()
+            .map(|(transform, _)| transform.translation.truncate()),
+    )
 }
+
 
 /// Validates ghost placement against map boundaries, collisions, tech prerequisites, and mineral costs
 fn update_placement_validation(
