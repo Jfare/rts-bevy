@@ -128,6 +128,9 @@ pub fn distance_to_aabb(point: Vec2, center: Vec2, size: Vec2) -> f32 {
 
 pub const NAV_GRID_DIM: usize = 64;
 pub const NAV_CELL_SIZE: f32 = 50.0; // 64 * 50 = 3200 px
+/// Half the world-space width of the nav grid (grid spans -HALF..HALF on both axes).
+pub const NAV_GRID_HALF_EXTENT: f32 = 1600.0;
+
 
 #[derive(Debug, Clone, Resource, Reflect)]
 pub struct NavGrid {
@@ -209,14 +212,15 @@ impl NavGrid {
         let min_pos = center - half;
         let max_pos = center + half;
 
-        if min_pos.x > 1600.0 || max_pos.x < -1600.0 || min_pos.y > 1600.0 || max_pos.y < -1600.0 {
+        if min_pos.x > NAV_GRID_HALF_EXTENT || max_pos.x < -NAV_GRID_HALF_EXTENT || min_pos.y > NAV_GRID_HALF_EXTENT || max_pos.y < -NAV_GRID_HALF_EXTENT {
             return;
         }
 
-        let min_gx = (((min_pos.x - (-1600.0)) / NAV_CELL_SIZE).floor() as isize).clamp(0, (NAV_GRID_DIM - 1) as isize) as usize;
-        let min_gy = (((min_pos.y - (-1600.0)) / NAV_CELL_SIZE).floor() as isize).clamp(0, (NAV_GRID_DIM - 1) as isize) as usize;
-        let max_gx = (((max_pos.x - (-1600.0)) / NAV_CELL_SIZE).floor() as isize).clamp(0, (NAV_GRID_DIM - 1) as isize) as usize;
-        let max_gy = (((max_pos.y - (-1600.0)) / NAV_CELL_SIZE).floor() as isize).clamp(0, (NAV_GRID_DIM - 1) as isize) as usize;
+        let min_gx = (((min_pos.x - (-NAV_GRID_HALF_EXTENT)) / NAV_CELL_SIZE).floor() as isize).clamp(0, (NAV_GRID_DIM - 1) as isize) as usize;
+        let min_gy = (((min_pos.y - (-NAV_GRID_HALF_EXTENT)) / NAV_CELL_SIZE).floor() as isize).clamp(0, (NAV_GRID_DIM - 1) as isize) as usize;
+        let max_gx = (((max_pos.x - (-NAV_GRID_HALF_EXTENT)) / NAV_CELL_SIZE).floor() as isize).clamp(0, (NAV_GRID_DIM - 1) as isize) as usize;
+        let max_gy = (((max_pos.y - (-NAV_GRID_HALF_EXTENT)) / NAV_CELL_SIZE).floor() as isize).clamp(0, (NAV_GRID_DIM - 1) as isize) as usize;
+
 
         for gy in min_gy..=max_gy {
             for gx in min_gx..=max_gx {
@@ -550,7 +554,13 @@ mod tests {
         let corner = distance_to_aabb(Vec2::new(65.0, 65.0), c, s); // diagonal
         assert!((corner - 200.0_f32.sqrt()).abs() < 0.001);
     }
+
+    #[test]
+    fn test_nav_grid_half_extent_matches_dimensions() {
+        assert_eq!(NAV_GRID_HALF_EXTENT, NAV_GRID_DIM as f32 * NAV_CELL_SIZE / 2.0);
+    }
 }
+
 
 
 
